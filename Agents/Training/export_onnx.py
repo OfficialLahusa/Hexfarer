@@ -1,4 +1,5 @@
 import argparse
+import copy
 import numpy as np
 import onnxruntime as ort
 import torch
@@ -13,23 +14,36 @@ class ExportedValueNet(nn.Module):
     der Zug-Tokens [Vokabular, dim] (konstant, für alle Batches gleich). Die Queries kommen als float16: sie sind 300-mal so
     groß wie die Value Logits, und die Kopie von der GPU bremst sonst die Suche"""
 
-    def __init__(self, model: nn.Module, with_placements: bool, with_policy: bool):
+    def __init__(self, model: nn.Module, with_placements: bool, with_policy: bool, fp16: bool = False):
         super().__init__()
+        self.with_placements, self.with_policy, self.fp16 = with_placements, with_policy, fp16
+        self.input_mean = self.input_scale = None
+        if fp16:
+            # Die Schichten in float16 (Tensor Cores, halber Speicherverkehr); Input und Outputs bleiben wie beim
+            # float32-Export, die Standardisierung der rohen Features rechnet vorher in float32
+            model = copy.deepcopy(model)
+            if model.input_mean is not None:
+                self.input_mean, self.input_scale = model.input_mean.float(), model.input_scale.float()
+                model.input_mean = model.input_scale = None
+            model = model.half()
         self.model = model
-        self.with_placements, self.with_policy = with_placements, with_policy
 
     def forward(self, x):
+        if self.fp16:
+            if self.input_mean is not None:
+                x = (x - self.input_mean) * self.input_scale
+            x = x.half()
         outputs = self.model.forward_all(x)
-        result = [outputs["logits"]]
+        result = [outputs["logits"].float()]
         if self.with_placements:
-            result.append(outputs["placements"])
+            result.append(outputs["placements"].float())
         if self.with_policy:
             result.append(outputs["policy_query"].flatten(1).half())
-            result.append(self.model.policy_embeddings.weight * 1.0)
+            result.append(self.model.policy_embeddings.weight.float() * 1.0)
         return tuple(result)
 
 
-def export(ckpt_path: str, out_path: str, in_dim: int = None):
+def export(ckpt_path: str, out_path: str, in_dim: int = None, fp16: bool = False):
     # Lightning-Module aus Checkpoint laden, die Inputgröße steht in seinen Hyperparametern
     overrides = {"in_dim": in_dim} if in_dim else {}
     module = StateValueModule.load_from_checkpoint(ckpt_path, map_location="cpu", weights_only=True, **overrides)
@@ -39,17 +53,20 @@ def export(ckpt_path: str, out_path: str, in_dim: int = None):
     module.eval()
 
     # Kern-Modell statt Lightning-Module für ONNX-Export nötig
-    export_model(module.model, out_path, in_dim)
+    export_model(module.model, out_path, in_dim, fp16)
 
 
-def export_model(model: nn.Module, out_path: str, in_dim: int) -> float:
+def export_model(model: nn.Module, out_path: str, in_dim: int, fp16: bool = False) -> float:
     """Exportiert ein StateValueNet (im eval-Modus) nach ONNX und prüft die Parität.
     Modelle mit trainiertem Platzierungs-Head (--placement-weight > 0) bekommen einen zweiten Output "placements"
     (der C#-Code liest "logits" über den Namen); Aux Heads nur für andere Losses werden nicht exportiert.
+    Mit fp16 rechnen die Schichten in float16 (Input und Outputs wie bei float32), die Parität dann gegen das
+    float32-Modell mit der Toleranz von float16.
     Gibt die maximale Abweichung zwischen PyTorch und ONNX zurück."""
     with_placements = getattr(model, "aux", None) is not None and getattr(model, "placements_trained", False)
     with_policy = getattr(model, "policy_query", None) is not None
-    exported = ExportedValueNet(model, with_placements, with_policy).eval()
+    exported = ExportedValueNet(model, with_placements, with_policy, fp16).eval()
+    reference = ExportedValueNet(model, with_placements, with_policy).eval()
     output_names = ["logits"] + (["placements"] if with_placements else []) + (["policy_query", "policy_embeddings"] if with_policy else [])
     batch_outputs = [name for name in output_names if name != "policy_embeddings"]
 
@@ -72,7 +89,7 @@ def export_model(model: nn.Module, out_path: str, in_dim: int) -> float:
     def max_difference(batch: int) -> float:
         x_np = np.random.randn(batch, in_dim).astype(np.float32)
         with torch.no_grad():
-            torch_out = exported(torch.from_numpy(x_np))
+            torch_out = reference(torch.from_numpy(x_np))
         torch_outputs = [t.numpy() for t in torch_out]
         onnx_outputs = sess.run(output_names, {"state": x_np})
 
@@ -86,7 +103,9 @@ def export_model(model: nn.Module, out_path: str, in_dim: int) -> float:
 
     max_diff = max_difference(16)
     print(f"Max abs diff, PyTorch vs ONNX (batch=16): {max_diff:.2e}")
-    assert max_diff < 1e-4, "ONNX export does not match PyTorch output -- do not ship this .onnx file"
+    # float16 hat ~3 Dezimalstellen, über vier Schichten summieren sich ein paar Rundungsschritte
+    tolerance = 5e-2 if fp16 else 1e-4
+    assert max_diff < tolerance, "ONNX export does not match PyTorch output -- do not ship this .onnx file"
     print("Parity check passed.")
 
     # Und nochmal mit batch=1 wegen Relevanz für MCTS
@@ -114,5 +133,6 @@ if __name__ == "__main__":
     parser.add_argument("--out", default="state_value_net.onnx")
     # Nur für Checkpoints ohne gespeicherte Inputgröße nötig
     parser.add_argument("--in-dim", type=int, default=None)
+    parser.add_argument("--fp16", action="store_true", help="Schichten in float16 (Input und Outputs bleiben wie bei float32)")
     args = parser.parse_args()
-    export(args.ckpt, args.out, args.in_dim)
+    export(args.ckpt, args.out, args.in_dim, args.fp16)
