@@ -43,10 +43,10 @@ def log(loop_dir, text):
         file.write(line + "\n")
 
 
-def run(command, output_path, env=None):
+def run(command, output_path):
     """Runs a command with its output in a file; raises with the end of the output if it fails"""
     with open(output_path, "w", encoding="utf-8") as output:
-        code = subprocess.call(command, stdout=output, stderr=subprocess.STDOUT, env=env)
+        code = subprocess.call(command, stdout=output, stderr=subprocess.STDOUT)
     if code != 0:
         with open(output_path, encoding="utf-8", errors="replace") as file:
             tail = file.read()[-2000:]
@@ -110,7 +110,6 @@ def main(argv=None):
     os.makedirs(args.loop_dir, exist_ok=True)
     state = load_state(args.loop_dir)
     python = sys.executable
-    env = dict(os.environ, KMP_DUPLICATE_LIB_OK="TRUE")
     extra_shares = sum(float(spec.rsplit("@", 1)[1]) for spec in args.extra_data)
     if not 0 <= extra_shares < 1:
         raise SystemExit("The shares of --extra-data must add up to less than 1")
@@ -153,7 +152,7 @@ def main(argv=None):
         if "prepared" not in gen:
             prepared = os.path.join(gen_dir, "prepared")
             run([python, os.path.join(REPO, "DatasetProcessing", "selfplay_to_dataset.py"), gen["run"], "--output", prepared,
-                 "--target-lambda", str(args.target_lambda)], os.path.join(gen_dir, "convert.log"), env)
+                 "--target-lambda", str(args.target_lambda)], os.path.join(gen_dir, "convert.log"))
             gen["prepared"] = prepared
             save_state(args.loop_dir, state)
 
@@ -169,7 +168,7 @@ def main(argv=None):
             for spec in data:
                 command += ["--data", spec]
             started = time.time()
-            run(command + args.train_args.split(), os.path.join(gen_dir, "train.log"), env)
+            run(command + args.train_args.split(), os.path.join(gen_dir, "train.log"))
             checkpoints = sorted(glob.glob(os.path.join(checkpoint_dir, "*.ckpt")), key=os.path.getmtime)
             if not checkpoints:
                 raise RuntimeError(f"train.py wrote no checkpoint into {checkpoint_dir}")
@@ -181,7 +180,7 @@ def main(argv=None):
         if "model" not in gen:
             onnx = os.path.join(gen_dir, f"state_value_net-loop-g{g:03d}.onnx")
             run([python, os.path.join(HERE, "export_onnx.py"), "--ckpt", gen["checkpoint"], "--out", onnx],
-                os.path.join(gen_dir, "export.log"), env)
+                os.path.join(gen_dir, "export.log"))
             gen["model"] = onnx
             save_state(args.loop_dir, state)
             log(args.loop_dir, f"gen {g}: trained on {gen['train']['window']} generations in {gen['train']['minutes']} min, "

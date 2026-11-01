@@ -13,9 +13,6 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(REPO, "DatasetProcessing"))
 sys.path.insert(0, os.path.join(REPO, "Agents", "Training"))
 
-# conda's MKL and torch both ship an OpenMP runtime in Agents/env
-os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
-
 from state_to_vector import FEATURE_DIM  # noqa: E402
 
 try:

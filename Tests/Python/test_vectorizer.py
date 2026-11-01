@@ -134,7 +134,6 @@ class BaselineLayoutTest(unittest.TestCase):
     def setUp(self):
         try:
             sys.path.insert(0, os.path.join(REPO, "Agents", "Training"))
-            os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
             import baselines
         except ImportError as error:
             self.skipTest(f"baselines.py needs torch: {error}")

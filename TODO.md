@@ -116,7 +116,6 @@
 		- SPRT ist umgesetzt (Arena mirror, [0, +40], α = β = 0,05, Paar als Einheit, eigener Seed-Bereich pro Duell, entscheidet erst ab 10 Paaren); für wichtige Entscheidungen [0, +20] über Nacht
 		- Zweistufig wie STC/LTC: 5k-Duell als Filter, nur Bestandenes bei 60k oder gleicher Denkzeit; mehr Paare über mehr Parallelität (Server-GPU)
 	- Plackett-Luce misst die Unsicherheit des Spielausgangs, nicht die des Nets (dafür Ensemble oder Varianz-Head); Platzierungs-Head als Plackett-Luce wäre konsistent
-- Agents/env: OpenMP-Konflikt (conda-MKL und torch), torch nur mit KMP_DUPLICATE_LIB_OK=TRUE => nomkl installieren
 - Spezialisierten Datensatz für Initial Placements anlegen
 	- Größter Hebel: im Setup reicht die Suche nicht über den eigenen Zug hinaus, praktisch eine 1-Ply-Bewertung des Nets
 	- Mehr Playouts
