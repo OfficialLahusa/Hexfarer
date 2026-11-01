@@ -299,6 +299,9 @@ namespace Client
             float x = 92;
             Theme.Card(dl, ColorPalette.DevelopmentCardPurple, ColorPalette.DevelopmentCardDarkPurple, TextureAtlas.Sprite.Development, pos + new Vector2(x, 0), new Vector2(17, 24), true, 1);
             Theme.DrawText(dl, Theme.Regular15, pos + new Vector2(x + 24, 2), Theme.TextSoft, devCards.ToString());
+            // Their types on hover, where the shown view may see them (all hands, or the seat's own)
+            if (fullHand && devCards > 0 && ImGui.IsMouseHoveringRect(pos + new Vector2(x - 2, -2), pos + new Vector2(x + 44, 26)))
+                DrawTooltip(ImGui.GetForegroundDrawList(), pos + new Vector2(x + 18, -4), DevelopmentCardsText(player));
 
             x += 56;
             bool army = player.VictoryPoints.LargestArmyPoints > 0;

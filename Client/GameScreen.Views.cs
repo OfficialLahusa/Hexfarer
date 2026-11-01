@@ -114,6 +114,18 @@ namespace Client
         /// <summary>
         /// A tooltip over a hand with unknown cards: how many, and how many of each type they can be at most
         /// </summary>
+        /// <summary>
+        /// A hand's development cards by type, and those bought this turn, which can't be played yet
+        /// </summary>
+        private static string DevelopmentCardsText(PlayerState player)
+        {
+            static string Cards(CardSet<DevelopmentCardType> cards) => string.Join(", ", CardSet<DevelopmentCardType>.Values
+                .Where(type => type != DevelopmentCardType.Unknown && cards.Get(type) > 0)
+                .Select(type => $"{cards.Get(type)} {type.GetName().ToLower()} card{(cards.Get(type) == 1 ? "" : "s")}"));
+            string text = Cards(player.DevelopmentCards);
+            return player.NewDevelopmentCards.Count() > 0 ? $"{text} (bought this turn: {Cards(player.NewDevelopmentCards)})" : text;
+        }
+
         private static string UnknownCardsText(HandBelief belief)
         {
             IEnumerable<string> types = CardTypeExtensions.ResourceTypes.Where(belief.CanBe)
