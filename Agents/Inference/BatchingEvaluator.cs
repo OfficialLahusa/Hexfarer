@@ -11,7 +11,7 @@ namespace Agents.Inference
     /// </summary>
     public sealed class BatchingEvaluator : ILeafEvaluator, IDisposable
     {
-        private sealed record Request(DenseTensor<float> Features, int Rows, bool WithPlacements, bool WithPolicy, TaskCompletionSource<LeafValues> Completion);
+        private sealed record Request(DenseTensor<float> Features, int Rows, bool WithPlacements, bool WithPolicy, LeafValues? Destination, TaskCompletionSource<LeafValues> Completion);
 
         private readonly BlockingCollection<Request> _queue = new(new ConcurrentQueue<Request>());
         private readonly Thread[] _workers;
@@ -52,7 +52,7 @@ namespace Agents.Inference
         /// </summary>
         public long Rows => Interlocked.Read(ref _rows);
 
-        public Task<LeafValues> EvaluateAsync(DenseTensor<float> features, bool withPlacements, bool withPolicy = false)
+        public Task<LeafValues> EvaluateAsync(DenseTensor<float> features, bool withPlacements, bool withPolicy = false, LeafValues? destination = null)
         {
             int rows = features.Dimensions[0];
             if (rows > _maxRows) throw new ArgumentException($"{rows} rows don't fit into a batch of {_maxRows}.", nameof(features));
@@ -64,7 +64,7 @@ namespace Agents.Inference
 
             // The search continues on the thread pool, not on the worker, which goes on with the next batch
             var completion = new TaskCompletionSource<LeafValues>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _queue.Add(new Request(features, rows, withPlacements, withPolicy, completion));
+            _queue.Add(new Request(features, rows, withPlacements, withPolicy, destination, completion));
             return completion.Task;
         }
 
@@ -106,18 +106,17 @@ namespace Agents.Inference
                 {
                     int runRows = net.FixedBatchSize ?? rows;
                     var input = new DenseTensor<float>(buffer.AsMemory(0, runRows * _featureDim), [runRows, _featureDim]);
-                    LeafValues values = net.Evaluate(input, batch.Any(request => request.WithPlacements), batch.Any(request => request.WithPolicy));
+                    // The outputs stay in the runtime's memory, and each request gets its rows in its own arrays (those it brought,
+                    // which a search reuses): no batch allocates large arrays, which would force full collections
+                    using StateValueNet.BatchOutputs outputs = net.RunBatch(input, batch.Any(request => request.WithPlacements), batch.Any(request => request.WithPolicy));
 
                     int row = 0;
                     int queryLength = Policy?.QueryLength ?? 0;
                     foreach (Request request in batch)
                     {
-                        float[] wins = values.WinProbabilities.AsSpan(row * StateValueNet.PlayerCount, request.Rows * StateValueNet.PlayerCount).ToArray();
-                        float[]? places = request.WithPlacements
-                            ? values.Placements!.AsSpan(row * StateValueNet.PlayerCount * 4, request.Rows * StateValueNet.PlayerCount * 4).ToArray()
-                            : null;
-                        float[]? queries = request.WithPolicy ? values.PolicyQueries!.AsSpan(row * queryLength, request.Rows * queryLength).ToArray() : null;
-                        request.Completion.SetResult(new LeafValues(wins, places, queries));
+                        LeafValues target = request.Destination ?? LeafValues.Allocate(request.Rows, request.WithPlacements, request.WithPolicy ? queryLength : 0);
+                        outputs.CopyRows(row, request.Rows, target, 0, request.WithPlacements, request.WithPolicy);
+                        request.Completion.SetResult(target.Only(request.WithPlacements, request.WithPolicy));
                         row += request.Rows;
                     }
 

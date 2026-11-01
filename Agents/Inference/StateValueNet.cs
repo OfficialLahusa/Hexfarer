@@ -269,20 +269,119 @@ namespace Agents.Inference
         /// </summary>
         public LeafValues Evaluate(DenseTensor<float> inputTensor, bool withPlacements, bool withPolicy)
         {
+            int rows = inputTensor.Dimensions[0];
+            return Evaluate(inputTensor, withPlacements, withPolicy, LeafValues.Allocate(rows, withPlacements, withPolicy ? Policy?.QueryLength ?? 0 : 0));
+        }
+
+        /// <summary>
+        /// As Evaluate, written into the arrays of destination (at least as long as the batch needs) instead of new ones, so a
+        /// search that keeps its buffers allocates nothing per batch; returns them with the outputs not asked for left out
+        /// </summary>
+        public LeafValues Evaluate(DenseTensor<float> inputTensor, bool withPlacements, bool withPolicy, LeafValues destination)
+        {
             if (withPlacements && !HasPlacements)
                 throw new InvalidOperationException("The value net has no placements output (it was trained without auxiliary heads).");
             if (withPolicy && Policy == null)
                 throw new InvalidOperationException("The value net has no policy head.");
 
+            int batchSize = inputTensor.Dimensions[0];
+            if (FixedBatchSize is not int fixedSize || batchSize == fixedSize)
+            {
+                using BatchOutputs outputs = RunBatch(inputTensor, withPlacements, withPolicy);
+                outputs.CopyRows(0, batchSize, destination, 0, withPlacements, withPolicy);
+            }
+            else
+            {
+                // Smaller batches are padded with empty rows, larger ones run in several pieces; only the real rows are kept
+                int featureDim = inputTensor.Dimensions[1];
+                var piece = new DenseTensor<float>([fixedSize, featureDim]);
+                for (int start = 0; start < batchSize; start += fixedSize)
+                {
+                    int rows = Math.Min(fixedSize, batchSize - start);
+                    piece.Buffer.Span.Clear();
+                    inputTensor.Buffer.Span.Slice(start * featureDim, rows * featureDim).CopyTo(piece.Buffer.Span);
+                    using BatchOutputs outputs = RunBatch(piece, withPlacements, withPolicy);
+                    outputs.CopyRows(0, rows, destination, start, withPlacements, withPolicy);
+                }
+            }
+            return destination.Only(withPlacements, withPolicy);
+        }
+
+        /// <summary>
+        /// Runs one batch (of the fixed batch size, if there is one) and keeps the outputs in the runtime's memory until
+        /// disposed, so callers copy out only the rows they need (see BatchingEvaluator)
+        /// </summary>
+        public BatchOutputs RunBatch(DenseTensor<float> inputTensor, bool withPlacements, bool withPolicy)
+        {
+            if (FixedBatchSize is int fixedSize && inputTensor.Dimensions[0] != fixedSize)
+                throw new ArgumentException($"The session runs batches of {fixedSize} rows, not {inputTensor.Dimensions[0]}.", nameof(inputTensor));
+
             List<string> names = ["logits"];
             if (withPlacements) names.Add("placements");
             if (withPolicy) names.Add("policy_query");
-            float[][] outputs = RunOutputs(inputTensor, [.. names]);
+            var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("state", inputTensor) };
 
-            int batchSize = outputs[0].Length / PlayerCount;
-            float[] winProbabilities = SoftmaxPerRow(outputs[0], batchSize, PlayerCount);
-            float[]? placements = withPlacements ? SoftmaxPerRow(outputs[1], batchSize * PlayerCount, PlayerCount) : null;
-            return new LeafValues(winProbabilities, placements, withPolicy ? outputs[^1] : null);
+            IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results;
+            if (_runLock == null)
+                results = _session.Run(inputs, names);
+            else
+                lock (_runLock) results = _session.Run(inputs, names);
+            return new BatchOutputs(results, Policy?.QueryLength ?? 0);
+        }
+
+        /// <summary>
+        /// The outputs of one batch in the runtime's memory, read row by row: softmax for the win probabilities and placements,
+        /// float16 policy queries widened to float
+        /// </summary>
+        public sealed class BatchOutputs : IDisposable
+        {
+            private readonly IDisposableReadOnlyCollection<DisposableNamedOnnxValue> _results;
+            private readonly DisposableNamedOnnxValue _logits;
+            private readonly DisposableNamedOnnxValue? _placements, _queries;
+            private readonly int _queryLength;
+
+            internal BatchOutputs(IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results, int queryLength)
+            {
+                _results = results;
+                _logits = results.First(result => result.Name == "logits");
+                _placements = results.FirstOrDefault(result => result.Name == "placements");
+                _queries = results.FirstOrDefault(result => result.Name == "policy_query");
+                _queryLength = queryLength;
+            }
+
+            /// <summary>
+            /// Copies `rows` rows from `sourceRow` on into destination from `destinationRow` on, the placements and queries only
+            /// if asked for
+            /// </summary>
+            public void CopyRows(int sourceRow, int rows, LeafValues destination, int destinationRow, bool withPlacements, bool withPolicy)
+            {
+                SoftmaxRows(Floats(_logits).Slice(sourceRow * PlayerCount, rows * PlayerCount),
+                    destination.WinProbabilities.AsSpan(destinationRow * PlayerCount, rows * PlayerCount), PlayerCount);
+
+                if (withPlacements)
+                {
+                    const int Places = PlayerCount * PlayerCount;
+                    SoftmaxRows(Floats(_placements!).Slice(sourceRow * Places, rows * Places),
+                        destination.Placements!.AsSpan(destinationRow * Places, rows * Places), PlayerCount);
+                }
+
+                if (withPolicy)
+                {
+                    Span<float> queries = destination.PolicyQueries!.AsSpan(destinationRow * _queryLength, rows * _queryLength);
+                    if (_queries!.ElementType == TensorElementType.Float16)
+                    {
+                        // Float16 and Half share the IEEE layout; one vectorized pass
+                        ReadOnlySpan<Float16> halves = ((DenseTensor<Float16>)_queries.AsTensor<Float16>()).Buffer.Span.Slice(sourceRow * _queryLength, rows * _queryLength);
+                        System.Numerics.Tensors.TensorPrimitives.ConvertToSingle(System.Runtime.InteropServices.MemoryMarshal.Cast<Float16, Half>(halves), queries);
+                    }
+                    else
+                        Floats(_queries).Slice(sourceRow * _queryLength, rows * _queryLength).CopyTo(queries);
+                }
+            }
+
+            private static ReadOnlySpan<float> Floats(DisposableNamedOnnxValue result) => ((DenseTensor<float>)result.AsTensor<float>()).Buffer.Span;
+
+            public void Dispose() => _results.Dispose();
         }
 
         /// <summary>
@@ -295,28 +394,32 @@ namespace Agents.Inference
         private static float[] SoftmaxPerRow(float[] flat, int batchSize, int numClasses)
         {
             var result = new float[flat.Length];
+            SoftmaxRows(flat.AsSpan(0, batchSize * numClasses), result, numClasses);
+            return result;
+        }
 
-            for (int row = 0; row < batchSize; row++)
+        /// <summary>
+        /// Softmax of each row of numClasses values from source into destination (same length)
+        /// </summary>
+        private static void SoftmaxRows(ReadOnlySpan<float> source, Span<float> destination, int numClasses)
+        {
+            for (int offset = 0; offset < source.Length; offset += numClasses)
             {
-                int offset = row * numClasses;
-
                 float max = float.NegativeInfinity;
                 for (int c = 0; c < numClasses; c++)
-                    max = Math.Max(max, flat[offset + c]);
+                    max = Math.Max(max, source[offset + c]);
 
                 float sumExp = 0f;
                 for (int c = 0; c < numClasses; c++)
                 {
-                    float e = MathF.Exp(flat[offset + c] - max);
-                    result[offset + c] = e;
+                    float e = MathF.Exp(source[offset + c] - max);
+                    destination[offset + c] = e;
                     sumExp += e;
                 }
 
                 for (int c = 0; c < numClasses; c++)
-                    result[offset + c] /= sumExp;
+                    destination[offset + c] /= sumExp;
             }
-
-            return result;
         }
     }
 }

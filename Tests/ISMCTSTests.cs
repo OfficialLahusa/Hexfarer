@@ -25,7 +25,7 @@ namespace Tests
             public bool HasPlacements => false;
             public PolicyHead? Policy => null;
 
-            public Task<LeafValues> EvaluateAsync(DenseTensor<float> features, bool withPlacements, bool withPolicy = false)
+            public Task<LeafValues> EvaluateAsync(DenseTensor<float> features, bool withPlacements, bool withPolicy = false, LeafValues? destination = null)
             {
                 int rows = features.Dimensions[0], width = features.Dimensions[1];
                 float[] probabilities = new float[rows * 4];

@@ -6,7 +6,19 @@ namespace Agents.Inference
     /// Value net outputs of a batch of leaves: win probabilities [rows * players] and, if requested, placement distributions
     /// [rows * players * places] and policy queries [rows * move types * dim]
     /// </summary>
-    public readonly record struct LeafValues(float[] WinProbabilities, float[]? Placements, float[]? PolicyQueries = null);
+    public readonly record struct LeafValues(float[] WinProbabilities, float[]? Placements, float[]? PolicyQueries = null)
+    {
+        /// <summary>
+        /// Arrays for `rows` rows: the placements if asked for, the policy queries of queryLength numbers per row (0 for none)
+        /// </summary>
+        public static LeafValues Allocate(int rows, bool withPlacements, int queryLength) => new(new float[rows * StateValueNet.PlayerCount],
+            withPlacements ? new float[rows * StateValueNet.PlayerCount * StateValueNet.PlayerCount] : null, queryLength > 0 ? new float[rows * queryLength] : null);
+
+        /// <summary>
+        /// The same arrays without the outputs not asked for (a reused buffer may hold them from an earlier batch)
+        /// </summary>
+        public LeafValues Only(bool withPlacements, bool withPolicy) => new(WinProbabilities, withPlacements ? Placements : null, withPolicy ? PolicyQueries : null);
+    }
 
     /// <summary>
     /// The constant part of a policy head: the token embeddings [VocabularySize * Dim] (see ActionEncoding)
@@ -34,9 +46,10 @@ namespace Agents.Inference
 
         /// <summary>
         /// Evaluates the rows of features [rows, featureDim]. The tensor is only read until the returned task completes, so the
-        /// caller can reuse it afterwards.
+        /// caller can reuse it afterwards. With a destination (see LeafValues.Allocate) the outputs are written into its arrays
+        /// instead of new ones; the caller leaves them alone until the task completes.
         /// </summary>
-        Task<LeafValues> EvaluateAsync(DenseTensor<float> features, bool withPlacements, bool withPolicy = false);
+        Task<LeafValues> EvaluateAsync(DenseTensor<float> features, bool withPlacements, bool withPolicy = false, LeafValues? destination = null);
     }
 
     /// <summary>
@@ -55,9 +68,11 @@ namespace Agents.Inference
 
         public PolicyHead? Policy => _net.Policy;
 
-        public Task<LeafValues> EvaluateAsync(DenseTensor<float> features, bool withPlacements, bool withPolicy = false)
+        public Task<LeafValues> EvaluateAsync(DenseTensor<float> features, bool withPlacements, bool withPolicy = false, LeafValues? destination = null)
         {
-            return Task.Run(() => _net.Evaluate(features, withPlacements, withPolicy));
+            return Task.Run(() => destination is LeafValues target
+                ? _net.Evaluate(features, withPlacements, withPolicy, target)
+                : _net.Evaluate(features, withPlacements, withPolicy));
         }
     }
 }

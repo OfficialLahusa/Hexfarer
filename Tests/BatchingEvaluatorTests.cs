@@ -55,6 +55,34 @@ namespace Tests
         }
 
         [Fact]
+        public async Task ResultsGoIntoTheBuffersARequestBrings()
+        {
+            StateValueNet reference = CpuNet();
+            using BatchingEvaluator evaluator = new([CpuNet()], maxRows: 64);
+            Random random = new(5);
+            LeafValues buffer = LeafValues.Allocate(8, withPlacements: true, queryLength: 0);
+
+            // The same buffer for a batch with placements and then one without: the second leaves out the stale placements
+            foreach (bool withPlacements in new[] { true, false })
+            {
+                var features = new DenseTensor<float>([8, reference.InputDim]);
+                for (int j = 0; j < features.Buffer.Length; j++) features.Buffer.Span[j] = (float)random.NextDouble();
+                LeafValues result = await evaluator.EvaluateAsync(features, withPlacements, destination: buffer);
+
+                (float[] wins, float[] placements) = reference.RunWithPlacements(features);
+                Assert.Same(buffer.WinProbabilities, result.WinProbabilities);
+                for (int j = 0; j < wins.Length; j++) Assert.Equal(wins[j], result.WinProbabilities[j], 1e-5);
+                if (withPlacements)
+                {
+                    Assert.Same(buffer.Placements, result.Placements);
+                    for (int j = 0; j < placements.Length; j++) Assert.Equal(placements[j], result.Placements![j], 1e-5);
+                }
+                else
+                    Assert.Null(result.Placements);
+            }
+        }
+
+        [Fact]
         public void RequestsLargerThanABatchAreRejected()
         {
             StateValueNet net = CpuNet();

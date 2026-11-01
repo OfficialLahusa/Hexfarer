@@ -30,7 +30,7 @@ namespace Agents.MCTS
     public sealed class MCTSSearch
     {
         // Leaves of a batch with their features, written by selection so the evaluation only runs the value net
-        private sealed record LeafBatch(SearchLeaf[] Leaves, DenseTensor<float> Features, List<Action>?[] Moves);
+        private sealed record LeafBatch(SearchLeaf[] Leaves, DenseTensor<float> Features, List<Action>?[] Moves, LeafValues Results);
 
         // Utilities per leaf and player (flat: leaf * 4 + player) and the policy queries of the leaves (null without policy)
         private sealed record BatchResults(double[] Utilities, float[]? PolicyQueries);
@@ -40,8 +40,10 @@ namespace Agents.MCTS
         private readonly bool _parallelSelection;
         private double _placementWeight;
 
-        // Two feature buffers used in turn: one is evaluated while the next batch is selected into the other
+        // Two feature buffers used in turn: one is evaluated while the next batch is selected into the other; each with the
+        // buffer its outputs are written into, read by the backpropagation before the buffer comes round again
         private readonly DenseTensor<float>[] _featureBuffers;
+        private readonly LeafValues[] _resultBuffers;
         private int _nextBuffer;
 
         private long _distinctLeaves;
@@ -57,6 +59,8 @@ namespace Agents.MCTS
             _parallelSelection = parallelSelection;
             LeavesPerBatch = leavesPerBatch;
             _featureBuffers = [new([leavesPerBatch, vectorizer.FeatureDim]), new([leavesPerBatch, vectorizer.FeatureDim])];
+            int queryLength = evaluator.Policy?.QueryLength ?? 0;
+            _resultBuffers = [LeafValues.Allocate(leavesPerBatch, evaluator.HasPlacements, queryLength), LeafValues.Allocate(leavesPerBatch, evaluator.HasPlacements, queryLength)];
         }
 
         public int LeavesPerBatch { get; }
@@ -249,6 +253,7 @@ namespace Agents.MCTS
             var moves = new List<Action>?[LeavesPerBatch];
             bool usesPolicy = UsesPolicy;
             DenseTensor<float> features = _featureBuffers[_nextBuffer];
+            LeafValues results = _resultBuffers[_nextBuffer];
             _nextBuffer ^= 1;
             Memory<float> featureBuffer = features.Buffer;
             int featureDim = _vectorizer.FeatureDim;
@@ -277,7 +282,7 @@ namespace Agents.MCTS
             _selectionTime.Stop();
             _distinctLeaves += leaves.Select(leaf => leaf.Node).Distinct().Count();
 
-            return new LeafBatch(leaves, features, moves);
+            return new LeafBatch(leaves, features, moves, results);
         }
 
         /// <summary>
@@ -297,7 +302,7 @@ namespace Agents.MCTS
             LeafValues? values = null;
             bool withPolicy = batch.Moves.Any(moves => moves != null);
             if (leaves.Any(leaf => !leaf.State.HasEnded))
-                values = await _evaluator.EvaluateAsync(batch.Features, placementWeight > 0, withPolicy).ConfigureAwait(false);
+                values = await _evaluator.EvaluateAsync(batch.Features, placementWeight > 0, withPolicy, batch.Results).ConfigureAwait(false);
 
             for (int i = 0; i < leaves.Length; i++)
             {

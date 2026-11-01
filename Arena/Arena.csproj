@@ -7,6 +7,9 @@
     <Nullable>enable</Nullable>
     <!-- Many searches allocate on all cores; the workstation GC slows them down about 3x -->
     <ServerGarbageCollection>true</ServerGarbageCollection>
+    <!-- Without the default heap count adaptation (DATAS): it keeps few heaps for the many live search trees and collects
+         so often that the GC paused self-play 41% of the time instead of 20% (about 10% fewer iterations/s) -->
+    <GarbageCollectionAdaptationMode>0</GarbageCollectionAdaptationMode>
   </PropertyGroup>
 
   <ItemGroup>
