@@ -60,8 +60,8 @@
 	- 1. Messen: Catanatron-Bridge (~3-5 Tage) plus Leaderboard
 	- 2. max^n: erledigt (~+70 Elo), Explorationskonstante egal; offen: Paranoid testen, Gegnerzüge nach Policy-Prior
 	- 3. GPU-Inference: erledigt (DirectML 566k States/s, MCTS ~320k Iterationen/s, Self-Play ~400k über BatchingEvaluator; nur mit Server-GC, Workstation-GC bremst ~3x), jetzt bremst die Net-Auswertung; CUDA-EP braucht CUDA 13
-		- FP16 (export_onnx.py --fp16, Input/Outputs wie FP32): Präzisions-Set identisch (KL, Ranking, bester Zug auf 5 Stellen), Net allein mit 3 Sessions +25% (DirectML 410k => 510k States/s), Self-Play unverändert ~205k Iterationen/s => nicht der Engpass, bleibt optional
-		- Self-Play mit Policy-Net ist weder GPU- noch CPU-gebunden: GPU halb leer, 14 von 32 Threads aktiv, 6 Nets oder 2048 Spiele nur +4-10%, Server mit 8 Kernen gleich schnell => Engpass im Collector suchen (serieller Teil pro Batch?), vor FP16-Inputs oder zweiter GPU
+		- FP16 (export_onnx.py --fp16, Input/Outputs wie FP32): Präzisions-Set identisch (KL, Ranking, bester Zug auf 5 Stellen), Net allein mit 3 Sessions +25% (DirectML 410k => 510k States/s), Self-Play auch nach GC-Fix unverändert (445k) => bleibt optional
+		- Self-Play-Engpass war der GC (52% Pause): Ergebnis-Buffer pro Suche wiederverwendet, DATAS aus => 205k => 445k Iterationen/s (3 Nets), 6 Nets 497k (+11%)
 	- 4. Setup-Phase spezialisieren: eigene Zeit, Best-Response-Gegner, Sibling-Gruppen an Setup-Entscheidungen
 	- 5. Policy Head + PUCT: erledigt (siehe PolicyNet), P1 mhn8ihqb ist Default (auf HF), gegen E2 im 5k-Duell +122 Elo [+78, +169] (104 Paare), Wiederholung +73 [+33, +115] (125 Paare); PUCT mit uniformen Priors ±0 [−47, +47] => der Gewinn kommt von der gelernten Policy
 		- Tempo: Queries als float16, Priors in der Backpropagation => P1 223k statt 170k Iterationen/s (E2 ~310k); Query-Dim 32 gibt 257k bei gleichem Loss, spielte aber nur +13 [−34, +61] gegen E2 => bei 64 bleiben, Streuung zwischen Trainingsläufen desselben Rezepts prüfen
