@@ -297,18 +297,49 @@ namespace Client
             // Development cards, knights and road length; the holders of the bonuses in yellow
             uint devCards = player.DevelopmentCards.Count();
             float x = 92;
-            Theme.Card(dl, ColorPalette.DevelopmentCardPurple, ColorPalette.DevelopmentCardDarkPurple, TextureAtlas.Sprite.Development, pos + new Vector2(x, 0), new Vector2(17, 24), true, 1);
-            Theme.DrawText(dl, Theme.Regular15, pos + new Vector2(x + 24, 2), Theme.TextSoft, devCards.ToString());
-            // Their types on hover, where the shown view may see them (all hands, or the seat's own)
-            if (fullHand && devCards > 0 && ImGui.IsMouseHoveringRect(pos + new Vector2(x - 2, -2), pos + new Vector2(x + 44, 26)))
-                DrawTooltip(ImGui.GetForegroundDrawList(), pos + new Vector2(x + 18, -4), DevelopmentCardsText(player));
+            if (fullHand && devCards > 0)
+            {
+                // Mini cards by type where the shown view may see them (all hands, or the seat's own), those bought this turn
+                // muted. Their types differ only in the icon, so they can't be squeezed like the resources: up to 5 are fanned
+                // 11 apart, more merge into one stack per type (at most 5, so the fan never grows) whose depth shows the count
+                // (1, 2, 3, 4 or more cards); the exact counts are in the tooltip
+                bool grouped = devCards > 5;
+                int i = 0;
+                foreach (DevelopmentCardType type in CardSet<DevelopmentCardType>.Values)
+                {
+                    uint count = player.DevelopmentCards.Get(type), playable = count - player.NewDevelopmentCards.Get(type);
+                    if (count == 0) continue;
+                    if (grouped)
+                    {
+                        // Muted only if none of the type can be played yet
+                        for (uint layer = Math.Min(count, 4) - 1; layer > 0; layer--)
+                            Theme.DevelopmentCard(dl, type, pos + new Vector2(x + i * 11, 1 - layer * 3f), new Vector2(15, 22), false, 1, playable == 0);
+                        Theme.DevelopmentCard(dl, type, pos + new Vector2(x + i * 11, 1), new Vector2(15, 22), true, 1, playable == 0);
+                        i++;
+                    }
+                    else
+                    {
+                        for (uint n = 0; n < count; n++, i++)
+                            Theme.DevelopmentCard(dl, type, pos + new Vector2(x + i * 11, 1), new Vector2(15, 22), true, 1, n >= playable);
+                    }
+                }
+                float width = (i - 1) * 11 + 15;
+                Theme.DrawText(dl, Theme.Regular15, pos + new Vector2(x + width + 5, 2), Theme.TextSoft, devCards.ToString());
+                if (ImGui.IsMouseHoveringRect(pos + new Vector2(x, -9), pos + new Vector2(x + width, 24)))
+                    DrawTooltip(ImGui.GetForegroundDrawList(), pos + new Vector2(x + width / 2, -4), DevelopmentCardsText(player));
+            }
+            else
+            {
+                Theme.Card(dl, ColorPalette.DevelopmentCardPurple, ColorPalette.DevelopmentCardDarkPurple, TextureAtlas.Sprite.Development, pos + new Vector2(x, 0), new Vector2(17, 24), true, 1);
+                Theme.DrawText(dl, Theme.Regular15, pos + new Vector2(x + 24, 2), Theme.TextSoft, devCards.ToString());
+            }
 
-            x += 56;
+            x += 84;
             bool army = player.VictoryPoints.LargestArmyPoints > 0;
             Theme.Icon(dl, TextureAtlas.Sprite.Knight, pos + new Vector2(x, -1), pos + new Vector2(x + 26, 25), army ? Theme.Highlight : Theme.TextSoft);
             Theme.DrawText(dl, army ? Theme.Bold15 : Theme.Regular15, pos + new Vector2(x + 30, 2), army ? Theme.Highlight : Theme.TextSoft, player.PlayedKnights.ToString());
 
-            x += 60;
+            x += 56;
             bool road = player.VictoryPoints.LongestRoadPoints > 0;
             Theme.Icon(dl, TextureAtlas.Sprite.Road, pos + new Vector2(x, -1), pos + new Vector2(x + 26, 25), road ? Theme.Highlight : Theme.TextSoft);
             Theme.DrawText(dl, road ? Theme.Bold15 : Theme.Regular15, pos + new Vector2(x + 30, 2), road ? Theme.Highlight : Theme.TextSoft, player.LongestRoadLength.ToString());
@@ -755,6 +786,8 @@ namespace Client
         {
             Vector2 size = Theme.TextSize(Theme.SemiBold15, text) + new Vector2(18, 8);
             Vector2 min = bottomCenter - new Vector2(size.X / 2, size.Y);
+            // Kept on the screen, for long ones near its edge
+            min.X = Math.Clamp(min.X, 8, MathF.Max(8, ImGui.GetIO().DisplaySize.X - size.X - 8));
             dl.RoundRectFilled(min, min + size, Theme.U32(new Color(11, 22, 64, 240)), 6);
             dl.RoundRect(min, min + size, Theme.U32(Theme.BorderLight), 6);
             Theme.TextCentered(dl, Theme.SemiBold15, min + size / 2, Theme.Text, text);

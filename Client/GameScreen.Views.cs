@@ -112,9 +112,6 @@ namespace Client
         }
 
         /// <summary>
-        /// A tooltip over a hand with unknown cards: how many, and how many of each type they can be at most
-        /// </summary>
-        /// <summary>
         /// A hand's development cards by type, and those bought this turn, which can't be played yet
         /// </summary>
         private static string DevelopmentCardsText(PlayerState player)
@@ -126,6 +123,9 @@ namespace Client
             return player.NewDevelopmentCards.Count() > 0 ? $"{text} (bought this turn: {Cards(player.NewDevelopmentCards)})" : text;
         }
 
+        /// <summary>
+        /// A tooltip over a hand with unknown cards: how many, and how many of each type they can be at most
+        /// </summary>
         private static string UnknownCardsText(HandBelief belief)
         {
             IEnumerable<string> types = CardTypeExtensions.ResourceTypes.Where(belief.CanBe)
