@@ -31,7 +31,9 @@
 		- Offen: ISMCTS-Self-Play (--hidden): ein ISMCTS-Baum pro Sitz mit dessen Beliefs, Policy-Ziele aus den Root Visits des IS-Baums, Views mitschreiben; danach das belief-aware Net darauf trainieren
 	- 4. Belief-aware StateValueNet: Training auf StateView-Inputs (Views per Replay der Histories rekonstruierbar), Sichtbarkeits-Augmentation nach der echten Beobachtungsverteilung statt zufällig, erwartete versteckte VP als Feature
 		- VP1 7wy14wew (P1-Rezept auf Views, Iteration 1 + v2, 1990 Features mit Belief-Block): Präzisions-KL +0,0028 gegen P1 (vor allem Endspiel), Ranking gleich; Vectorizers.For gibt einem 1990-Net die Sicht des Sitzes
-		- Offen: VP1 in die Agents einbinden (ISMCTS bewertet jede Welt mit Sicht und Belief-Block statt mit den zufällig gezogenen Karten): Duell ISMCTS mit VP1 gegen ISMCTS mit P1 bzw. 505oscbr, bei Gewinn Standard für die MCTS-Sitze
+		- Offen: VP1 in ISMCTS einbinden: Determinisierung bleibt für Züge und Zufall, nur das Blatt bewertet die Sicht des Suchenden statt der gezogenen Karten (BeliefTracker an der Root klonen, entlang des Pfads mit den geschwärzten Zügen füttern, am Blatt Vectorizers.For) => kein Rauschen durch gezogene Karten, Welten realistisch gewichtet statt nur konsistent; gleicher Knoten = gleiche Sicht, also ein Wert pro Knoten statt pro Welt
+			- Duell ISMCTS mit VP1 gegen ISMCTS mit P1 (gleiches Rezept und gleiche Daten, nur die Inputs verschieden; gegen kt5fwcz5 vermischt es Netzqualität und Sicht), bei Gewinn View-Net auf den Daten von kt5fwcz5 (Views per Replay), dann Standard für die MCTS-Sitze
+			- Bleibt: VP1 lernte aus Open-hand-Partien und nimmt hinter dem Blatt hellseherisches Spiel an => erst ISMCTS-Self-Play mit Views behebt das
 	- 5. Particle MCTS / POMCP erst mit Spielerhandel (Angebote schwer als Constraints)
 - Client
 	- Herkunft fehlender Assets/Sounds klären und herausfinden, welche Sounds noch ergänzt werden sollten
