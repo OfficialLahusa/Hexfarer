@@ -7,7 +7,7 @@
 - Freier Handel umgesetzt (Regelbuch: nur mit dem Spieler am Zug, nach dem Wurf, keine Geschenke/gleichen Rohstoffe; Angebot, Annehmen/Ablehnen/Gegenangebot, Partnerwahl; Regel FreeTrade aus für Self-Play/Datasets, an im Client; Bots antworten per Value Net bzw. Handheuristik, max. 10 Angebote pro Zug)
 	- Offen: Bots machen selbst Angebote und Gegenangebote, Zeitlimit für Antworten im Netzwerkspiel, Handel im Policy Head/Training
 - Client-UI für echtes interaktives Spielen durch Menschen überarbeiten und fertigstellen
-	- Umgesetzt: Modi Play, Spectate, Edit (Ghosts aus den legalen Moves, Dialoge, Ertragspartikel, Hidden Info im Play, Policy-Heatmap und Eval-Bar im Spectate, Edit mit Undo/Redo und Log), HUD skaliert mit der Fensterhöhe; Hauptmenü (auf diesem Computer mit Mensch oder Bot pro Sitz, Fair MCTS als Standard-Bot, Hosten mit derselben Sitzwahl, Beitreten, Laden; Einstellungen für Sounds, Lautstärke, Partikel und Bot-Tempo in %AppData%\Hexfarer\settings.json); --selftest spielt Partien über die UI-Pfade und das Menü
+	- Umgesetzt: Modi Play, Spectate, Edit (Ghosts aus den legalen Moves, Dialoge, Ertragspartikel, Hidden Info im Play, Policy-Heatmap und Eval-Bar im Spectate, Edit mit Undo/Redo und Log), HUD skaliert mit der Fensterhöhe; Hauptmenü (auf diesem Computer mit Mensch oder Bot pro Sitz, MCTS Hard als Standard-Bot, Hosten mit derselben Sitzwahl, Beitreten, Laden; Einstellungen für Sounds, Lautstärke, Partikel und Bot-Tempo in %AppData%\Hexfarer\settings.json); --selftest spielt Partien über die UI-Pfade und das Menü
 	- Hot-Seat mit verdeckter Übergabe ist umgesetzt (Vorhang zwischen zwei Menschen)
 	- Danach, erst wenn die UI im C#-Client fertig ist: Web-Client fürs Spielen (gleiche Farben, Icons und Proportionen; Brett als SVG, UI in HTML/CSS); Spiellogik und Agents bleiben in C# auf dem Simulation Server (SignalR/WebSocket), keine KI im Browser
 	- Der C#-Client bleibt die Obermenge (Analyse, Eval-Bar, Edit Mode, Playouts), der Web-Client deckt nur das Spielen ab
@@ -36,6 +36,7 @@
 			- Bleibt: VP1 lernte aus Open-hand-Partien und nimmt hinter dem Blatt hellseherisches Spiel an => erst ISMCTS-Self-Play mit Views behebt das
 	- 5. Particle MCTS / POMCP erst mit Spielerhandel (Angebote schwer als Constraints)
 - Client
+	- Zwei Admin-Buttons unten am Bildschirm (nur für Admins): Karte zurücksetzen (Kartenlayout und Lobby-Einstellungen bleiben, der Rest des GameState wird neu) und neue Karte (dasselbe mit neu generierter Karte)
 	- Herkunft fehlender Assets/Sounds klären und herausfinden, welche Sounds noch ergänzt werden sollten
 	- Linux-Port: RenderDataImpl.dll (nur Windows, ohne Quellcode) ersetzen, ShowWindow nur unter Windows (Ressourcen kommen schon aus res/ neben der Exe)
 
