@@ -68,7 +68,8 @@ namespace DatasetCollector
     /// What the command line asks for: a run with the settings, after an optional thread calibration
     /// </summary>
     public sealed record CommandLine(CollectorSettings Settings, bool CalibrateThreads, bool CalibrateOnly, TimeSpan CalibrationTime, bool ShowHelp,
-        (string Seeds, string Output)? RegenerateMaps = null, (string Index, string States, string Output)? RegenerateViews = null)
+        (string Seeds, string Output)? RegenerateMaps = null, (string Index, string States, string Output)? RegenerateViews = null,
+        (string Index, string States, string Output, ReanalysisSettings Settings)? Reanalyze = null)
     {
         public const string Usage = """
             Usage: DatasetCollector [options]
@@ -109,6 +110,23 @@ namespace DatasetCollector
                                      every match again and checking each state against its stored row; needs the
                                      run's --seed, --agents, --exploration, --samples, --sibling-groups, --siblings
                                      and --center-desert
+              --reanalyze INDEX STATES OUT
+                                     Instead of collecting: policy targets for a prepared dataset collected without
+                                     searches, written to the directory OUT (one entry per row of INDEX, read by
+                                     train.py --policy-dir). Plays every match again (needs the run's settings as for
+                                     --regenerate-views), checks each state against its stored row and searches every
+                                     entry with at least two legal moves with MCTS and the net; the share of the root
+                                     visits per move becomes the target. Options:
+                --model NET.onnx       The net (full-state inputs, ideally with a policy head)
+                --iterations N         Iterations per search (default 1600)
+                --first-run I          The first match run of the index to search (default 0)
+                --runs N               Match runs to search (default all); the other entries get no target
+                --concurrent N         Searches at once on the shared nets (default 1024)
+                --nets N               Copies of the net, each with its own session (default 3)
+                --batch N              Rows per net evaluation (default 1024)
+                --leaves N             Leaves per search batch (default 16)
+                --search-exploration C Exploration constant of the search (default 1.414)
+                --provider P           auto, cpu, directml or cuda (default auto)
               --help                 Show this help
             """;
 
@@ -118,7 +136,8 @@ namespace DatasetCollector
             bool calibrateThreads = false, calibrateOnly = false, showHelp = false;
             TimeSpan calibrationTime = TimeSpan.FromSeconds(20);
             (string, string)? regenerateMaps = null;
-            (string, string, string)? regenerateViews = null;
+            (string, string, string)? regenerateViews = null, reanalyze = null;
+            ReanalysisSettings reanalysis = new();
             string agents = "random=0.3,simple=0.35,builder=0.35", exploration = "0.1-0.2";
 
             for (int i = 0; i < args.Length; i++)
@@ -150,6 +169,24 @@ namespace DatasetCollector
                     case "--calibration-seconds": calibrationTime = TimeSpan.FromSeconds(double.Parse(Value(), CultureInfo.InvariantCulture)); break;
                     case "--regenerate-maps": regenerateMaps = (Value(), Value()); break;
                     case "--regenerate-views": regenerateViews = (Value(), Value(), Value()); break;
+                    case "--reanalyze": reanalyze = (Value(), Value(), Value()); break;
+                    case "--model": reanalysis = reanalysis with { ModelPath = Value() }; break;
+                    case "--iterations": reanalysis = reanalysis with { Iterations = IntValue() }; break;
+                    case "--first-run": reanalysis = reanalysis with { FirstRun = IntValue() }; break;
+                    case "--runs": reanalysis = reanalysis with { Runs = IntValue() }; break;
+                    case "--concurrent": reanalysis = reanalysis with { ConcurrentSearches = IntValue() }; break;
+                    case "--nets": reanalysis = reanalysis with { Nets = IntValue() }; break;
+                    case "--batch": reanalysis = reanalysis with { BatchRows = IntValue() }; break;
+                    case "--leaves": reanalysis = reanalysis with { LeavesPerBatch = IntValue() }; break;
+                    case "--search-exploration": reanalysis = reanalysis with { Exploration = double.Parse(Value(), CultureInfo.InvariantCulture) }; break;
+                    case "--provider":
+                        string provider = Value();
+                        reanalysis = reanalysis with
+                        {
+                            Provider = Enum.TryParse(provider, ignoreCase: true, out Agents.Inference.InferenceProvider parsed)
+                                ? parsed : throw new ArgumentException($"Unknown provider \"{provider}\".")
+                        };
+                        break;
                     case "--help" or "-h": showHelp = true; break;
                     default: throw new ArgumentException($"Unknown option \"{args[i]}\".");
                 }
@@ -157,7 +194,13 @@ namespace DatasetCollector
 
             settings = settings with { Agents = AgentMix.Parse(agents, exploration) };
             settings.Validate();
-            return new CommandLine(settings, calibrateThreads, calibrateOnly, calibrationTime, showHelp, regenerateMaps, regenerateViews);
+            (string, string, string, ReanalysisSettings)? reanalysisRequest = null;
+            if (reanalyze is (string index, string states, string output))
+            {
+                reanalysis.Validate();
+                reanalysisRequest = (index, states, output, reanalysis);
+            }
+            return new CommandLine(settings, calibrateThreads, calibrateOnly, calibrationTime, showHelp, regenerateMaps, regenerateViews, reanalysisRequest);
         }
     }
 }

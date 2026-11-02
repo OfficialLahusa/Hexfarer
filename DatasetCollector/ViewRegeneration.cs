@@ -27,20 +27,7 @@ namespace DatasetCollector
         {
             if (File.Exists(outputPath)) throw new InvalidOperationException($"{outputPath} already exists.");
 
-            // Entries in row order, grouped into runs of the same match
-            List<(int match, List<(long row, string name)> entries)> groups = [];
-            long rows = 0;
-            foreach (string line in File.ReadLines(indexPath).Skip(1))
-            {
-                string[] fields = line.Split(',');
-                long row = long.Parse(fields[0], CultureInfo.InvariantCulture);
-                if (row != rows) throw new InvalidOperationException($"Entry {row} of the index is not in row order.");
-                string name = fields[3];
-                int match = int.Parse(name.AsSpan(1, name.IndexOf('_') - 1), CultureInfo.InvariantCulture);
-                if (groups.Count == 0 || groups[^1].match != match) groups.Add((match, []));
-                groups[^1].entries.Add((row, name));
-                rows++;
-            }
+            List<(int match, List<(long row, string name)> entries)> groups = ReadIndex(indexPath, out long rows);
 
             using SafeFileHandle states = File.OpenHandle(statesPath);
             long statesData = ReadNpyHeader(states, rows, StateVectorizer.FeatureDim);
@@ -81,6 +68,41 @@ namespace DatasetCollector
         }
 
         /// <summary>
+        /// The entries of a prepared dataset's index in row order, grouped into runs of the same match
+        /// </summary>
+        internal static List<(int match, List<(long row, string name)> entries)> ReadIndex(string indexPath, out long rows)
+        {
+            List<(int match, List<(long row, string name)> entries)> groups = [];
+            rows = 0;
+            foreach (string line in File.ReadLines(indexPath).Skip(1))
+            {
+                string[] fields = line.Split(',');
+                long row = long.Parse(fields[0], CultureInfo.InvariantCulture);
+                if (row != rows) throw new InvalidOperationException($"Entry {row} of the index is not in row order.");
+                string name = fields[3];
+                int match = int.Parse(name.AsSpan(1, name.IndexOf('_') - 1), CultureInfo.InvariantCulture);
+                if (groups.Count == 0 || groups[^1].match != match) groups.Add((match, []));
+                groups[^1].entries.Add((row, name));
+                rows++;
+            }
+            return groups;
+        }
+
+        /// <summary>
+        /// Throws if a replayed entry's state differs from its stored row in the prepared states
+        /// </summary>
+        internal static void CheckStoredRow(GameState state, string name, long row, SafeFileHandle states, long statesData, float[] full, byte[] stored)
+        {
+            StateVectorizer.Current.VectorizeInto(state, full);
+            RandomAccess.Read(states, stored, statesData + row * stored.Length);
+            for (int f = 0; f < full.Length; f++)
+            {
+                if (BinaryPrimitives.ReadHalfLittleEndian(stored.AsSpan(f * sizeof(ushort))) != (Half)full[f])
+                    throw new InvalidOperationException($"{name}: the replayed state differs from its stored row {row} in feature {f}; are the collection settings the run's?");
+            }
+        }
+
+        /// <summary>
         /// The float16 views of a match's entries, each checked against its stored row first
         /// </summary>
         private static byte[] ViewsOf(int matchIdx, List<(long row, string name)> entries, CollectorSettings settings, SafeFileHandle states, long statesData)
@@ -109,14 +131,7 @@ namespace DatasetCollector
             {
                 (long row, string name) = entries[e];
                 (GameState entryState, BeliefTracker tracker) = Entry(name, samples, trackersAt);
-
-                StateVectorizer.Current.VectorizeInto(entryState, full);
-                RandomAccess.Read(states, stored, statesData + row * stored.Length);
-                for (int f = 0; f < full.Length; f++)
-                {
-                    if (BinaryPrimitives.ReadHalfLittleEndian(stored.AsSpan(f * sizeof(ushort))) != (Half)full[f])
-                        throw new InvalidOperationException($"{name}: the replayed state differs from its stored row {row} in feature {f}; are the collection settings the run's?");
-                }
+                CheckStoredRow(entryState, name, row, states, statesData, full, stored);
 
                 ViewVectorizer.VectorizeView(entryState, tracker, view);
                 Span<byte> target = result.AsSpan(e * view.Length * sizeof(ushort));
@@ -166,7 +181,7 @@ namespace DatasetCollector
         /// <summary>
         /// Checks a float16 .npy array's header against the expected shape; returns where its data starts
         /// </summary>
-        private static long ReadNpyHeader(SafeFileHandle file, long rows, int columns)
+        internal static long ReadNpyHeader(SafeFileHandle file, long rows, int columns)
         {
             byte[] start = new byte[10];
             RandomAccess.Read(file, start, 0);

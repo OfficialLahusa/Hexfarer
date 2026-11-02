@@ -7,6 +7,8 @@
     <Nullable>enable</Nullable>
     <!-- Parallel playouts allocate heavily; the workstation GC stops scaling beyond a few threads -->
     <ServerGarbageCollection>true</ServerGarbageCollection>
+    <!-- The reanalysis keeps many search trees alive at once: DATAS (the default heap count adaptation) pauses it far more -->
+    <GarbageCollectionAdaptationMode>0</GarbageCollectionAdaptationMode>
   </PropertyGroup>
 
   <ItemGroup>

@@ -44,6 +44,21 @@
                 }
             }
 
+            if (commandLine.Reanalyze is (string reanalysisIndex, string reanalysisStates, string reanalysisOutput, ReanalysisSettings reanalysis))
+            {
+                try
+                {
+                    ReanalysisResult result = Reanalysis.Run(reanalysisIndex, reanalysisStates, reanalysisOutput, reanalysis, settings, Console.Out);
+                    Console.WriteLine($"{result.Searched} of {result.Rows} entries searched ({result.Moves} moves) in {result.Elapsed:hh\\:mm\\:ss}, written to {reanalysisOutput}");
+                    return 0;
+                }
+                catch (Exception e) when (e is InvalidOperationException or IOException)
+                {
+                    Console.Error.WriteLine(e.Message);
+                    return 1;
+                }
+            }
+
             if (commandLine.CalibrateThreads)
             {
                 int threads = ThreadCalibration.FindBestThreadCount(settings, commandLine.CalibrationTime, Console.Out);

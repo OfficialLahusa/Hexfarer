@@ -30,7 +30,7 @@ def read_policy_layout(directory):
 
 class StateDataset(Dataset):
     def __init__(self, states_path, labels_path, aux_dir=None, augment_rotation=False, augment_numbers=False, augment_board=False,
-                 target_lambda=None, policy_temperature=1.0):
+                 target_lambda=None, policy_temperature=1.0, policy_dir=None):
         self.states_path = states_path
         self.labels_path = labels_path
         # Self-Play-Daten (selfplay_to_dataset.py): Target λ·onehot(Sieger) + (1-λ)·Root-q statt der gespeicherten Labels,
@@ -57,12 +57,16 @@ class StateDataset(Dataset):
                 path = os.path.join(aux_dir, f"{name}.npy")
                 if os.path.exists(path):
                     self.aux_paths[name] = path
-        # Policy-Targets, wenn alle Arrays und das Token-Layout da sind; die Brett-Symmetrien permutieren auch die Tokens
-        self.policy_layout = read_policy_layout(aux_dir)
+        # Policy-Targets, wenn alle Arrays und das Token-Layout da sind; die Brett-Symmetrien permutieren auch die Tokens.
+        # Aus policy_dir statt aus dem aux_dir, z.B. eine Reanalyse (DatasetCollector --reanalyze) mit einer Zeile pro State
+        policy_source = policy_dir or aux_dir
+        self.policy_layout = read_policy_layout(policy_source)
         self.policy_paths = {}
-        if self.policy_layout is not None and all(os.path.exists(os.path.join(aux_dir, f"{name}.npy")) for name in POLICY_ARRAYS):
-            self.policy_paths = {name: os.path.join(aux_dir, f"{name}.npy") for name in POLICY_ARRAYS}
+        if self.policy_layout is not None and all(os.path.exists(os.path.join(policy_source, f"{name}.npy")) for name in POLICY_ARRAYS):
+            self.policy_paths = {name: os.path.join(policy_source, f"{name}.npy") for name in POLICY_ARRAYS}
             self.token_symmetries = move_token_symmetries(self.policy_layout)
+        elif policy_dir is not None:
+            raise ValueError(f"{policy_dir} has no complete policy targets (policy_layout.json and {', '.join(POLICY_ARRAYS)})")
         self.max_tokens = self.policy_layout["max_tokens"][0] if self.policy_layout else 1
         self._open()
 
@@ -290,6 +294,23 @@ def parse_source(spec):
     return directory, share
 
 
+def policy_dirs(specs, sources):
+    """Aus 'QUELLE=VERZEICHNIS'-Angaben eine Funktion Quellverzeichnis -> Policy-Verzeichnis (oder None); jede Angabe muss
+    eine der Quellen treffen"""
+    def key(directory):
+        return os.path.normcase(os.path.abspath(directory))
+    mapping = {}
+    for spec in specs:
+        if "=" not in spec:
+            raise SystemExit(f"--policy-dir needs SOURCE=DIR, not {spec!r}")
+        source, directory = spec.split("=", 1)
+        mapping[key(source)] = directory
+    unknown = set(mapping) - {key(source) for source in sources if source}
+    if unknown:
+        raise SystemExit(f"--policy-dir names no --data source: {', '.join(sorted(unknown))}")
+    return lambda directory: mapping.get(key(directory)) if directory else None
+
+
 def keep_batch(batch):
     """collate_fn für Datasets mit __getitems__: der Batch ist schon fertig zusammengesetzt"""
     return batch
@@ -420,11 +441,14 @@ def main():
     # Wonach Checkpoints und Early Stopping gehen: val_loss ist nur der Value Loss, val_total_loss zählt auch Policy und
     # Aux Heads mit ihren Gewichten (bei Policy-Training wählt val_loss sonst Epochen mit schwächerer Policy)
     parser.add_argument("--monitor", default="val_loss", choices=["val_loss", "val_total_loss"])
+    # Policy-Targets einer Quelle aus einem anderen Verzeichnis (eine Zeile pro State der Quelle), z.B. die Reanalyse von v2
+    # (DatasetCollector --reanalyze): --policy-dir QUELLE=VERZEICHNIS, wiederholbar
+    parser.add_argument("--policy-dir", action="append", default=[])
     args = parser.parse_args()
 
     # Eintrag in der Run-Registry (runlog.py): Kommandozeile, Commit, Daten und am Ende der beste Checkpoint
     with runlog.begin("train", name=os.path.basename(os.path.normpath(args.checkpoint_dir)) if args.checkpoint_dir else None,
-                      inputs={"data": args.data or [args.states], "init_from": args.init_from},
+                      inputs={"data": args.data or [args.states], "init_from": args.init_from, "policy_dirs": args.policy_dir},
                       outputs={"checkpoint_dir": args.checkpoint_dir}) as run:
         run.result(**run_training(args))
 
@@ -438,8 +462,10 @@ def run_training(args):
         args.train_idx, args.val_idx, args.aux_dir = os.path.join(first, "idx_train.npy"), os.path.join(first, "idx_val.npy"), first
         if args.ranking_weight > 0 and len(sources) > 1:
             raise SystemExit("--ranking-weight works with a single data source only")
+    policy_dir_for = policy_dirs(args.policy_dir, [args.aux_dir] + [directory for directory, _ in sources])
 
-    full_ds = StateDataset(args.states, args.labels, args.aux_dir, target_lambda=args.target_lambda, policy_temperature=args.policy_temperature)
+    full_ds = StateDataset(args.states, args.labels, args.aux_dir, target_lambda=args.target_lambda, policy_temperature=args.policy_temperature,
+                           policy_dir=policy_dir_for(args.aux_dir))
     for name, weight in [("placements", args.placement_weight), ("vp_shares", args.vp_share_weight),
                          ("rounds_left", args.rounds_weight), ("sibling_groups", args.ranking_weight),
                          ("placements", args.ranking_placement_weight)]:
@@ -456,13 +482,14 @@ def run_training(args):
     augment = args.augment_rotation or args.augment_numbers or args.augment_board
     train_ds = StateDataset(args.states, args.labels, args.aux_dir, augment_rotation=args.augment_rotation,
                             augment_numbers=args.augment_numbers, augment_board=args.augment_board,
-                            target_lambda=args.target_lambda, policy_temperature=args.policy_temperature) if augment else full_ds
+                            target_lambda=args.target_lambda, policy_temperature=args.policy_temperature,
+                            policy_dir=policy_dir_for(args.aux_dir)) if augment else full_ds
     loader_args = dict(num_workers=args.num_workers, pin_memory=True, persistent_workers=True, collate_fn=keep_batch)
     if len(sources) > 1:
         datasets = [train_ds] + [StateDataset(os.path.join(directory, args.features), os.path.join(directory, "win_rates.npy"), directory,
                                               augment_rotation=args.augment_rotation, augment_numbers=args.augment_numbers,
                                               augment_board=args.augment_board, target_lambda=args.target_lambda,
-                                              policy_temperature=args.policy_temperature)
+                                              policy_temperature=args.policy_temperature, policy_dir=policy_dir_for(directory))
                                  for directory, _ in sources[1:]]
         if len({dataset.states.shape[1] for dataset in datasets}) != 1:
             raise SystemExit("The --data sources have different feature layouts")

@@ -352,6 +352,155 @@ namespace Tests
             }
         }
 
+        [Fact]
+        public void ReanalysisSearchesEveryEntryWithAChoiceAndWritesItsVisitShares()
+        {
+            var settings = new CollectorSettings { Threads = 2, Matches = 4, SamplesPerMatch = 4, PlayoutsPerSample = 2, SiblingsPerGroup = 3, Seed = 171 };
+            string datasetDirectory = CollectIntoTemporaryDirectory(settings, out _);
+            try
+            {
+                string[] names = WritePreparedIndex(datasetDirectory, out string index, out string states, out Half[][] stored);
+                var reanalysis = new ReanalysisSettings
+                {
+                    ModelPath = TestUtil.FixturePath("ValueNet", "policy_tiny.onnx"), Iterations = 48, ConcurrentSearches = 3, Nets = 1,
+                    BatchRows = 32, LeavesPerBatch = 8, Provider = Agents.Inference.InferenceProvider.Cpu,
+                };
+                string output = Path.Combine(datasetDirectory, "reanalysis");
+                ReanalysisResult result = Reanalysis.Run(index, states, output, reanalysis, settings, TextWriter.Null);
+
+                long[] offsets = ReadNpyValues(Path.Combine(output, "policy_offsets.npy"), "<i8", out _, (b, i) => BinaryPrimitives.ReadInt64LittleEndian(b[(i * 8)..]));
+                short[] tokens = ReadNpyValues(Path.Combine(output, "policy_tokens.npy"), "<i2", out string tokenShape, (b, i) => BinaryPrimitives.ReadInt16LittleEndian(b[(i * 2)..]));
+                byte[] weights = ReadNpyValues(Path.Combine(output, "policy_weights.npy"), "|u1", out _, (b, i) => b[i]);
+                float[] targets = ReadNpyValues(Path.Combine(output, "policy_targets.npy"), "<f4", out _, (b, i) => BinaryPrimitives.ReadSingleLittleEndian(b[(i * 4)..]));
+                float[] rootValues = ReadNpyValues(Path.Combine(output, "root_q.npy"), "<f4", out string valueShape, (b, i) => BinaryPrimitives.ReadSingleLittleEndian(b[(i * 4)..]));
+                int maxTokens = Agents.Inference.ActionEncoding.MaxTokens;
+                Assert.Equal($"({targets.Length}, {maxTokens})", tokenShape);
+                Assert.Equal($"({names.Length}, 4)", valueShape);
+                Assert.Equal(names.Length + 1, offsets.Length);
+                Assert.Equal((0L, (long)targets.Length), (offsets[0], offsets[^1]));
+                Assert.Equal(tokens.Length, weights.Length);
+
+                // Every entry against its own replay from the sample's save file: searched exactly where there is a choice,
+                // its moves the legal moves in the root's order, encoded, with visit shares that add up to 1
+                int searched = 0;
+                short[] expectedTokens = new short[maxTokens];
+                float[] expectedWeights = new float[maxTokens];
+                for (int i = 0; i < names.Length; i++)
+                {
+                    GameState state = SaveFileSerializer.Load(Path.Combine(datasetDirectory, "input", names[i] + ".yaml")).GameState;
+                    List<Action> legal = Agents.MCTS.MCTSTree.GetValidActions(state);
+                    int count = (int)(offsets[i + 1] - offsets[i]);
+                    if (state.HasEnded || legal.Count < 2)
+                    {
+                        Assert.Equal(0, count);
+                        Assert.True(float.IsNaN(rootValues[i * 4]), names[i]);
+                        continue;
+                    }
+                    searched++;
+                    Assert.Equal(legal.Count, count);
+                    for (int m = 0; m < count; m++)
+                    {
+                        int used = Agents.Inference.ActionEncoding.Encode(legal[m], expectedTokens, expectedWeights);
+                        long move = offsets[i] + m;
+                        for (int t = 0; t < maxTokens; t++)
+                        {
+                            Assert.Equal(t < used ? expectedTokens[t] : (short)-1, tokens[move * maxTokens + t]);
+                            Assert.Equal(t < used ? (byte)expectedWeights[t] : (byte)0, weights[move * maxTokens + t]);
+                        }
+                    }
+                    float[] shares = targets[(int)offsets[i]..(int)offsets[i + 1]];
+                    Assert.All(shares, share => Assert.InRange(share, 0f, 1f));
+                    Assert.Equal(1.0, shares.Sum(share => (double)share), 5);
+                    Assert.All(rootValues[(i * 4)..(i * 4 + 4)], value => Assert.True(float.IsFinite(value)));
+                }
+                Assert.Equal(searched, result.Searched);
+                Assert.InRange(searched, 1, names.Length - 1);
+
+                using (var metadata = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "metadata.json"))))
+                {
+                    Assert.Equal("finished", metadata.RootElement.GetProperty("status").GetString());
+                    Assert.Equal(48, metadata.RootElement.GetProperty("search").GetProperty("iterations").GetInt32());
+                }
+                Assert.True(File.Exists(Path.Combine(output, "policy_layout.json")));
+                Assert.Throws<InvalidOperationException>(() => Reanalysis.Run(index, states, output, reanalysis, settings, TextWriter.Null));
+
+                // Only the chosen match runs are searched; the others keep their rows without moves
+                string subset = Path.Combine(datasetDirectory, "subset");
+                Reanalysis.Run(index, states, subset, reanalysis with { FirstRun = 1, Runs = 2 }, settings, TextWriter.Null);
+                long[] subsetOffsets = ReadNpyValues(Path.Combine(subset, "policy_offsets.npy"), "<i8", out _, (b, i) => BinaryPrimitives.ReadInt64LittleEndian(b[(i * 8)..]));
+                int[] runs = names.Select(name => int.Parse(name[1..name.IndexOf('_')], CultureInfo.InvariantCulture)).Distinct().ToArray();
+                for (int i = 0; i < names.Length; i++)
+                {
+                    int run = Array.IndexOf(runs, int.Parse(names[i][1..names[i].IndexOf('_')], CultureInfo.InvariantCulture));
+                    long expected = run is 1 or 2 ? offsets[i + 1] - offsets[i] : 0;
+                    Assert.Equal(expected, subsetOffsets[i + 1] - subsetOffsets[i]);
+                }
+
+                // A stored row that doesn't match its replay stops the reanalysis before anything is written
+                stored[names.Length / 2] = stored[names.Length / 2].Select(value => (Half)((float)value + 1)).ToArray();
+                WriteNpy(states, stored);
+                string corrupted = Path.Combine(datasetDirectory, "corrupted");
+                Assert.Throws<InvalidOperationException>(() => Reanalysis.Run(index, states, corrupted, reanalysis, settings, TextWriter.Null));
+                Assert.False(Directory.Exists(corrupted));
+            }
+            finally
+            {
+                DeleteTemporaryDirectory(datasetDirectory);
+            }
+        }
+
+        [Fact]
+        public void TheCommandLineSetsTheReanalysis()
+        {
+            var commandLine = CommandLine.Parse(["--seed", "20261025", "--reanalyze", "index.csv", "states.npy", "out", "--model", "net.onnx", "--iterations", "800",
+                "--first-run", "10", "--runs", "500", "--concurrent", "64", "--nets", "2", "--batch", "256", "--leaves", "8", "--search-exploration", "1.0", "--provider", "cuda"]);
+            Assert.NotNull(commandLine.Reanalyze);
+            (string index, string states, string output, ReanalysisSettings reanalysis) = commandLine.Reanalyze!.Value;
+            Assert.Equal(("index.csv", "states.npy", "out", 20261025UL), (index, states, output, commandLine.Settings.Seed));
+            Assert.Equal(("net.onnx", 800, 10, 500, 64, 2, 256, 8, 1.0, Agents.Inference.InferenceProvider.Cuda),
+                (reanalysis.ModelPath, reanalysis.Iterations, reanalysis.FirstRun, reanalysis.Runs, reanalysis.ConcurrentSearches, reanalysis.Nets,
+                 reanalysis.BatchRows, reanalysis.LeavesPerBatch, reanalysis.Exploration, reanalysis.Provider));
+            Assert.Null(CommandLine.Parse([]).Reanalyze);
+            Assert.Throws<ArgumentException>(() => CommandLine.Parse(["--reanalyze", "i", "s", "o"]));
+            Assert.Throws<ArgumentException>(() => CommandLine.Parse(["--reanalyze", "i", "s", "o", "--model", "m", "--batch", "4", "--leaves", "8"]));
+            Assert.Throws<ArgumentException>(() => CommandLine.Parse(["--provider", "tpu"]));
+        }
+
+        /// <summary>
+        /// Writes a collected dataset's samples as a prepared dataset: dataset_index.csv (matches in order, siblings after their
+        /// sample) and states.npy with their vectors in that order; returns the entry names and the stored rows
+        /// </summary>
+        private static string[] WritePreparedIndex(string datasetDirectory, out string index, out string states, out Half[][] stored)
+        {
+            List<SampleRecord> records = ReadSampleRecords(datasetDirectory);
+            Dictionary<string, Half[]> vectors = ReadVectorChunks(Path.Combine(datasetDirectory, "vectors"));
+            string[] names = records.Select(record => record.Name)
+                .OrderBy(name => int.Parse(name[1..name.IndexOf('_')], CultureInfo.InvariantCulture)).ThenBy(name => name, StringComparer.Ordinal).ToArray();
+            index = Path.Combine(datasetDirectory, "dataset_index.csv");
+            File.WriteAllLines(index, ["entry_idx,group_idx,subdir_name,entry_name", .. names.Select((name, i) => $"{i},0,.,{name}")]);
+            states = Path.Combine(datasetDirectory, "states.npy");
+            stored = names.Select(name => vectors[name]).ToArray();
+            WriteNpy(states, stored);
+            return names;
+        }
+
+        /// <summary>
+        /// The values of a little-endian .npy array of the given type, its shape as written in the header
+        /// </summary>
+        private static T[] ReadNpyValues<T>(string path, string descr, out string shape, Func<ReadOnlySpan<byte>, int, T> read)
+        {
+            byte[] bytes = File.ReadAllBytes(path);
+            Assert.Equal(0x93, bytes[0]);
+            int headerLength = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(8));
+            string header = System.Text.Encoding.ASCII.GetString(bytes, 10, headerLength);
+            Assert.Contains($"'descr': '{descr}'", header);
+            Assert.Equal(0, (10 + headerLength) % 64);
+            shape = header[(header.IndexOf("'shape': ", StringComparison.Ordinal) + 9)..(header.IndexOf(')') + 1)];
+            int itemBytes = int.Parse(descr[2..], CultureInfo.InvariantCulture);
+            byte[] data = bytes[(10 + headerLength)..];
+            return Enumerable.Range(0, data.Length / itemBytes).Select(i => read(data, i)).ToArray();
+        }
+
         private static void WriteNpy(string path, Half[][] rows)
         {
             using FileStream file = File.Create(path);

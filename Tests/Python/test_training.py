@@ -21,7 +21,7 @@ try:
     import torch
     from export_onnx import export_model
     from state_value_net import StateValueModule, masked_kl, policy_cross_entropy, sibling_ranking
-    from train import GroupBatchSampler, MixedDataset, MixSampler, StateDataset, widen_state_dict
+    from train import GroupBatchSampler, MixedDataset, MixSampler, StateDataset, policy_dirs, widen_state_dict
 except ImportError as error:  # pragma: no cover - depends on the environment
     IMPORT_ERROR = error
 else:
@@ -258,6 +258,39 @@ class TrainingTest(unittest.TestCase):
             np.testing.assert_array_equal(batch["policy_mask"].sum(dim=1).numpy(), [3, 2, 0])
             np.testing.assert_array_equal(batch["policy_tokens"][2].numpy(), -1)
             np.testing.assert_allclose(batch["policy_targets"][0].numpy(), [1, 0, 0])
+
+    def test_policy_targets_can_come_from_another_directory(self):
+        # A reanalysis of a value-only source: one entry per state, entries without moves stay out of the policy loss
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            source, reanalysis = os.path.join(directory, "v2"), os.path.join(directory, "reanalysis")
+            write_source(source, rows=3, features=8, label_dtype=np.float16, self_play=False)
+            os.makedirs(reanalysis)
+            np.save(os.path.join(reanalysis, "policy_offsets.npy"), np.array([0, 0, 3, 3]))
+            np.save(os.path.join(reanalysis, "policy_tokens.npy"), np.array([[1, -1], [2, -1], [3, 21]], dtype=np.int16))
+            np.save(os.path.join(reanalysis, "policy_weights.npy"), np.ones((3, 2), dtype=np.uint8))
+            np.save(os.path.join(reanalysis, "policy_targets.npy"), np.array([0.25, 0.75, 0], dtype=np.float32))
+            with open(os.path.join(reanalysis, "policy_layout.json"), "w") as file:
+                json.dump(POLICY_LAYOUT | {"max_tokens": [2]}, file)
+
+            plain = StateDataset(os.path.join(source, "states.npy"), os.path.join(source, "win_rates.npy"), source)
+            self.assertEqual(plain.policy_paths, {})
+            dataset = StateDataset(os.path.join(source, "states.npy"), os.path.join(source, "win_rates.npy"), source, policy_dir=reanalysis)
+            batch = dataset.__getitems__([0, 1, 2])
+            np.testing.assert_array_equal(batch["policy_mask"].sum(dim=1).numpy(), [0, 3, 0])
+            np.testing.assert_allclose(batch["policy_targets"][1].numpy(), [0.25, 0.75, 0])
+            np.testing.assert_array_equal(batch["policy_tokens"][1, 2].numpy(), [3, 21])
+            # The value labels stay the source's
+            np.testing.assert_allclose(batch["y"].numpy(), plain.__getitems__([0, 1, 2])["y"].numpy())
+
+            with self.assertRaises(ValueError):
+                StateDataset(os.path.join(source, "states.npy"), os.path.join(source, "win_rates.npy"), source, policy_dir=directory)
+            for_source = policy_dirs([f"{source}={reanalysis}"], [source])
+            self.assertEqual(for_source(source + os.sep), reanalysis)
+            self.assertIsNone(for_source(directory))
+            with self.assertRaises(SystemExit):
+                policy_dirs([f"{directory}={reanalysis}"], [source])
+            with self.assertRaises(SystemExit):
+                policy_dirs([reanalysis], [source])
 
     def test_a_model_with_a_policy_head_exports_queries_and_embeddings(self):
         module = StateValueModule(in_dim=32, hidden=16, policy_weight=1.0, policy_types=19, policy_vocabulary=213, policy_dim=4)
