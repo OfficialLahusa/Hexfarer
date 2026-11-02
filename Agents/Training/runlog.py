@@ -278,7 +278,12 @@ def load(root=None):
                 run["results"].append(event)
             elif kind == "end":
                 run["end"] = event
-    return sorted(runs.values(), key=lambda run: run.get("time", ""))
+    def started(run):
+        try:
+            return datetime.datetime.fromisoformat(run["time"].replace("Z", "+00:00")).timestamp()
+        except (KeyError, ValueError, AttributeError):
+            return 0.0
+    return sorted(runs.values(), key=started)
 
 
 def merge(root, lines):
@@ -302,8 +307,8 @@ def summary(run):
     end = run.get("end") or {}
     repo = run.get("repo") or {}
     commit = (run.get("binary") or {}).get("commit") or repo.get("commit") or ""
-    state = f"exit {end['exit']}" if "exit" in end else "running?"
-    duration = f"{end['seconds'] / 60:.0f} min" if "seconds" in end else ""
+    state = "imported" if end.get("imported") and end.get("exit") is None else f"exit {end['exit']}" if "exit" in end else "running?"
+    duration = f"{end['seconds'] / 60:.0f} min" if end.get("seconds") is not None else ""
     result = end.get("last_line") or ""
     for item in run.get("results", []):
         fields = {k: v for k, v in item.items() if k not in ("id", "time", "inputs", "outputs", "kind_detail", "name")}
@@ -313,44 +318,95 @@ def summary(run):
             f"{state:<8} {duration:>7}  {result[:120]}")
 
 
+def _wandb_run_file(path):
+    """Metadata, final summary and exit of an offline W&B run, read from its .wandb file (offline runs keep them only
+    there): ({startedAt, host, program, executable, args, git}, {summary key: value}, {exit_code, runtime}), or None"""
+    try:
+        from wandb.proto import wandb_internal_pb2 as pb
+        from wandb.sdk.internal.datastore import DataStore
+    except ImportError:
+        return None
+    store = DataStore()
+    store.open_for_scan(path)
+    metadata, final, exit_info = None, {}, {}
+    while True:
+        data = store.scan_data()
+        if data is None:
+            break
+        record = pb.Record()
+        record.ParseFromString(data)
+        kind = record.WhichOneof("record_type")
+        if kind == "environment" and metadata is None:
+            env = record.environment
+            metadata = {"startedAt": datetime.datetime.fromtimestamp(env.started_at.seconds, datetime.timezone.utc).isoformat(),
+                        "host": env.host, "program": env.program, "executable": env.executable, "args": list(env.args),
+                        "git": {"commit": env.git.commit}}
+        elif kind == "summary":
+            for item in record.summary.update:
+                final[item.key or "/".join(item.nested_key)] = json.loads(item.value_json)
+        elif kind == "exit":
+            exit_info = {"exit_code": record.exit.exit_code, "runtime": record.exit.runtime}
+    return (metadata, final, exit_info) if metadata else None
+
+
 def import_wandb(directories, root=None):
     """Backfill: a train run for every W&B run folder not yet in the registry (args, commit and host from its metadata,
-    final metrics from its summary); returns how many were added"""
+    final metrics from its summary, exit code and runtime if known); returns how many were added"""
     root = root or registry_root()
-    known = {run.get("wandb_id") for run in load(root)}
+    # Live runs keep their W&B id in a result, imported ones at the top
+    known = {run.get("wandb_id") for run in load(root)} | {result.get("wandb_id") for run in load(root) for result in run["results"]}
     added = 0
     for directory in directories:
         for entry in sorted(os.listdir(directory)):
-            files = os.path.join(directory, entry, "files")
-            metadata_path = os.path.join(files, "wandb-metadata.json")
-            if not os.path.isfile(metadata_path):
-                continue
+            folder = os.path.join(directory, entry)
             wandb_id = entry.rsplit("-", 1)[-1]
-            if wandb_id in known:
+            if not os.path.isdir(folder) or wandb_id in known:
                 continue
-            with open(metadata_path, encoding="utf-8") as file:
-                metadata = json.load(file)
-            final = {}
-            summary_path = os.path.join(files, "wandb-summary.json")
-            if os.path.isfile(summary_path):
-                with open(summary_path, encoding="utf-8") as file:
-                    final = {k: v for k, v in json.load(file).items() if k.startswith(("val_", "epoch")) and isinstance(v, (int, float))}
+            metadata_path = os.path.join(folder, "files", "wandb-metadata.json")
+            summary_path = os.path.join(folder, "files", "wandb-summary.json")
+            run_file = os.path.join(folder, f"run-{wandb_id}.wandb")
+            exit_info = {}
+            if os.path.isfile(metadata_path):
+                with open(metadata_path, encoding="utf-8") as file:
+                    metadata = json.load(file)
+                final = {}
+                if os.path.isfile(summary_path):
+                    with open(summary_path, encoding="utf-8") as file:
+                        final = json.load(file)
+            elif os.path.isfile(run_file) and (parsed := _wandb_run_file(run_file)):
+                metadata, final, exit_info = parsed
+            else:
+                continue
+            metrics = {k: v for k, v in final.items() if k.startswith(("val_", "epoch")) and isinstance(v, (int, float))}
             argv = [metadata.get("executable") or "python", metadata.get("program") or "train.py", *metadata.get("args", [])]
-            run_id = f"{metadata.get('startedAt', '')[:19].replace('-', '').replace(':', '').replace('T', '-')}-{(metadata.get('host') or 'unknown').lower()}-train-{wandb_id}"
-            started = metadata.get("startedAt")
-            append({"event": "start", "id": run_id, "time": started, "kind": "train", "name": wandb_id, "machine": metadata.get("host"),
+            # W&B keeps UTC; the registry keeps local time like its live entries
+            local = datetime.datetime.fromisoformat(metadata["startedAt"].replace("Z", "+00:00")).astimezone()
+            started = local.isoformat(timespec="seconds")
+            run_id = f"{local.strftime('%Y%m%d-%H%M%S')}-{(metadata.get('host') or 'unknown').lower()}-train-{wandb_id}"
+            args = metadata.get("args", [])
+            # Named like live runs after the checkpoint folder, if the command gave one
+            name = wandb_id
+            if "--checkpoint-dir" in args[:-1]:
+                parts = os.path.normpath(args[args.index("--checkpoint-dir") + 1]).replace("\\", "/").split("/")
+                # A self-play generation trains into <loop>/<generation>/checkpoints
+                name = "/".join(parts[-3:-1]) if parts[-1] == "checkpoints" and len(parts) >= 3 else parts[-1]
+            append({"event": "start", "id": run_id, "time": started, "kind": "train", "name": name, "machine": metadata.get("host"),
                     "argv": argv, "command": shlex.join(argv), "cwd": None, "parent": None, "inputs": {}, "outputs": {},
                     "repo": {"commit": (metadata.get("git") or {}).get("commit"), "dirty": None},
                     "wandb_id": wandb_id, "note": "imported from W&B (no dirty flag)"}, root)
-            if final:
-                append({"event": "result", "id": run_id, "time": started, **final}, root)
+            if metrics:
+                append({"event": "result", "id": run_id, "time": started, **metrics}, root)
+            runtime = exit_info.get("runtime", final.get("_runtime"))
+            append({"event": "end", "id": run_id, "time": started, "exit": exit_info.get("exit_code"),
+                    "seconds": round(float(runtime), 1) if isinstance(runtime, (int, float)) else None, "imported": True}, root)
+            known.add(wandb_id)
             added += 1
     return added
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Central run registry")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="action", required=True)
 
     run_parser = sub.add_parser("run", help="run a command as a registered run: runlog.py run --kind K [--name N] -- COMMAND ...")
     run_parser.add_argument("--kind", required=True, choices=KINDS)
@@ -386,18 +442,18 @@ def main(argv=None):
     add_parser.add_argument("--note", default="reconstructed")
     args = parser.parse_args(argv)
 
-    if args.command == "run":
+    if args.action == "run":
         rest = args.rest[1:] if args.rest[:1] == ["--"] else args.rest
         if not rest:
             parser.error("run needs a command after --")
         pairs = lambda items: dict(item.split("=", 1) for item in items)  # noqa: E731
         return wrap(args.kind, rest, name=args.name, note=args.note, inputs=pairs(args.input), outputs=pairs(args.output))
-    if args.command == "list":
+    if args.action == "list":
         runs = [run for run in load() if (not args.kind or run.get("kind") == args.kind) and (not args.name or args.name in str(run.get("name")))]
         for run in runs[-args.last:]:
             print(summary(run))
         return 0
-    if args.command == "show":
+    if args.action == "show":
         runs = load()
         matches = [run for run in runs if args.id in run["id"]] or [run for run in runs if run.get("name") == args.id]
         if len(matches) != 1:
@@ -405,7 +461,7 @@ def main(argv=None):
             return 1
         print(json.dumps(matches[0], indent=2, ensure_ascii=False))
         return 0
-    if args.command == "sync":
+    if args.action == "sync":
         ssh = shlex.split(args.ssh)
         remote = subprocess.run(ssh + [f"cat {shlex.quote(args.remote_dir)}/{REGISTRY_FILE} 2>/dev/null"], capture_output=True, check=True)
         lines = remote.stdout.decode("utf-8").splitlines()
@@ -413,22 +469,26 @@ def main(argv=None):
         # The run folders (console logs, diffs) of the runs not here yet
         ids = sorted({json.loads(line)["id"] for line in lines if line.strip()} - set(os.listdir(registry_root())))
         if ids:
+            # Only runs started live have a folder; tar skips the others
             pack = subprocess.Popen(ssh + [f"cd {shlex.quote(args.remote_dir)} && tar cf - " + " ".join(shlex.quote(i) for i in ids) + " 2>/dev/null"],
                                     stdout=subprocess.PIPE)
             subprocess.run(["tar", "xf", "-"], stdin=pack.stdout, cwd=registry_root(), check=False)
             pack.wait()
-        print(f"{added} new events, {len(ids)} run folders")
+        copied = sum(1 for run_id in ids if os.path.isdir(os.path.join(registry_root(), run_id)))
+        print(f"{added} new events, {copied} run folders")
         return 0
-    if args.command == "import-wandb":
+    if args.action == "import-wandb":
         print(f"{import_wandb(args.directories)} runs imported")
         return 0
-    if args.command == "add":
+    if args.action == "add":
         run_id = f"{args.time[:19].replace('-', '').replace(':', '').replace('T', '-')}-{args.machine.lower()}-{args.kind}-{secrets.token_hex(2)}"
         append({"event": "start", "id": run_id, "time": args.time, "kind": args.kind, "name": args.name, "machine": args.machine,
                 "argv": shlex.split(args.command), "command": args.command, "cwd": None, "parent": None, "inputs": {}, "outputs": {},
                 "repo": {"commit": args.commit, "dirty": None}, "note": args.note})
         if args.result:
             append({"event": "result", "id": run_id, "time": args.time, "summary": args.result})
+        # Entered after the fact: finished, exit code and duration unknown
+        append({"event": "end", "id": run_id, "time": args.time, "exit": None, "seconds": None, "imported": True})
         print(run_id)
         return 0
     return 1

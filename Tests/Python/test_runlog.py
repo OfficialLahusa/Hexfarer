@@ -207,6 +207,19 @@ class RunlogTest(unittest.TestCase):
         self.assertEqual(duel["end"]["last_line"], "decided: +5 Elo [-10, +20]")
         self.assertIsNone(os.environ.get(runlog.ENV_PARENT), "the loop must leave the environment as it found it")
 
+    def test_the_command_line_adds_shows_and_lists_runs(self):
+        code = runlog.main(["add", "--kind", "collect", "--name", "v2", "--machine", "desktop", "--time", "2026-10-25T02:00:00+02:00",
+                            "--command", "DatasetCollector --seed 20261025", "--result", "1M matches"])
+        self.assertEqual(code, 0)
+        (run,) = runlog.load()
+        self.assertEqual((run["kind"], run["name"], run["command"], run["argv"]), ("collect", "v2", "DatasetCollector --seed 20261025",
+                                                                               ["DatasetCollector", "--seed", "20261025"]))
+        self.assertEqual(run["results"][0]["summary"], "1M matches")
+        self.assertTrue(run["end"]["imported"], "a run entered after the fact is finished, not running")
+        self.assertEqual(runlog.main(["show", "v2"]), 0)
+        self.assertEqual(runlog.main(["show", "nothing-like-this"]), 1)
+        self.assertEqual(runlog.main(["list", "--kind", "collect"]), 0)
+
     def test_wandb_runs_are_imported_once(self):
         wandb = os.path.join(self.directory.name, "wandb")
         files = os.path.join(wandb, "run-20261027_234503-mhn8ihqb", "files")
@@ -216,12 +229,68 @@ class RunlogTest(unittest.TestCase):
                        "args": ["--lr", "3e-4"], "git": {"commit": "abc"}}, file)
         with open(os.path.join(files, "wandb-summary.json"), "w", encoding="utf-8") as file:
             json.dump({"val_loss": 0.25, "epoch": 3, "train_loss": 0.2, "_runtime": 9}, file)
-        self.assertEqual(runlog.import_wandb([wandb]), 1)
+        # An offline run keeps its metadata only in its .wandb file
+        try:
+            from wandb.proto import wandb_internal_pb2 as pb
+            from wandb.sdk.internal.datastore import DataStore
+        except ImportError:
+            pb = None
+        if pb is not None:
+            offline = os.path.join(wandb, "offline-run-20261102_101323-7fu9314k")
+            os.makedirs(offline)
+            store = DataStore()
+            store.open_for_write(os.path.join(offline, "run-7fu9314k.wandb"))
+            record = pb.Record()
+            record.environment.host, record.environment.program, record.environment.executable = "server", "train.py", "python"
+            record.environment.args.extend(["--monitor", "val_total_loss", "--checkpoint-dir", "/runs/v2policy/structured-ft/"])
+            record.environment.git.commit = "def"
+            record.environment.started_at.seconds = 1793614403
+            store.write(record)
+            for key, value in (("val_loss", "0.4"), ("val_loss", "0.3"), ("train_loss", "0.1")):
+                record = pb.Record()
+                item = record.summary.update.add()
+                item.key, item.value_json = key, value
+                store.write(record)
+            record = pb.Record()
+            record.exit.exit_code, record.exit.runtime = 0, 120
+            store.write(record)
+            store.close()
+
+        # A run that registered itself live keeps its W&B id in a result and must not come in a second time
+        live = os.path.join(wandb, "offline-run-20261102_120000-livelive")
+        os.makedirs(os.path.join(live, "files"))
+        with open(os.path.join(live, "files", "wandb-metadata.json"), "w", encoding="utf-8") as file:
+            json.dump({"startedAt": "2026-11-02T11:00:00Z", "host": "desktop", "args": []}, file)
+        loop_run = os.path.join(wandb, "offline-run-20261031_062520-kt5fwcz5", "files")
+        os.makedirs(loop_run)
+        with open(os.path.join(loop_run, "wandb-metadata.json"), "w", encoding="utf-8") as file:
+            json.dump({"startedAt": "2026-10-31T05:25:20Z", "host": "server",
+                       "args": ["--checkpoint-dir", "/home/x/loop2/gen006/checkpoints"]}, file)
+        with runlog.begin("train", name="live") as run:
+            run.result(wandb_id="livelive")
+
+        self.assertEqual(runlog.import_wandb([wandb]), 2 if pb is None else 3)
         self.assertEqual(runlog.import_wandb([wandb]), 0)
-        (run,) = runlog.load()
-        self.assertEqual((run["kind"], run["wandb_id"], run["repo"]["commit"], run["machine"]), ("train", "mhn8ihqb", "abc", "desktop"))
+        self.assertEqual(len(runlog.load()), 3 if pb is None else 4)
+        self.assertEqual(next(r for r in runlog.load() if r.get("wandb_id") == "kt5fwcz5")["name"], "loop2/gen006",
+                         "a self-play generation's training is named after its generation")
+        runs = {run["wandb_id"]: run for run in runlog.load() if "wandb_id" in run}
+        run = runs["mhn8ihqb"]
+        self.assertEqual(run["time"], runlog.datetime.datetime(2026, 10, 27, 23, 45, 3, tzinfo=runlog.datetime.timezone.utc).astimezone().isoformat(),
+                         "imported times are local like live ones")
+        self.assertEqual((run["kind"], run["repo"]["commit"], run["machine"]), ("train", "abc", "desktop"))
         self.assertEqual(run["argv"], ["python", "train.py", "--lr", "3e-4"])
         self.assertEqual(run["results"][0], {"id": run["id"], "time": run["time"], "val_loss": 0.25, "epoch": 3})
+        self.assertEqual((run["end"]["exit"], run["end"]["seconds"]), (None, 9.0))
+        if pb is not None:
+            offline = runs["7fu9314k"]
+            self.assertEqual((offline["machine"], offline["repo"]["commit"]), ("server", "def"))
+            self.assertEqual(offline["argv"], ["python", "train.py", "--monitor", "val_total_loss", "--checkpoint-dir", "/runs/v2policy/structured-ft/"])
+            self.assertEqual(offline["name"], "structured-ft")
+            self.assertEqual(run["name"], "mhn8ihqb", "without a checkpoint folder the W&B id names the run")
+            self.assertEqual(offline["results"][0]["val_loss"], 0.3, "the last summary update counts")
+            self.assertNotIn("train_loss", offline["results"][0])
+            self.assertEqual((offline["end"]["exit"], offline["end"]["seconds"]), (0, 120.0))
 
 
 if __name__ == "__main__":
