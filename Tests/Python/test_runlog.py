@@ -5,6 +5,8 @@ sync merges without duplicates; .NET build commits, dirty diffs and W&B runs are
 Run from the repository root:  python -m unittest discover -s Tests/Python -v
 """
 
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -219,6 +221,25 @@ class RunlogTest(unittest.TestCase):
         self.assertEqual(runlog.main(["show", "v2"]), 0)
         self.assertEqual(runlog.main(["show", "nothing-like-this"]), 1)
         self.assertEqual(runlog.main(["list", "--kind", "collect"]), 0)
+
+        # A name that is also part of other runs' ids (duels named after it) still finds its own run
+        for name in ("v2p-structured-ft-vs-kt5fwcz5", "v2p-structured-ft-vs-mlp-ft"):
+            # As the backfill writes them: the duel's name inside the id
+            duel_id = f"20261102-121800-server-duel-{name}"
+            runlog.append({"event": "start", "id": duel_id, "time": "2026-11-02T12:18:00+01:00", "kind": "duel", "name": name})
+            runlog.append({"event": "end", "id": duel_id, "time": "2026-11-02T12:50:00+01:00", "exit": None, "imported": True})
+        trained = runlog.start("train", name="structured-ft", argv=["train.py"])
+        trained.end(0)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(runlog.main(["show", "structured-ft"]), 0)
+        self.assertEqual(json.loads(output.getvalue())["id"], trained.id)
+        # Ambiguous: lists the candidates
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(runlog.main(["show", "v2p-structured"]), 1)
+        self.assertIn("2 runs match", output.getvalue())
+        self.assertIn("v2p-structured-ft-vs-mlp-ft", output.getvalue())
 
     def test_wandb_runs_are_imported_once(self):
         wandb = os.path.join(self.directory.name, "wandb")

@@ -455,9 +455,14 @@ def main(argv=None):
         return 0
     if args.action == "show":
         runs = load()
-        matches = [run for run in runs if args.id in run["id"]] or [run for run in runs if run.get("name") == args.id]
+        # The most exact kind of match wins: the id, the name, then part of an id, then part of a name
+        query = args.id
+        matches = ([run for run in runs if run["id"] == query] or [run for run in runs if run.get("name") == query]
+                   or [run for run in runs if query in run["id"]] or [run for run in runs if query in str(run.get("name") or "")])
         if len(matches) != 1:
-            print(f"{len(matches)} runs match {args.id!r}")
+            print(f"{len(matches)} runs match {query!r}" + (", show one by its id:" if matches else ""))
+            for run in matches[:30]:
+                print(summary(run))
             return 1
         print(json.dumps(matches[0], indent=2, ensure_ascii=False))
         return 0
