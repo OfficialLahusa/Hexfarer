@@ -119,7 +119,7 @@ class Run:
         return os.path.join(self.root, self.id)
 
     def result(self, **fields):
-        append({"event": "result", "id": self.id, "time": now(), **fields}, self.root)
+        self._append({"event": "result", "id": self.id, "time": now(), **fields})
 
     def end(self, exit_code=0, **fields):
         """Writes the end event once; later calls do nothing"""
@@ -127,9 +127,17 @@ class Run:
             return
         self.ended = True
         if not self.attached:
-            append({"event": "end", "id": self.id, "time": now(), "exit": exit_code,
-                    "seconds": round(time.time() - self.started, 1), **fields}, self.root)
+            self._append({"event": "end", "id": self.id, "time": now(), "exit": exit_code,
+                          "seconds": round(time.time() - self.started, 1), **fields})
         self._restore_env()
+
+    def _append(self, event):
+        """An event of the started run: a registry that can't be written then is reported but doesn't stop the work, which
+        may have run for hours (the start event still has to be written, so no run goes unrecorded)"""
+        try:
+            append(event, self.root)
+        except OSError as error:
+            print(f"runlog: could not record the {event['event']} of run {self.id} in {self.root}: {error}", file=sys.stderr)
 
     def _enter_env(self):
         # Processes started from here on belong to this run

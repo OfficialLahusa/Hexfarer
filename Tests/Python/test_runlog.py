@@ -97,6 +97,24 @@ class RunlogTest(unittest.TestCase):
         self.assertEqual(crashed["end"]["exit"], 1)
         self.assertIn("boom", crashed["end"]["error"])
 
+    def test_a_registry_that_fails_during_a_run_does_not_stop_the_work(self):
+        os.environ[runlog.ENV_PARENT] = "the-caller"
+        run = runlog.begin("train", name="long")
+        # The registry can't be written any more (a directory took the file's place)
+        registry = os.path.join(self.root, runlog.REGISTRY_FILE)
+        os.replace(registry, registry + ".saved")
+        os.makedirs(registry)
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            run.result(best_checkpoint="epoch=7.ckpt")
+            run.end(0)
+        self.assertIn("could not record the result", errors.getvalue())
+        self.assertIn("could not record the end", errors.getvalue())
+        self.assertEqual(os.environ[runlog.ENV_PARENT], "the-caller")
+        # A run that can't record its start doesn't start
+        with self.assertRaises(OSError):
+            runlog.start("train", name="unrecorded", argv=["x"])
+
     def test_every_kind_of_run_can_be_registered(self):
         for kind in ("train", "export", "precision", "selfplay-loop", "selfplay-gen", "collect", "convert", "reanalysis", "duel", "bench", "other"):
             runlog.start(kind, name=kind, argv=["x"]).end(0)
