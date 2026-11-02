@@ -89,6 +89,17 @@ class StructuredNetTest(unittest.TestCase):
         self.assertTrue(np.array_equal(neighbor_buildings[:, 5:].sum(axis=1), intersection_neighbors @ built))
         del relative
 
+    def test_absolute_seats_keep_the_seat_order(self):
+        model = small_net(aux_heads=True, relative_seats=False)
+        x = fixture("midgame")
+        x = torch.tensor(rotate_features(x, 1 if x[3:7].argmax() == 0 else 0)[None])
+        self.assertNotEqual(int(x[0, 3:7].argmax()), 0, "another player than player 0 should be to act")
+        with torch.no_grad():
+            _, _, frame = model.encode(x)
+            self.assertEqual(frame.tolist(), [0])
+            outputs = model.forward_all(x)
+        self.assertEqual(outputs["logits"].shape, (1, 4))
+
     def test_exports_with_parity(self):
         model = small_net(aux_heads=True, policy_types=3, policy_vocabulary=10, policy_dim=8)
         model.placements_trained = True

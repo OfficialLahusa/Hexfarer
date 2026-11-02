@@ -62,8 +62,10 @@ def _mlp(inputs: int, hidden: int, outputs: int) -> nn.Module:
 
 class StructuredValueNet(nn.Module):
     def __init__(self, in_dim, hidden=2048, aux_heads=False, normalize_inputs=False, policy_types=0, policy_vocabulary=0,
-                 policy_dim=64, widths=(32, 16, 8, 128)):
+                 policy_dim=64, widths=(32, 16, 8, 128), relative_seats=True):
         super().__init__()
+        # Without relative seats (an ablation) every state is encoded in absolute seat order like in the MLP
+        self.relative_seats = relative_seats
         if normalize_inputs:
             self.register_buffer("input_mean", torch.zeros(in_dim))
             self.register_buffer("input_scale", torch.ones(in_dim))
@@ -114,7 +116,7 @@ class StructuredValueNet(nn.Module):
 
     def symmetrize_normalization(self):
         """Mean and scale averaged over the players' copies of each feature, so they are the same for every player"""
-        if self.input_mean is not None:
+        if self.input_mean is not None and self.relative_seats:
             self.input_mean.copy_(self.input_mean[self.rotation].mean(dim=0))
             self.input_scale.copy_(self.input_scale[self.rotation].mean(dim=0))
 
@@ -126,11 +128,13 @@ class StructuredValueNet(nn.Module):
         return raw[:, _TURN_PLAYER:_TURN_PLAYER + PLAYER_COUNT].float().argmax(dim=1)
 
     def encode(self, x, raw=None):
-        """The trunk's input and the players' encodings in relative order, and the index of the player to act"""
+        """The trunk's input, the players' encodings in relative order and the frame: the absolute seat of relative
+        player 0 (the player to act, or 0 without relative seats)"""
         raw = x if raw is None else raw
         normalized = self._normalize(x)
         acting = self._acting(raw)
-        relative = normalized.gather(1, self.rotation[acting])
+        frame = acting if self.relative_seats else torch.zeros_like(acting)
+        relative = normalized.gather(1, self.rotation[frame])
         padded = F.pad(relative, (0, 1))
         tiles, intersections, edges = padded[:, self.tiles], padded[:, self.intersections], padded[:, self.edges]
         players = padded[:, self.players]
@@ -164,15 +168,15 @@ class StructuredValueNet(nn.Module):
         trunk_in = torch.cat([tile_code.flatten(1), intersection_code.flatten(1), edge_code.flatten(1), player_code.flatten(1),
                               relative[:, self.global_features],
                               (acting[:, None] == torch.arange(PLAYER_COUNT, device=acting.device)[None, :]).to(relative.dtype)], dim=1)
-        return trunk_in, player_code, acting
+        return trunk_in, player_code, frame
 
     def forward_all(self, x, raw=None):
         """Value logits and, if present, the outputs of the aux heads and the policy queries, in absolute seat order"""
-        trunk_in, player_code, acting = self.encode(x, raw)
+        trunk_in, player_code, frame = self.encode(x, raw)
         features = self.trunk(F.pad(trunk_in, (0, self.trunk_padding)))
         per_player = self.head_out(F.gelu(self.head_trunk(features)[:, None, :] + self.head_player(player_code)))
-        # Absolute player p is relative player p - a
-        source = (torch.arange(PLAYER_COUNT, device=acting.device)[None, :] - acting[:, None]) % PLAYER_COUNT
+        # Absolute player p is relative player p - frame
+        source = (torch.arange(PLAYER_COUNT, device=frame.device)[None, :] - frame[:, None]) % PLAYER_COUNT
 
         def absolute(values):
             return values.gather(1, source.view(*source.shape, *[1] * (values.dim() - 2)).expand_as(values))

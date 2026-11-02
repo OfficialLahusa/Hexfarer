@@ -94,7 +94,7 @@ class StateValueModule(L.LightningModule):
     def __init__(self, in_dim, lr=1e-3, weight_decay=1e-4, constant_lr=False,
                  placement_weight=0.0, vp_share_weight=0.0, rounds_weight=0.0, ranking_weight=0.0, normalize_inputs=False,
                  ranking_placement_weight=0.0, hidden=2048, policy_weight=0.0, policy_types=0, policy_vocabulary=0, policy_dim=64,
-                 blocks=None, structured=False):
+                 blocks=None, structured=False, relative_seats=True):
         super().__init__()
         self.save_hyperparameters()
         aux_heads = placement_weight > 0 or vp_share_weight > 0 or rounds_weight > 0 or ranking_placement_weight > 0
@@ -103,7 +103,7 @@ class StateValueModule(L.LightningModule):
             # v2.1: Block-Encoder mit relativen Sitzen, Nachbar-Features und Köpfen pro Spieler (siehe structured_net.py)
             from structured_net import StructuredValueNet
             self.model = StructuredValueNet(in_dim, hidden=hidden, aux_heads=aux_heads, normalize_inputs=normalize_inputs,
-                                            widths=tuple(blocks) if blocks else (32, 16, 8, 128), **policy)
+                                            widths=tuple(blocks) if blocks else (32, 16, 8, 128), relative_seats=relative_seats, **policy)
         else:
             self.model = StateValueNet(in_dim, hidden=hidden, aux_heads=aux_heads, normalize_inputs=normalize_inputs, blocks=blocks, **policy)
         self.model.placements_trained = placement_weight > 0
