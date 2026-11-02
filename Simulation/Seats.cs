@@ -54,9 +54,9 @@ namespace Simulation
         ];
 
         /// <summary>
-        /// The bot a new game gets by default: the medium MCTS preset, or the builder without the value net
+        /// The bot a new game gets by default: the hard MCTS preset, or the builder without the value net
         /// </summary>
-        public static SeatKind DefaultBot(bool valueNetAvailable) => valueNetAvailable ? SeatKind.PimcMedium : SeatKind.Builder;
+        public static SeatKind DefaultBot(bool valueNetAvailable) => valueNetAvailable ? SeatKind.PimcHard : SeatKind.Builder;
 
         public static string Name(SeatKind kind) => kind switch
         {

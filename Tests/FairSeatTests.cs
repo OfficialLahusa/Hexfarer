@@ -34,6 +34,10 @@ namespace Tests
             Assert.Equal(SeatKind.PimcHard, ServerConsole.ParseKind("fair-hard"));
             Assert.Equal(SeatKind.MctsHard, ServerConsole.ParseKind("open-hand-hard"));
             Assert.Equal(SeatKind.PimcEasy, ServerConsole.ParseKind("PimcEasy"));
+
+            // New games get the hard fair preset, the builder without the value net
+            Assert.Equal(SeatKind.PimcHard, Seats.DefaultBot(valueNetAvailable: true));
+            Assert.Equal(SeatKind.Builder, Seats.DefaultBot(valueNetAvailable: false));
         }
 
         [SkippableFact]
