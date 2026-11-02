@@ -264,27 +264,53 @@ namespace Client
             PlayerState player = Shown.Players[seat];
             (bool fullHand, bool tracked) = HandShown(seat);
 
-            // Hand: mini cards when visible (the unknown ones of a tracked hand as card backs), otherwise a card back with the count
+            // Hand: mini cards when visible (the unknown ones of a tracked hand as card backs with a question mark), otherwise a
+            // card back with the count. As with the development cards: up to 5 are fanned 11 apart, each with its icon; more
+            // merge into one stack per type, and one for the unknown cards (at most 6, so the count after them stays clear of the
+            // development cards), whose depth shows the count (1, 2, 3, 4 or more cards); the exact counts are in the tooltip
             uint cards = player.ResourceCards.Count();
             if ((fullHand || tracked) && cards > 0)
             {
+                Vector2 mini = new Vector2(15, 22);
+                bool grouped = cards > 5;
                 int i = 0;
-                // Up to 6 cards fanned 9 apart, more squeezed into the same width, so the count after them stays clear of the
-                // development cards
-                float step = cards > 6 ? 45f / (cards - 1) : 9;
+                void Stack(uint count, System.Action<Vector2, bool> draw)
+                {
+                    if (grouped)
+                    {
+                        // The lower layers peek out above the top card, which alone carries the icon
+                        for (uint layer = Math.Min(count, 4) - 1; layer > 0; layer--)
+                            draw(pos + new Vector2(i * 11, 1 - layer * 3f), false);
+                        draw(pos + new Vector2(i * 11, 1), true);
+                        i++;
+                    }
+                    else
+                    {
+                        for (uint n = 0; n < count; n++, i++)
+                            draw(pos + new Vector2(i * 11, 1), true);
+                    }
+                }
                 foreach (ResourceCardType type in CardTypeExtensions.ResourceTypes)
                 {
-                    for (uint n = 0; n < player.ResourceCards.Get(type); n++, i++)
-                        Theme.ResourceCard(dl, type, pos + new Vector2(i * step, 1), new Vector2(15, 22), false);
+                    uint count = player.ResourceCards.Get(type);
+                    if (count > 0) Stack(count, (at, top) => Theme.ResourceCard(dl, type, at, mini, top));
                 }
                 uint unknown = player.ResourceCards.Get(ResourceCardType.Unknown);
-                for (uint n = 0; n < unknown; n++, i++)
-                    Theme.UnknownCard(dl, pos + new Vector2(i * step, 1), new Vector2(15, 22));
-                Theme.DrawText(dl, Theme.Regular15, pos + new Vector2((cards - 1) * step + 20, 2), Theme.TextSoft, cards.ToString());
+                if (unknown > 0)
+                    Stack(unknown, (at, top) =>
+                    {
+                        if (top) Theme.UnknownCard(dl, at, mini);
+                        else Theme.CardBack(dl, at, mini);
+                    });
+                float width = (i - 1) * 11 + mini.X;
+                Theme.DrawText(dl, Theme.Regular15, pos + new Vector2(width + 5, 2), Theme.TextSoft, cards.ToString());
 
-                if (unknown > 0 && ShownBelief(seat) is HandBelief belief && belief.Unknown > 0
-                    && ImGui.IsMouseHoveringRect(pos, pos + new Vector2((cards - 1) * step + 16, 24)))
-                    DrawTooltip(ImGui.GetForegroundDrawList(), pos + new Vector2((cards - 1) * step / 2 + 8, -4), UnknownCardsText(belief));
+                // The counts by type where the stacks hide them, and what the unknown cards of a tracked hand can be
+                List<string> tip = [];
+                if (grouped) tip.Add(ResourceCardsText(player));
+                if (unknown > 0 && ShownBelief(seat) is HandBelief belief && belief.Unknown > 0) tip.Add(UnknownCardsText(belief));
+                if (tip.Count > 0 && ImGui.IsMouseHoveringRect(pos + new Vector2(0, -9), pos + new Vector2(width, 24)))
+                    DrawTooltip(ImGui.GetForegroundDrawList(), pos + new Vector2(width / 2, -4), string.Join("; ", tip));
             }
             else
             {

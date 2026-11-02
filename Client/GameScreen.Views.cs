@@ -124,6 +124,15 @@ namespace Client
         }
 
         /// <summary>
+        /// A hand's known resource cards by type, e.g. "7 lumber, 6 brick"
+        /// </summary>
+        private static string ResourceCardsText(PlayerState player)
+        {
+            return string.Join(", ", CardTypeExtensions.ResourceTypes.Where(type => player.ResourceCards.Get(type) > 0)
+                .Select(type => $"{player.ResourceCards.Get(type)} {type.GetName().ToLower()}"));
+        }
+
+        /// <summary>
         /// A tooltip over a hand with unknown cards: how many, and how many of each type they can be at most
         /// </summary>
         private static string UnknownCardsText(HandBelief belief)
