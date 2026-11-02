@@ -305,13 +305,12 @@ namespace Client
                 float width = (i - 1) * 11 + mini.X;
                 Theme.DrawText(dl, Theme.Regular15, pos + new Vector2(width + 5, 2), Theme.TextSoft, cards.ToString());
 
-                // The exact makeup at any size, and what the unknown cards of a tracked hand can be
+                // The exact makeup at any size, the unknown cards of a tracked hand as one more entry ("1 lumber, 2 unknown")
                 List<string> tip = [];
                 if (cards > unknown) tip.Add(ResourceCardsText(player));
-                if (unknown > 0)
-                    tip.Add(ShownBelief(seat) is HandBelief belief && belief.Unknown > 0 ? UnknownCardsText(belief) : CardsText(unknown, "unknown card"));
+                if (unknown > 0) tip.Add($"{unknown} unknown");
                 SeatStatTooltip(pos + new Vector2(0, -9), pos + new Vector2(width + 5 + Theme.TextSize(Theme.Regular15, cards.ToString()).X, 24),
-                    string.Join("; ", tip));
+                    string.Join(", ", tip));
             }
             else
             {

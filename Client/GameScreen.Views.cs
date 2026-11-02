@@ -54,11 +54,6 @@ namespace Client
         }
 
         /// <summary>
-        /// What the shown observer knows of a seat's unknown cards, if its tracker is at hand
-        /// </summary>
-        private HandBelief? ShownBelief(int seat) => ShownObserver is int observer && _sim.Game.Beliefs is RecordBeliefs beliefs ? beliefs.For(observer).Hand(seat) : null;
-
-        /// <summary>
         /// How a seat's hand is shown: every card, the confirmed cards and the unknown ones, or only its size
         /// </summary>
         private (bool full, bool tracked) HandShown(int seat)
@@ -135,17 +130,6 @@ namespace Client
         {
             return string.Join(", ", CardTypeExtensions.ResourceTypes.Where(type => player.ResourceCards.Get(type) > 0)
                 .Select(type => $"{player.ResourceCards.Get(type)} {type.GetName().ToLower()}"));
-        }
-
-        /// <summary>
-        /// A tooltip over a hand with unknown cards: how many, and how many of each type they can be at most
-        /// </summary>
-        private static string UnknownCardsText(HandBelief belief)
-        {
-            IEnumerable<string> types = CardTypeExtensions.ResourceTypes.Where(belief.CanBe)
-                .Select(type => $"{belief.Room(type)} {type.GetName().ToLower()}");
-            string cards = belief.Unknown == 1 ? "1 unknown card" : $"{belief.Unknown} unknown cards";
-            return $"{cards}, at most {string.Join(", ", types)}";
         }
     }
 }
