@@ -274,6 +274,37 @@ namespace Tests
             Assert.Equal(counts, visits);
             Assert.Throws<ArgumentException>(() => open.LegalMoveVisits([1, 2]));
 
+            // Children in another order: the visits stay with their moves
+            Array.Reverse(open.RootNode.ChildArray);
+            (moves, visits) = open.LegalMoveVisits(counts);
+            Assert.All(Enumerable.Range(0, legal.Count), m => Assert.True(moves[m].IsSameDecision(legal[m])));
+            Assert.Equal(counts.Reverse(), visits);
+
+            // Two children of the same decision would put the visits of both on one move: that stops instead
+            MCTSNode[] openChildren = open.RootNode.ChildArray;
+            openChildren[1] = new MCTSNode(openChildren[0].ActivePlayerIndex, open.RootNode, openChildren[0].LastAction);
+            Assert.Throws<InvalidOperationException>(() => open.LegalMoveVisits(counts));
+
+            // Self-play records the pruned visits of a PUCT search (without those only the root noise caused) on their moves
+            IStateVectorizer vectorizer = StateVectorizer.Current;
+            float[] features = new float[vectorizer.FeatureDim];
+            double[] win = new double[4], loss = new double[4];
+            win[playerIdx] = 1;
+            loss[(playerIdx + 1) % 4] = 1;
+            MCTSTree puct = new(new GameState(state), (sbyte)playerIdx, 1.414, model: OpponentModel.MaxN) { UsesPolicy = true };
+            puct.ExpandNode(puct.RootNode, new GameState(state));
+            MCTSNode[] children = puct.RootNode.Children.ToArray();
+            for (int i = 0; i < 50; i++) puct.Backpropagate(children[0], win);
+            for (int i = 0; i < 10; i++) puct.Backpropagate(children[1], loss);
+            for (int i = 0; i < 10; i++) puct.Backpropagate(children[2], win);
+            float[] clean = Enumerable.Repeat(1f / children.Length, children.Length).ToArray();
+            uint[] pruned = puct.PrunedRootVisits(clean);
+            Assert.InRange(pruned[1], 0u, 2u);
+            (int, uint)[] expected = Enumerable.Range(0, legal.Count).Where(m => pruned[m] > 0).Select(m => (m, pruned[m])).ToArray();
+            Assert.Equal(expected, SelfPlayCollector.SelfPlayGame.Record(state, 0, puct, 70, vectorizer, features, clean).Visits);
+            Array.Reverse(puct.RootNode.ChildArray);
+            Assert.Equal(expected, SelfPlayCollector.SelfPlayGame.Record(state, 0, puct, 70, vectorizer, features, clean).Visits);
+
             // One city away from ten points: the tree searches only the city, the targets still list every legal move
             player.VictoryPoints.SettlementPoints += 1;
             legal = MCTSTree.GetValidActions(state);
@@ -286,11 +317,12 @@ namespace Tests
             int winningIdx = legal.FindIndex(move => move.IsSameDecision(winning));
             Assert.Equal(Enumerable.Range(0, legal.Count).Select(m => m == winningIdx ? 7u : 0u), visits);
 
-            // Self-play records the same: all legal moves, the visits on the winning one
-            IStateVectorizer vectorizer = StateVectorizer.Current;
-            SelfPlayCollector.RecordedPosition position = SelfPlayCollector.SelfPlayGame.Record(state, 0, tree, 7, vectorizer, new float[vectorizer.FeatureDim], null);
+            // Self-play records the same from the tree's visits: all legal moves, the visits on the winning one, also pruned
+            for (int i = 0; i < 7; i++) tree.Backpropagate(tree.RootNode.Children[0], win);
+            SelfPlayCollector.RecordedPosition position = SelfPlayCollector.SelfPlayGame.Record(state, 0, tree, 7, vectorizer, features, null);
             Assert.Equal(legal.Count, position.Moves.Length);
-            Assert.All(position.Visits, visit => Assert.Equal(winningIdx, visit.move));
+            Assert.Equal([(winningIdx, 7u)], position.Visits);
+            Assert.Equal([(winningIdx, 7u)], SelfPlayCollector.SelfPlayGame.Record(state, 0, tree, 7, vectorizer, features, [1f]).Visits);
         }
 
         // ================================================================ MCTSAgent with the value net

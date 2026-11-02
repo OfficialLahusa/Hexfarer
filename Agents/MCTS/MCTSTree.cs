@@ -167,16 +167,20 @@ namespace Agents.MCTS
 
             Action[] legal = [.. GetValidActions(RootState)];
             uint[] visits = new uint[legal.Length];
-            if (children.Length == legal.Length)
+            // Checked rather than assumed: children in another order would give every target to the wrong move
+            if (children.Length == legal.Length && children.Select((child, c) => child.LastAction!.IsSameDecision(legal[c])).All(same => same))
             {
                 childVisits.CopyTo(visits, 0);
                 return (legal, visits);
             }
+            bool[] matched = new bool[legal.Length];
             for (int c = 0; c < children.Length; c++)
             {
                 int m = Array.FindIndex(legal, move => move.IsSameDecision(children[c].LastAction!));
                 if (m < 0) throw new InvalidOperationException($"The root move {children[c].LastAction} is not among the root state's legal moves.");
-                visits[m] += childVisits[c];
+                if (matched[m]) throw new InvalidOperationException($"Two root moves are the legal move {legal[m]}.");
+                matched[m] = true;
+                visits[m] = childVisits[c];
             }
             return (legal, visits);
         }
