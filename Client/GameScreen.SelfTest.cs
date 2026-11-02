@@ -60,7 +60,11 @@ namespace Client
                 // The match's agents play the random seats without a pause; the human seat plays through the UI's paths. The first
                 // game starts the way the menu starts one.
                 SeatKind[] seats = [SeatKind.Random, SeatKind.Random, SeatKind.Random, SeatKind.Human];
-                if (game == 0) StartGameFromMenu(seats, host: false);
+                if (game == 0)
+                {
+                    StartGameFromMenu(seats, host: false);
+                    Check(_mode == InteractionMode.Play, "a game with a human seat did not start in Play mode");
+                }
                 else
                 {
                     SetMode(InteractionMode.Play);
@@ -112,6 +116,17 @@ namespace Client
 
                 foreach (bool frame in EditSelfTest(random)) yield return frame;
             }
+
+            // A game with agents only, started the way the menu starts one: there is nothing to play, so it opens in Spectate
+            // mode, and it runs without anyone pressing play
+            StartGameFromMenu([SeatKind.Random, SeatKind.Random, SeatKind.Random, SeatKind.Random], host: false);
+            yield return true;
+            Check(_mode == InteractionMode.Spectate, "a game without a human seat did not start in Spectate mode");
+            Check(!Playback.Paused, "a game without a human seat started paused");
+            int started = History.Count;
+            for (int frame = 0; frame < 3000 && History.Count == started; frame++) yield return true;
+            Check(History.Count > started, "the agents did not play the game without a human seat");
+            Console.WriteLine($"Agents-only game: started in {_mode} mode, {History.Count - started} moves played");
         }
 
         /// <summary>

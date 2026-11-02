@@ -103,11 +103,13 @@ namespace Client
             _menuOpen = false;
             _menuIsStartScreen = false;
             _playbackBeforeMenu = null;
-            // Not SetMode: the new game gets its playback below
-            _mode = InteractionMode.Play;
+            // Not SetMode: the new game gets its playback below, running in either mode. Without a human seat there is nothing
+            // to play, so it opens in Spectate mode (eval bar and moves) with the stand-ins Spectate uses
+            bool human = seats.Contains(SeatKind.Human);
+            _mode = human ? InteractionMode.Play : InteractionMode.Spectate;
             ClearHumanInput();
             Send(new Simulation.NewGame(seats, _centerDesert, FreeTrade: _freeTrade, ShowTrackedCards: _showTrackedCards));
-            Send(new SetPlayback(PlaybackState.Default with { PaceSeconds = _settings.BotPace }));
+            Send(new SetPlayback(PlaybackState.Default with { PaceSeconds = _settings.BotPace, HumanStandIns = !human }));
             _endScreenDismissed = false;
             if (host)
             {
