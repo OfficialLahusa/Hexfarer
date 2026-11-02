@@ -491,7 +491,8 @@ def main():
         # Nur Tensoren und einfache Typen: ein manipulierter Checkpoint kann so keinen Code ausführen
         checkpoint = torch.load(args.init_from, map_location="cpu", weights_only=True)
         state_dict = checkpoint["state_dict"]
-        old_dim = state_dict["model.net.0.weight"].shape[1]
+        # Die Inputbreite steht in der Normalisierung (Block-Encoder und v2.1 haben kein net.0)
+        old_dim = state_dict["model.input_mean"].shape[0] if "model.input_mean" in state_dict else state_dict["model.net.0.weight"].shape[1]
         if old_dim < in_dim:
             # Mehr Features als der Checkpoint (Sicht-Layout): die neuen Spalten starten mit Gewicht 0, ihre Normalisierung
             # kommt aus den Daten wie ohne Checkpoint
