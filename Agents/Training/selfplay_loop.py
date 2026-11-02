@@ -30,6 +30,8 @@ import subprocess
 import sys
 import time
 
+import runlog
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 # The collector's Release build: an .exe on Windows, a plain executable elsewhere
@@ -44,10 +46,17 @@ def log(loop_dir, text):
         file.write(line + "\n")
 
 
-def run(command, output_path):
-    """Runs a command with its output in a file; raises with the end of the output if it fails"""
-    with open(output_path, "w", encoding="utf-8") as output:
-        code = subprocess.call(command, stdout=output, stderr=subprocess.STDOUT)
+def run(command, output_path, kind=None):
+    """Runs a command with its output in a file; raises with the end of the output if it fails. With a kind the command
+    gets its own entry in the run registry (for programs that don't register themselves, like the collector)."""
+    if kind:
+        with runlog.track(kind, command, output_path) as finish:
+            with open(output_path, "w", encoding="utf-8") as output:
+                code = subprocess.call(command, stdout=output, stderr=subprocess.STDOUT)
+            finish(code)
+    else:
+        with open(output_path, "w", encoding="utf-8") as output:
+            code = subprocess.call(command, stdout=output, stderr=subprocess.STDOUT)
     if code != 0:
         with open(output_path, encoding="utf-8", errors="replace") as file:
             tail = file.read()[-2000:]
@@ -110,6 +119,19 @@ def main(argv=None):
                         help="command evaluating {new} (ONNX) against {old} (ONNX), {name} names the run, run without a shell; its last output line is logged")
     args = parser.parse_args(argv)
 
+    # In the run registry: the loop, each generation as its child, each step of a generation as the generation's child
+    generation_runs = []
+    with runlog.begin("selfplay-loop", name=os.path.basename(os.path.normpath(args.loop_dir)), outputs={"loop_dir": args.loop_dir}) as run:
+        try:
+            code = run_loop(args, generation_runs)
+        finally:
+            for generation_run in generation_runs:
+                generation_run.end(1)  # only one stopped by an exception is still open
+        run.result(stopped_by="an evaluation" if code == 2 else "generations done")
+    return code
+
+
+def run_loop(args, generation_runs):
     os.makedirs(args.loop_dir, exist_ok=True)
     state = load_state(args.loop_dir)
     python = sys.executable
@@ -133,6 +155,13 @@ def main(argv=None):
         os.makedirs(gen_dir, exist_ok=True)
         model = newest("model", args.start_model)
         checkpoint = newest("checkpoint", args.start_checkpoint)
+        generation_run = runlog.begin("selfplay-gen", name=f"{os.path.basename(os.path.normpath(args.loop_dir))}/gen{g:03d}",
+                                      inputs={"model": model, "checkpoint": checkpoint}, outputs={"gen_dir": gen_dir})
+        generation_runs.append(generation_run)
+
+        def finish_generation():
+            generation_run.result(**{key: gen[key] for key in ("collect", "train", "model", "eval", "anchor") if key in gen})
+            generation_run.end(0)
 
         if "run" not in gen:
             # A collection stopped before it finished left its directory behind; the collector won't reuse it
@@ -148,7 +177,7 @@ def main(argv=None):
                     os.path.join(gen_dir, "export_fp16.log"))
             command = [COLLECTOR, "--games", str(args.games), "--output", gen_dir, "--name", "run", "--seed", str(args.seed + g),
                        "--model", collect_model] + args.collector_args.split()
-            run(command, os.path.join(gen_dir, "collect.log"))
+            run(command, os.path.join(gen_dir, "collect.log"), kind="collect")
             with open(os.path.join(gen_dir, "run", "metadata.json"), encoding="utf-8") as file:
                 result = json.load(file)["result"]
             gen["run"] = os.path.join(gen_dir, "run")
@@ -161,7 +190,7 @@ def main(argv=None):
         if "prepared" not in gen:
             prepared = os.path.join(gen_dir, "prepared")
             run([python, os.path.join(REPO, "DatasetProcessing", "selfplay_to_dataset.py"), gen["run"], "--output", prepared,
-                 "--target-lambda", str(args.target_lambda)], os.path.join(gen_dir, "convert.log"))
+                 "--target-lambda", str(args.target_lambda)], os.path.join(gen_dir, "convert.log"), kind="convert")
             gen["prepared"] = prepared
             save_state(args.loop_dir, state)
 
@@ -199,8 +228,9 @@ def main(argv=None):
             """Runs the evaluation command, keeps its last line under gen[key]; whether the newest net came out clearly worse"""
             command = command_arguments(args.eval_command, new=gen["model"], old=reference, name=name)
             output = os.path.join(gen_dir, f"{key}.log")
-            with open(output, "w", encoding="utf-8") as file:
-                subprocess.call(command, stdout=file, stderr=subprocess.STDOUT)
+            with runlog.track("duel", command, output, name=name) as finish:
+                with open(output, "w", encoding="utf-8") as file:
+                    finish(subprocess.call(command, stdout=file, stderr=subprocess.STDOUT))
             with open(output, encoding="utf-8", errors="replace") as file:
                 lines = [line.strip() for line in file if line.strip()]
             gen[key] = {"against": reference, "result": lines[-1] if lines else "no output"}
@@ -217,10 +247,13 @@ def main(argv=None):
             state["evaluated"] = gen["model"]
             save_state(args.loop_dir, state)
             if worse:
+                finish_generation()
                 return 2
         if args.eval_command and args.anchor_every > 0 and g % args.anchor_every == 0 and "anchor" not in gen:
             if evaluate("anchor", args.anchor_model or args.start_model, f"loop_g{g:03d}_anchor"):
+                finish_generation()
                 return 2
+        finish_generation()
     return 0
 
 

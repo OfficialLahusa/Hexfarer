@@ -28,6 +28,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+import runlog
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "DatasetProcessing"))
 from state_to_vector import VIEW_FEATURE_DIM, _PLAYER_SIZE, _PLAYER_START  # noqa: E402
 
@@ -182,7 +184,8 @@ def load_precision_set(data: str, exclude_seeds: Optional[str]) -> Dict[str, np.
     return result
 
 
-def evaluate(data: Dict[str, np.ndarray], models: List[Tuple[str, np.ndarray]]) -> None:
+def evaluate(data: Dict[str, np.ndarray], models: List[Tuple[str, np.ndarray]]) -> Dict[str, Dict[str, float]]:
+    """Prints the metrics of every model; returns KL and best move per model for the run registry"""
     labels = data["win_rates"]
     vp = victory_points(data["states"])
     leader = vp.max(axis=1)
@@ -218,6 +221,7 @@ def evaluate(data: Dict[str, np.ndarray], models: List[Tuple[str, np.ndarray]]) 
               f"pair accuracy {rankings[name]['pair_accuracy_0'] - rankings[reference_name]['pair_accuracy_0']:+.3f}, "
               f"best move {rankings[name]['best_move'] - rankings[reference_name]['best_move']:+.3f}, "
               f"regret {rankings[name]['regret_pp'] - rankings[reference_name]['regret_pp']:+.2f}pp")
+    return {name: {"kl": round(float(kls[name].mean()), 5), "best_move": round(float(rankings[name]["best_move"]), 4)} for name, _ in models}
 
 
 def main(argv=None) -> int:
@@ -227,12 +231,14 @@ def main(argv=None) -> int:
     parser.add_argument("models", nargs="+", help="name=path.onnx; the first one is the reference for the differences")
     args = parser.parse_args(argv)
 
-    data = load_precision_set(args.data, args.exclude_seeds)
-    models = []
-    for spec in args.models:
-        name, path = spec.split("=", 1)
-        models.append((name, run_model(path, data)))
-    evaluate(data, models)
+    with runlog.begin("precision", name=os.path.basename(os.path.normpath(args.data)),
+                      inputs={"data": args.data, "models": dict(spec.split("=", 1) for spec in args.models)}) as run:
+        data = load_precision_set(args.data, args.exclude_seeds)
+        models = []
+        for spec in args.models:
+            name, path = spec.split("=", 1)
+            models.append((name, run_model(path, data)))
+        run.result(models=evaluate(data, models))
     return 0
 
 

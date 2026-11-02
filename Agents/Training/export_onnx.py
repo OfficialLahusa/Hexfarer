@@ -1,10 +1,12 @@
 import argparse
 import copy
+import os
 import numpy as np
 import onnxruntime as ort
 import torch
 import torch.nn as nn
 import lightning as L
+import runlog
 from state_value_net import StateValueModule
 
 
@@ -55,7 +57,7 @@ def export(ckpt_path: str, out_path: str, in_dim: int = None, fp16: bool = False
     module.eval()
 
     # Kern-Modell statt Lightning-Module für ONNX-Export nötig
-    export_model(module.model, out_path, in_dim, fp16)
+    return export_model(module.model, out_path, in_dim, fp16)
 
 
 def export_model(model: nn.Module, out_path: str, in_dim: int, fp16: bool = False) -> float:
@@ -139,4 +141,6 @@ if __name__ == "__main__":
     parser.add_argument("--in-dim", type=int, default=None)
     parser.add_argument("--fp16", action="store_true", help="Schichten in float16 (Input und Outputs bleiben wie bei float32)")
     args = parser.parse_args()
-    export(args.ckpt, args.out, args.in_dim, args.fp16)
+    with runlog.begin("export", name=os.path.basename(args.out), inputs={"checkpoint": args.ckpt}, outputs={"onnx": args.out},
+                      fp16=args.fp16) as run:
+        run.result(max_diff=export(args.ckpt, args.out, args.in_dim, args.fp16))

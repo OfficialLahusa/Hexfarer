@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import lightning as L
 from torch.utils.data import Dataset, DataLoader, Sampler
+import runlog
 from state_value_net import StateValueModule, PLAYER_COUNT
 from augmentation import (BOARD_SYMMETRY_COUNT, NUMBER_PAIR_COUNT, is_rotatable, move_token_symmetries, rotate_features,
                           rotate_player_index, rotate_players, swap_number_pairs, transform_board)
@@ -421,6 +422,15 @@ def main():
     parser.add_argument("--monitor", default="val_loss", choices=["val_loss", "val_total_loss"])
     args = parser.parse_args()
 
+    # Eintrag in der Run-Registry (runlog.py): Kommandozeile, Commit, Daten und am Ende der beste Checkpoint
+    with runlog.begin("train", name=os.path.basename(os.path.normpath(args.checkpoint_dir)) if args.checkpoint_dir else None,
+                      inputs={"data": args.data or [args.states], "init_from": args.init_from},
+                      outputs={"checkpoint_dir": args.checkpoint_dir}) as run:
+        run.result(**run_training(args))
+
+
+def run_training(args):
+    """Das Training selbst; gibt den besten Checkpoint, seinen Wert, die Epochen und die W&B-Run-ID zurück"""
     sources = [parse_source(spec) for spec in args.data] if args.data else []
     if sources:
         first = sources[0][0]
@@ -542,6 +552,9 @@ def main():
     torch.set_float32_matmul_precision("high")
 
     trainer.fit(model, train_loader, val_loader)
+    best = callbacks[0]
+    return {"best_checkpoint": best.best_model_path, args.monitor: float(best.best_model_score) if best.best_model_score is not None else None,
+            "epochs": trainer.current_epoch, "wandb_id": logger.experiment.id}
 
 
 if __name__ == "__main__":
