@@ -202,6 +202,9 @@ def begin(kind, name=None, inputs=None, outputs=None, note=None, **fields):
 def wrap(kind, command, name=None, note=None, inputs=None, outputs=None, root=None, quiet=False):
     """Runs a command as a run: its output goes to the console and into <id>/console.log, the last non-empty line is kept
     as the result. Returns the exit code."""
+    # A program given by a relative path (Windows can't start one written with forward slashes) runs by its full path
+    if os.path.isfile(command[0]):
+        command = [os.path.abspath(command[0]), *command[1:]]
     executable = command[0]
     binary = executable if os.path.isfile(executable) and not os.path.basename(executable).lower().startswith("python") else None
     run = start(kind, name=name, argv=command, inputs=inputs, outputs=outputs, note=note, root=root, binary=binary)

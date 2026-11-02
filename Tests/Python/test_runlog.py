@@ -46,10 +46,14 @@ class RunlogTest(unittest.TestCase):
         self.assertEqual(runlog.wrap("other", command, name="ok", quiet=True), 0)
         failing = self.python("print('before'); sys.exit(3)")
         self.assertEqual(runlog.wrap("other", failing, name="fails", quiet=True), 3)
+        # A program by a relative path with forward slashes, as written in shell scripts
+        relative = os.path.relpath(sys.executable).replace(os.sep, "/")
+        self.assertEqual(runlog.wrap("other", [relative, "-c", "print('relative')"], name="relative", quiet=True), 0)
 
         runs = runlog.load()
-        self.assertEqual([run["name"] for run in runs], ["ok", "fails"])
-        ok, fails = runs
+        self.assertEqual([run["name"] for run in runs], ["ok", "fails", "relative"])
+        ok, fails, relative_run = runs
+        self.assertEqual(relative_run["end"]["last_line"], "relative")
         self.assertEqual(ok["argv"], command)
         self.assertEqual(ok["end"]["exit"], 0)
         self.assertEqual(ok["end"]["last_line"], "the last line")
