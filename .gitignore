@@ -60,7 +60,8 @@ BenchmarkDotNet.Artifacts/
 # .NET Core
 project.lock.json
 project.fragment.lock.json
-artifacts/
+# Both spellings: Windows ignores case, Linux (the server's checkout) does not
+[Aa]rtifacts/
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
