@@ -6,7 +6,8 @@ Every generation:
 2. convert: DatasetProcessing/selfplay_to_dataset.py turns the run into training arrays
 3. train: train.py continues from the previous checkpoint for a fixed number of samples at a constant learning rate, on a
    window of the newest generations (equal shares) plus extra data (e.g. the v2 data, against the value drift)
-4. export: export_onnx.py writes the net the next generation collects with
+4. export: export_onnx.py writes the net the next generation collects with (with --fp16 the collection uses a float16
+   export of it, the evaluations keep the float32 net)
 
 Every --eval-every generations an evaluation command (e.g. an SPRT mirror duel) compares the newest net with the one
 evaluated last, and every --anchor-every generations also with a fixed anchor (by default the start net), so small steps
@@ -91,6 +92,8 @@ def main(argv=None):
     parser.add_argument("--generations", type=int, default=1000)
     parser.add_argument("--games", type=int, default=8000, help="games per generation")
     parser.add_argument("--collector-args", default="--concurrent 1024 --nets 3", help="further SelfPlayCollector options")
+    parser.add_argument("--fp16", action="store_true",
+                        help="collect with float16 exports of the nets (faster where the GPU limits, e.g. CUDA on the server)")
     parser.add_argument("--seed", type=int, default=20261100, help="generation g collects with seed + g")
     parser.add_argument("--window", type=int, default=4, help="newest generations in the training data")
     parser.add_argument("--extra-data", action="append", default=[], help="further prepared data DIR@SHARE, e.g. the v2 data")
@@ -137,14 +140,20 @@ def main(argv=None):
             if os.path.exists(unfinished):
                 os.replace(unfinished, os.path.join(gen_dir, f"run_unfinished_{time.strftime('%Y%m%d_%H%M%S')}"))
             started = time.time()
+            collect_model = model
+            if args.fp16:
+                # Exported from the checkpoint the newest net came from (the start checkpoint for generation 1)
+                collect_model = os.path.join(gen_dir, "collect_fp16.onnx")
+                run([python, os.path.join(HERE, "export_onnx.py"), "--ckpt", checkpoint, "--out", collect_model, "--fp16"],
+                    os.path.join(gen_dir, "export_fp16.log"))
             command = [COLLECTOR, "--games", str(args.games), "--output", gen_dir, "--name", "run", "--seed", str(args.seed + g),
-                       "--model", model] + args.collector_args.split()
+                       "--model", collect_model] + args.collector_args.split()
             run(command, os.path.join(gen_dir, "collect.log"))
             with open(os.path.join(gen_dir, "run", "metadata.json"), encoding="utf-8") as file:
                 result = json.load(file)["result"]
             gen["run"] = os.path.join(gen_dir, "run")
             gen["collect"] = {"games": result["games"], "positions": result["positions"], "errors": result["errors"],
-                              "minutes": round((time.time() - started) / 60, 1), "model": model}
+                              "minutes": round((time.time() - started) / 60, 1), "model": collect_model}
             save_state(args.loop_dir, state)
             log(args.loop_dir, f"gen {g}: {result['games']} games, {result['positions']} positions, {result['errors']} errors "
                                f"in {gen['collect']['minutes']} min")
