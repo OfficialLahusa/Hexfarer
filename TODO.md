@@ -138,6 +138,7 @@
 		- Feinjustiert wie E2 => P1 (von structured-abs bzw. MLP, 50% Schleife 3/4 + 50% v2, λ 0,5, T 2, 4 Epochen à 5M, 5 min auf dem Server): v2.1-ft gegen kt5fwcz5 +55 [+21, +90], gegen MLP-ft +89 [+43, +138] (5k, beide H1); Präzisions-KL 0,0102 statt 0,0176, bester Zug 57,3% statt 55,9%; Policy nach 4 Epochen nicht konvergiert; gleiche Denkzeit (0,1 s, ~24k statt ~31k Iterationen) +18 [−12, +49] (248 Paare, offen)
 		- Reanalyse fertig (DatasetCollector --reanalyze, train.py --policy-dir): spielt v2 per Seed nach, sucht jede Position mit Wahl (~50%, Ø 11,6 Züge), Targets über alle legalen Züge; Test mit kt5fwcz5 auf 200 Matches: 207 Positionen/s, 330k Iterationen/s => ganz v2 (~5M Suchen à 1600) ~6-7 h auf einer Maschine
 		- Offen: v2 ganz reanalysieren, dann v2.1 von Grund auf mit Policy ohne Spielausgänge als Value-Target
+		- Danach: Value-Gewicht pro Datenquelle (Self-Play-Zeilen nur Policy, Value 0 bzw. 0,25), falls der Value beim Feinjustieren weiter driftet (64,2% => 57,3% Präzisions-Bester-Zug)
 		- Self-Play-Targets in Positionen mit Gewinnzug hatten nur diesen einen Zug (MCTS sucht nur ihn) => kein Lernsignal dort; behoben: Self-Play und Reanalyse schreiben alle legalen Züge (MCTSTree.LegalMoveVisits), gilt ab der nächsten Sammlung; ältere Daten haben die Lücke weiter
 	- State Vectorizer über push/pop Architektur eine Index-Aufschlüsselung generieren lassen
 	- Expansionspotenzial mit den Pips der erreichbaren Bauplätze (die Endspiel-Features zählen nur die Bauplätze)
