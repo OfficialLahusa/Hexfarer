@@ -134,6 +134,8 @@
 		- v2.1 (structured_net.py): Nachbar-Features über den Brettgraphen (Kreuzung + Tiles/Nachbarn/Straßen, Kante + Enden/Nachbarkanten, Tile + Ecken), Besitz-Summen pro Spieler, Köpfe pro Spieler; mit absoluten Sitzen KL −34% (0,0070), bester Zug 64,2% (+2,9 Pp), Regret 0,30 statt 0,38 Pp
 		- Relative Sitze (Spieler am Zug = 0) kosten Ranking: bester Zug −2,5 Pp in Geschwistergruppen mit Wechsel des Spielers am Zug => absolute Sitze, Rotation weiter per Augmentation
 		- Duell gegen das MLP mit gleichem Rezept (nur Value): v2.1 bei 5k +40 [+12, +69], bei 20k +46 [+16, +78] (beide H1), gleiche Denkzeit (0,1 s) Desktop +16 [−8, +41], Server +36 [+3, +69] (318/195 Paare, offen); Block-Encoder 5k +6 [−10, +23]; Self-Play ohne Policy 430k statt 740k Iterationen/s (−42%)
+		- v2.1 mit Policy Head von Grund auf (Schleife 3/4 60%, Iteration 3 10%, v2 30%, λ 0,8, T 2): Policy lernt bis zum Schluss (Top-Zug 63,7%), Value überfittet die Self-Play-Ausgänge (val 0,636 in Epoche 4, ab Epoche 10 ~0,85; Platzierungs-Loss steigt durchgehend) => wie E2 => P1 vom Value-Net (structured-abs) aus feinjustieren, MLP mit gleichem Rezept als Kontrolle
+		- Offen: v2 per Reanalyse mit kt5fwcz5 mit Policy-Targets versehen (~11 Mrd. Iterationen bei 1600 pro Position, ~7 h), dann von Grund auf ohne Spielausgänge als Value-Target
 	- State Vectorizer über push/pop Architektur eine Index-Aufschlüsselung generieren lassen
 	- Expansionspotenzial mit den Pips der erreichbaren Bauplätze (die Endspiel-Features zählen nur die Bauplätze)
 	- Weit zurückliegende Spieler: Winrates oft exakt 0, der Platzierungs-Head liefert dort das Signal
