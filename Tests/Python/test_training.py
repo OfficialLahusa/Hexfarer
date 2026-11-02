@@ -264,13 +264,24 @@ class TrainingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             source, reanalysis = os.path.join(directory, "v2"), os.path.join(directory, "reanalysis")
             write_source(source, rows=3, features=8, label_dtype=np.float16, self_play=False)
-            os.makedirs(reanalysis)
-            np.save(os.path.join(reanalysis, "policy_offsets.npy"), np.array([0, 0, 3, 3]))
-            np.save(os.path.join(reanalysis, "policy_tokens.npy"), np.array([[1, -1], [2, -1], [3, 21]], dtype=np.int16))
-            np.save(os.path.join(reanalysis, "policy_weights.npy"), np.ones((3, 2), dtype=np.uint8))
-            np.save(os.path.join(reanalysis, "policy_targets.npy"), np.array([0.25, 0.75, 0], dtype=np.float32))
-            with open(os.path.join(reanalysis, "policy_layout.json"), "w") as file:
-                json.dump(POLICY_LAYOUT | {"max_tokens": [2]}, file)
+
+            def write_reanalysis(path, offsets):
+                os.makedirs(path)
+                np.save(os.path.join(path, "policy_offsets.npy"), np.array(offsets))
+                np.save(os.path.join(path, "policy_tokens.npy"), np.array([[1, -1], [2, -1], [3, 21]], dtype=np.int16))
+                np.save(os.path.join(path, "policy_weights.npy"), np.ones((3, 2), dtype=np.uint8))
+                np.save(os.path.join(path, "policy_targets.npy"), np.array([0.25, 0.75, 0], dtype=np.float32))
+                with open(os.path.join(path, "policy_layout.json"), "w") as file:
+                    json.dump(POLICY_LAYOUT | {"max_tokens": [2]}, file)
+            write_reanalysis(reanalysis, [0, 0, 3, 3])
+
+            # Targets of another dataset (a row more or less) or offsets that don't cover the moves stop the training
+            for name, offsets in (("more", [0, 0, 3, 3, 3]), ("fewer", [0, 0, 3]), ("short", [0, 0, 2, 2]), ("start", [1, 1, 3, 3]),
+                                  ("descending", [0, 2, 1, 3])):
+                write_reanalysis(os.path.join(directory, name), offsets)
+                with self.assertRaises(ValueError, msg=name):
+                    StateDataset(os.path.join(source, "states.npy"), os.path.join(source, "win_rates.npy"), source,
+                                 policy_dir=os.path.join(directory, name))
 
             plain = StateDataset(os.path.join(source, "states.npy"), os.path.join(source, "win_rates.npy"), source)
             self.assertEqual(plain.policy_paths, {})

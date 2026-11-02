@@ -69,6 +69,19 @@ class StateDataset(Dataset):
             raise ValueError(f"{policy_dir} has no complete policy targets (policy_layout.json and {', '.join(POLICY_ARRAYS)})")
         self.max_tokens = self.policy_layout["max_tokens"][0] if self.policy_layout else 1
         self._open()
+        if self.policy:
+            self._check_policy_rows()
+
+    def _check_policy_rows(self):
+        """Die Policy-Targets müssen zu genau diesen States gehören: ein Offset mehr als Zeilen, aufsteigend ab 0 bis zur
+        Zahl der Züge. Sonst lieferte z.B. eine Reanalyse eines anderen Datensatzes still falsche Targets."""
+        directory = os.path.dirname(self.policy_paths["policy_offsets"])
+        offsets = self.policy["policy_offsets"]
+        if offsets.shape != (len(self.states) + 1,):
+            raise ValueError(f"{directory} has policy targets for {offsets.shape[0] - 1} rows, {self.states_path} has {len(self.states)}")
+        moves = {name: len(self.policy[name]) for name in ("policy_tokens", "policy_weights", "policy_targets")}
+        if offsets[0] != 0 or any(count != offsets[-1] for count in moves.values()) or np.any(np.diff(offsets) < 0):
+            raise ValueError(f"{directory}: the policy offsets (from {offsets[0]} to {offsets[-1]}) don't cover the moves {moves}")
 
     def _open(self):
         # Memory mapped NP Arrays
