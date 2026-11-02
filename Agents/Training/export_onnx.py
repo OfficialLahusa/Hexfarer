@@ -100,11 +100,13 @@ def export_model(model: nn.Module, out_path: str, in_dim: int, fp16: bool = Fals
             if t.dtype == np.float16:
                 t, o = t.astype(np.float32), o.astype(np.float32)
                 return float((np.abs(t - o) / np.maximum(np.abs(t), 1.0)).max()) * 1e-2
-            return float(np.abs(t - o).max())
+            # Relativ zum größten Output: zufällige Inputs treiben manche Netze auf Logits in den Hunderten, wo float32
+            # schon in der vierten Nachkommastelle rundet
+            return float(np.abs(t - o).max() / max(1.0, float(np.abs(t).max())))
         return max(difference(t, o) for t, o in zip(torch_outputs, onnx_outputs))
 
     max_diff = max_difference(16)
-    print(f"Max abs diff, PyTorch vs ONNX (batch=16): {max_diff:.2e}")
+    print(f"Max diff (relative to the largest output), PyTorch vs ONNX (batch=16): {max_diff:.2e}")
     # float16 hat ~3 Dezimalstellen, über vier Schichten summieren sich ein paar Rundungsschritte
     tolerance = 5e-2 if fp16 else 1e-4
     assert max_diff < tolerance, "ONNX export does not match PyTorch output -- do not ship this .onnx file"
@@ -112,7 +114,7 @@ def export_model(model: nn.Module, out_path: str, in_dim: int, fp16: bool = Fals
 
     # Und nochmal mit batch=1 wegen Relevanz für MCTS
     max_diff1 = max_difference(1)
-    print(f"Max abs diff, batch=1: {max_diff1:.2e}")
+    print(f"Max diff, batch=1: {max_diff1:.2e}")
 
     return float(max(max_diff, max_diff1))
 
