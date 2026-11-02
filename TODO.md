@@ -133,7 +133,7 @@
 		- Offline (E2-Rezept von Grund auf, gleiche Daten, Präzisions-Set): MLP-Wiederholung = E2 (KL 0,0105); Block-Encoder (block_encoder.py) KL −13%, bester Zug 61,8% statt 61,4%, Breite egal
 		- v2.1 (structured_net.py): Nachbar-Features über den Brettgraphen (Kreuzung + Tiles/Nachbarn/Straßen, Kante + Enden/Nachbarkanten, Tile + Ecken), Besitz-Summen pro Spieler, Köpfe pro Spieler; mit absoluten Sitzen KL −34% (0,0070), bester Zug 64,2% (+2,9 Pp), Regret 0,30 statt 0,38 Pp
 		- Relative Sitze (Spieler am Zug = 0) kosten Ranking: bester Zug −2,5 Pp in Geschwistergruppen mit Wechsel des Spielers am Zug => absolute Sitze, Rotation weiter per Augmentation
-		- Duell gegen das MLP mit gleichem Rezept (nur Value, 5k): v2.1 +40 [+12, +69] (571 Spiele, H1), Block-Encoder +6 [−10, +23] (1474 Spiele, offen); Self-Play ohne Policy 430k statt 740k Iterationen/s (−42%)
+		- Duell gegen das MLP mit gleichem Rezept (nur Value): v2.1 bei 5k +40 [+12, +69], bei 20k +46 [+16, +78] (beide H1), gleiche Denkzeit (0,1 s) Desktop +16 [−8, +41], Server +36 [+3, +69] (318/195 Paare, offen); Block-Encoder 5k +6 [−10, +23]; Self-Play ohne Policy 430k statt 740k Iterationen/s (−42%)
 	- State Vectorizer über push/pop Architektur eine Index-Aufschlüsselung generieren lassen
 	- Expansionspotenzial mit den Pips der erreichbaren Bauplätze (die Endspiel-Features zählen nur die Bauplätze)
 	- Weit zurückliegende Spieler: Winrates oft exakt 0, der Platzierungs-Head liefert dort das Signal
