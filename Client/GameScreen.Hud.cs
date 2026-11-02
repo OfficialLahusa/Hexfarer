@@ -305,18 +305,21 @@ namespace Client
                 float width = (i - 1) * 11 + mini.X;
                 Theme.DrawText(dl, Theme.Regular15, pos + new Vector2(width + 5, 2), Theme.TextSoft, cards.ToString());
 
-                // The counts by type where the stacks hide them, and what the unknown cards of a tracked hand can be
+                // The exact makeup at any size, and what the unknown cards of a tracked hand can be
                 List<string> tip = [];
-                if (grouped) tip.Add(ResourceCardsText(player));
-                if (unknown > 0 && ShownBelief(seat) is HandBelief belief && belief.Unknown > 0) tip.Add(UnknownCardsText(belief));
-                if (tip.Count > 0 && ImGui.IsMouseHoveringRect(pos + new Vector2(0, -9), pos + new Vector2(width, 24)))
-                    DrawTooltip(ImGui.GetForegroundDrawList(), pos + new Vector2(width / 2, -4), string.Join("; ", tip));
+                if (cards > unknown) tip.Add(ResourceCardsText(player));
+                if (unknown > 0)
+                    tip.Add(ShownBelief(seat) is HandBelief belief && belief.Unknown > 0 ? UnknownCardsText(belief) : CardsText(unknown, "unknown card"));
+                SeatStatTooltip(pos + new Vector2(0, -9), pos + new Vector2(width + 5 + Theme.TextSize(Theme.Regular15, cards.ToString()).X, 24),
+                    string.Join("; ", tip));
             }
             else
             {
                 Theme.CardBack(dl, pos + new Vector2(0, 2), new Vector2(15, 21));
                 Theme.CardBack(dl, pos + new Vector2(6, 0), new Vector2(15, 21));
                 Theme.DrawText(dl, Theme.Regular15, pos + new Vector2(28, 2), Theme.TextSoft, cards.ToString());
+                SeatStatTooltip(pos + new Vector2(0, -9), pos + new Vector2(28 + Theme.TextSize(Theme.Regular15, cards.ToString()).X, 24),
+                    cards == 0 ? "No resource cards" : $"{CardsText(cards, "resource card")}, types hidden");
             }
             _seatCardAnchor[seat] = pos + new Vector2(14, 12);
 
@@ -351,13 +354,15 @@ namespace Client
                 }
                 float width = (i - 1) * 11 + 15;
                 Theme.DrawText(dl, Theme.Regular15, pos + new Vector2(x + width + 5, 2), Theme.TextSoft, devCards.ToString());
-                if (ImGui.IsMouseHoveringRect(pos + new Vector2(x, -9), pos + new Vector2(x + width, 24)))
-                    DrawTooltip(ImGui.GetForegroundDrawList(), pos + new Vector2(x + width / 2, -4), DevelopmentCardsText(player));
+                SeatStatTooltip(pos + new Vector2(x, -9), pos + new Vector2(x + width + 5 + Theme.TextSize(Theme.Regular15, devCards.ToString()).X, 24),
+                    DevelopmentCardsText(player));
             }
             else
             {
                 Theme.Card(dl, ColorPalette.DevelopmentCardPurple, ColorPalette.DevelopmentCardDarkPurple, TextureAtlas.Sprite.Development, pos + new Vector2(x, 0), new Vector2(17, 24), true, 1);
                 Theme.DrawText(dl, Theme.Regular15, pos + new Vector2(x + 24, 2), Theme.TextSoft, devCards.ToString());
+                SeatStatTooltip(pos + new Vector2(x, -9), pos + new Vector2(x + 24 + Theme.TextSize(Theme.Regular15, devCards.ToString()).X, 24),
+                    devCards == 0 ? "No development cards" : $"{CardsText(devCards, "development card")}, types hidden");
             }
 
             x += 84;
@@ -806,6 +811,15 @@ namespace Client
             if (DrawButton(dl, "curtain", min + new Vector2(24, 100), new Vector2(260, 56), $"I'm {Theme.PlayerName(next)}, show my hand", true, Theme.Accent, Theme.AccentBorder, Theme.Bold15))
                 _curtainFor = null;
             ImGui.End();
+        }
+
+        /// <summary>
+        /// A tooltip above a group of a seat's stats (cards and their count) while the mouse is over it
+        /// </summary>
+        private static void SeatStatTooltip(Vector2 min, Vector2 max, string text)
+        {
+            if (ImGui.IsMouseHoveringRect(min, max))
+                DrawTooltip(ImGui.GetForegroundDrawList(), new Vector2((min.X + max.X) / 2, min.Y + 5), text);
         }
 
         private static void DrawTooltip(ImDrawListPtr dl, Vector2 bottomCenter, string text)

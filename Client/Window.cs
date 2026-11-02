@@ -33,6 +33,8 @@ namespace Client
             double after = double.Parse(Option("--after") ?? "3", CultureInfo.InvariantCulture);
             int seed = int.Parse(Option("--seed") ?? "7", CultureInfo.InvariantCulture);
             string? size = Option("--size");
+            if (Option("--mouse") is string mouse && mouse.Split(',') is [string mouseX, string mouseY])
+                GuiImpl.MouseOverride = new Vector2i(int.Parse(mouseX, CultureInfo.InvariantCulture), int.Parse(mouseY, CultureInfo.InvariantCulture));
 
             VideoMode mode = VideoMode.DesktopMode;
             if (size != null)

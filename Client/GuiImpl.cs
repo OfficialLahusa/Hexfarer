@@ -184,6 +184,12 @@ namespace Client
             _windowHasFocus = false;
         }
 
+        /// <summary>
+        /// A fixed mouse position for the UI instead of the real one (--mouse X,Y), so scripted screenshots can show hover
+        /// states such as tooltips
+        /// </summary>
+        public static Vector2i? MouseOverride { get; set; }
+
         public static void Update(RenderWindow window, Time dt)
         {
             Update(window, window, dt);
@@ -194,7 +200,7 @@ namespace Client
             // Update OS/hardware mouse cursor if imgui isn't drawing a software cursor
             UpdateMouseCursor(window);
 
-            Update(Mouse.GetPosition(window), new Vector2f(target.Size.X, target.Size.Y), dt);
+            Update(MouseOverride ?? Mouse.GetPosition(window), new Vector2f(target.Size.X, target.Size.Y), dt);
 
             if (ImGui.GetIO().MouseDrawCursor)
             {

@@ -124,6 +124,11 @@ namespace Client
         }
 
         /// <summary>
+        /// A count of cards in words, e.g. "1 resource card" or "9 resource cards"
+        /// </summary>
+        private static string CardsText(uint count, string card) => count == 1 ? $"1 {card}" : $"{count} {card}s";
+
+        /// <summary>
         /// A hand's known resource cards by type, e.g. "7 lumber, 6 brick"
         /// </summary>
         private static string ResourceCardsText(PlayerState player)
