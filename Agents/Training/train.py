@@ -416,6 +416,9 @@ def main():
     parser.add_argument("--policy-dim", type=int, default=64)
     # Temperatur der Policy-Targets: Visit-Anteile hoch 1/T, T < 1 schärft
     parser.add_argument("--policy-temperature", type=float, default=1.0)
+    # Wonach Checkpoints und Early Stopping gehen: val_loss ist nur der Value Loss, val_total_loss zählt auch Policy und
+    # Aux Heads mit ihren Gewichten (bei Policy-Training wählt val_loss sonst Epochen mit schwächerer Policy)
+    parser.add_argument("--monitor", default="val_loss", choices=["val_loss", "val_total_loss"])
     args = parser.parse_args()
 
     sources = [parse_source(spec) for spec in args.data] if args.data else []
@@ -514,13 +517,13 @@ def main():
     callbacks = [
         L.pytorch.callbacks.ModelCheckpoint(
             dirpath=args.checkpoint_dir,
-            monitor="val_loss",
+            monitor=args.monitor,
             mode="min",
             save_top_k=3,
-            filename="epoch={epoch}-step={step}-val_loss={val_loss:.6f}",
+            filename="epoch={epoch}-step={step}-" + args.monitor + "={" + args.monitor + ":.6f}",
             auto_insert_metric_name=False,
         ),
-        L.pytorch.callbacks.EarlyStopping(monitor="val_loss", patience=20, mode="min"),
+        L.pytorch.callbacks.EarlyStopping(monitor=args.monitor, patience=20, mode="min"),
         L.pytorch.callbacks.LearningRateMonitor(),
     ]
 
