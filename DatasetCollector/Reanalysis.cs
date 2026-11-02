@@ -254,35 +254,13 @@ namespace DatasetCollector
                     MCTSTree tree = new(new GameState(state), (sbyte)state.Turn.PlayerIndex, reanalysis.Exploration, model: OpponentModel.MaxN);
                     await search.RunAsync(tree, double.PositiveInfinity, reanalysis.Iterations).ConfigureAwait(false);
                     countIterations(search.LastSearch!.Iterations);
-                    Action[] legal = [.. MCTSTree.GetValidActions(state)];
-                    results[i] = new Searched(legal, VisitsOfLegalMoves(legal, tree.RootNode.Children), tree.RootValues());
+                    (Action[] legal, uint[] visits) = tree.LegalMoveVisits();
+                    results[i] = new Searched(legal, visits, tree.RootValues());
                 }
             })).ToArray();
             while (!Task.WaitAll(searches, TimeSpan.FromSeconds(10)))
                 report();
             return results;
-        }
-
-        /// <summary>
-        /// The root visits per legal move: the root's children are the legal moves in the same order, except where a move
-        /// wins at once, which the tree searches alone (MCTSTree.ExpandNode); its visits then go to that move and the others
-        /// keep 0, so the target still teaches the policy to pick it among all legal moves
-        /// </summary>
-        internal static uint[] VisitsOfLegalMoves(Action[] legal, IReadOnlyList<MCTSNode> children)
-        {
-            uint[] visits = new uint[legal.Length];
-            if (children.Count == legal.Length)
-            {
-                for (int m = 0; m < legal.Length; m++) visits[m] = children[m].VisitCount;
-                return visits;
-            }
-            foreach (MCTSNode child in children)
-            {
-                int m = Array.FindIndex(legal, move => move.IsSameDecision(child.LastAction!));
-                if (m < 0) throw new InvalidOperationException($"The root move {child.LastAction} is not among the legal moves.");
-                visits[m] += child.VisitCount;
-            }
-            return visits;
         }
 
         private static void Report(TextWriter log, Stopwatch stopwatch, long done, long total, long searched, long iterations)

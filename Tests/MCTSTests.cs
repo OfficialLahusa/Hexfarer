@@ -250,6 +250,49 @@ namespace Tests
             Assert.True(tree.RootNode.Children[0].LastAction!.IsSameDecision(winning!));
         }
 
+        [Fact]
+        public void PolicyTargetsCoverAllLegalMovesAlsoWhereOnlyTheWinningMoveIsSearched()
+        {
+            TestUtil.Seed(146);
+            GameState state = TestUtil.NewGame();
+            Assert.True(TestUtil.PlayUntil(state, s => TestUtil.IsFreeTurn(s) && TestUtil.CountBuildings(s, s.Turn.PlayerIndex, Intersection.BuildingType.Settlement) > 0));
+            int playerIdx = state.Turn.PlayerIndex;
+            PlayerState player = state.Players[playerIdx];
+            foreach ((ResourceCardType type, uint amount) in new[] { (ResourceCardType.Ore, 3u), (ResourceCardType.Grain, 2u) })
+                if (player.ResourceCards.Get(type) < amount)
+                    TestUtil.GiveCards(state, playerIdx, type, amount - player.ResourceCards.Get(type));
+
+            // Without a winning move: the children are the legal moves, their visits stay in place
+            player.VictoryPoints.SettlementPoints += (byte)(8 - player.VictoryPoints.Total);
+            List<Action> legal = MCTSTree.GetValidActions(state);
+            MCTSTree open = new(new GameState(state), (sbyte)playerIdx, 1.414, model: OpponentModel.MaxN);
+            open.ExpandNode(open.RootNode, new GameState(state));
+            uint[] counts = Enumerable.Range(1, legal.Count).Select(i => (uint)i).ToArray();
+            (Action[] moves, uint[] visits) = open.LegalMoveVisits(counts);
+            Assert.Equal(legal.Count, moves.Length);
+            Assert.All(Enumerable.Range(0, legal.Count), m => Assert.True(moves[m].IsSameDecision(legal[m])));
+            Assert.Equal(counts, visits);
+            Assert.Throws<ArgumentException>(() => open.LegalMoveVisits([1, 2]));
+
+            // One city away from ten points: the tree searches only the city, the targets still list every legal move
+            player.VictoryPoints.SettlementPoints += 1;
+            legal = MCTSTree.GetValidActions(state);
+            Action winning = MCTSTree.WinningMove(state, legal)!;
+            MCTSTree tree = new(new GameState(state), (sbyte)playerIdx, 1.414, model: OpponentModel.MaxN);
+            tree.ExpandNode(tree.RootNode, new GameState(state));
+            Assert.Single(tree.RootNode.Children);
+            (moves, visits) = tree.LegalMoveVisits([7]);
+            Assert.Equal(legal.Count, moves.Length);
+            int winningIdx = legal.FindIndex(move => move.IsSameDecision(winning));
+            Assert.Equal(Enumerable.Range(0, legal.Count).Select(m => m == winningIdx ? 7u : 0u), visits);
+
+            // Self-play records the same: all legal moves, the visits on the winning one
+            IStateVectorizer vectorizer = StateVectorizer.Current;
+            SelfPlayCollector.RecordedPosition position = SelfPlayCollector.SelfPlayGame.Record(state, 0, tree, 7, vectorizer, new float[vectorizer.FeatureDim], null);
+            Assert.Equal(legal.Count, position.Moves.Length);
+            Assert.All(position.Visits, visit => Assert.Equal(winningIdx, visit.move));
+        }
+
         // ================================================================ MCTSAgent with the value net
 
         [SkippableFact]

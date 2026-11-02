@@ -10,7 +10,7 @@ namespace SelfPlayCollector
     /// <summary>
     /// A position recorded after a full search: the state vector, the player deciding there, the search's mean result of
     /// every player at the root, and the visits of the root moves by their index in MCTSTree.GetValidActions (the order of
-    /// the root's children), only those with visits; Moves are the root's moves in that order
+    /// the root's children), only those with visits; Moves are all legal moves in that order (MCTSTree.LegalMoveVisits)
     /// </summary>
     internal sealed record RecordedPosition(int ActionIndex, int Round, int Actor, Half[] Features, double[] RootValues, uint RootVisits,
         long Iterations, (int move, uint visits)[] Visits, Action[] Moves);
@@ -128,7 +128,7 @@ namespace SelfPlayCollector
         /// <param name="cleanPriors">The root's priors before the root noise, to record the visits without those the noise
         /// caused (MCTSTree.PrunedRootVisits); null records the visits as they are</param>
         /// <param name="tracker">Under hidden information the actor's tracker: the position is recorded as its view</param>
-        private static RecordedPosition Record(GameState state, int actionIndex, MCTSTree tree, long iterations, IStateVectorizer vectorizer, float[] features,
+        internal static RecordedPosition Record(GameState state, int actionIndex, MCTSTree tree, long iterations, IStateVectorizer vectorizer, float[] features,
             float[]? cleanPriors, BeliefTracker? tracker = null)
         {
             if (tracker != null) ViewVectorizer.VectorizeView(state, tracker, features);
@@ -137,14 +137,14 @@ namespace SelfPlayCollector
             for (int i = 0; i < features.Length; i++)
                 row[i] = (Half)features[i];
 
-            IReadOnlyList<MCTSNode> children = tree.RootNode.Children;
-            uint[] counts = cleanPriors != null ? tree.PrunedRootVisits(cleanPriors) : children.Select(child => child.VisitCount).ToArray();
+            // All legal moves, also where the tree searched only a winning move (it gets the visits, the others 0)
+            (Action[] moves, uint[] counts) = tree.LegalMoveVisits(cleanPriors != null ? tree.PrunedRootVisits(cleanPriors) : null);
             var visits = new List<(int, uint)>();
-            for (int i = 0; i < children.Count; i++)
+            for (int i = 0; i < moves.Length; i++)
                 if (counts[i] > 0) visits.Add((i, counts[i]));
 
             return new RecordedPosition(actionIndex, state.Turn.RoundCounter, tree.RootNode.DeciderIndex, row, tree.RootValues(), tree.RootNode.VisitCount,
-                iterations, visits.ToArray(), children.Select(child => child.LastAction!).ToArray());
+                iterations, visits.ToArray(), moves);
         }
 
         /// <summary>

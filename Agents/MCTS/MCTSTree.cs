@@ -153,6 +153,35 @@ namespace Agents.MCTS
         }
 
         /// <summary>
+        /// The root's visits over all legal moves of the root state (in GetValidActions order), for policy targets: the
+        /// root's children are those moves in that order, except where a move wins at once, which ExpandNode keeps as the
+        /// only child; its visits then go to that move and the other legal moves get 0, so the target still teaches picking
+        /// it among them. childVisits are per child (e.g. PrunedRootVisits), null takes the children's visit counts.
+        /// </summary>
+        public (Action[] moves, uint[] visits) LegalMoveVisits(uint[]? childVisits = null)
+        {
+            MCTSNode[] children = RootNode.ChildArray;
+            childVisits ??= children.Select(child => child.VisitCount).ToArray();
+            if (childVisits.Length != children.Length)
+                throw new ArgumentException($"{childVisits.Length} visit counts for {children.Length} children.", nameof(childVisits));
+
+            Action[] legal = [.. GetValidActions(RootState)];
+            uint[] visits = new uint[legal.Length];
+            if (children.Length == legal.Length)
+            {
+                childVisits.CopyTo(visits, 0);
+                return (legal, visits);
+            }
+            for (int c = 0; c < children.Length; c++)
+            {
+                int m = Array.FindIndex(legal, move => move.IsSameDecision(children[c].LastAction!));
+                if (m < 0) throw new InvalidOperationException($"The root move {children[c].LastAction} is not among the root state's legal moves.");
+                visits[m] += childVisits[c];
+            }
+            return (legal, visits);
+        }
+
+        /// <summary>
         /// The root's visits without those that only exploration under noise gave a move (policy target pruning as in
         /// KataGo): every move but the most visited keeps the visits PUCT with the clean priors (in the order of the root's
         /// children) would have given it before its value fell below the most visited move's PUCT; moves left with at most

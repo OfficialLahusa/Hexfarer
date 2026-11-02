@@ -67,7 +67,8 @@ namespace SelfPlayCollector
 
         /// <summary>
         /// Writes the policy files for a run collected without them, by replaying every game from its save file. Returns the
-        /// number of positions.
+        /// number of positions. Such runs predate the policy head and with it the search's winning-move shortcut (MCTSTree
+        /// .ExpandNode), so their root children, which the visit indices of samples.csv count, are always all legal moves.
         /// </summary>
         public static long ConvertRun(string directory, TextWriter log)
         {
