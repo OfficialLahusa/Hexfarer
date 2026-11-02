@@ -385,6 +385,10 @@ def main():
     parser.add_argument("--augment-board", action="store_true")
     # Breite der ersten beiden Hidden Layer (die dritte hat die Hälfte)
     parser.add_argument("--hidden", type=int, default=2048)
+    # Block-Encoder vor dem MLP (siehe block_encoder.py): Breiten für Tile, Kreuzung, Kante und Spieler, z.B. 32,16,8,128
+    parser.add_argument("--blocks", default=None)
+    # v2.1 (siehe structured_net.py): relative Sitze, Nachbar-Features, Köpfe pro Spieler; Breiten aus --blocks
+    parser.add_argument("--structured", action="store_true")
     parser.add_argument("--batch-size", type=int, default=2048)
     parser.add_argument("--lr", type=float, default=1e-3)
     # Konstante Lernrate statt One-Cycle (Self-Play-Schleife: kleine Schritte pro Generation)
@@ -476,7 +480,9 @@ def main():
                       policy_dim=args.policy_dim)
     model = StateValueModule(in_dim=in_dim, lr=args.lr, constant_lr=args.constant_lr, placement_weight=args.placement_weight, vp_share_weight=args.vp_share_weight,
                              rounds_weight=args.rounds_weight, ranking_weight=args.ranking_weight, normalize_inputs=args.normalize_inputs,
-                             ranking_placement_weight=args.ranking_placement_weight, hidden=args.hidden, **policy)
+                             ranking_placement_weight=args.ranking_placement_weight, hidden=args.hidden,
+                             blocks=[int(width) for width in args.blocks.split(",")] if args.blocks else None,
+                             structured=args.structured, **policy)
     if args.init_from:
         # Gleiche Architektur und Normalisierung wie der Checkpoint, sonst schlägt das Laden fehl; nur der Optimizer startet neu.
         # Ein neuer Policy Head fehlt im Checkpoint und startet zufällig

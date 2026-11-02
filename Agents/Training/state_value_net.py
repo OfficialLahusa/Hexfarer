@@ -14,7 +14,8 @@ PLACEMENT_SCORES = (1.0, 2.0 / 3.0, 1.0 / 3.0, 0.0)
 
 
 class StateValueNet(nn.Module):
-    def __init__(self, in_dim, hidden=2048, aux_heads=False, normalize_inputs=False, policy_types=0, policy_vocabulary=0, policy_dim=64):
+    def __init__(self, in_dim, hidden=2048, aux_heads=False, normalize_inputs=False, policy_types=0, policy_vocabulary=0, policy_dim=64,
+                 blocks=None):
         super().__init__()
         # Optionale Standardisierung der Inputs (Mittelwert und Skala pro Feature aus den Trainingsdaten, siehe set_input_normalization),
         # Teil des Modells und damit auch des ONNX-Exports, die Vektorizer bleiben unskaliert
@@ -24,8 +25,16 @@ class StateValueNet(nn.Module):
         else:
             self.input_mean = None
             self.input_scale = None
+        # Optionale Block-Encoder (Breiten für Tile, Kreuzung, Kante, Spieler, siehe block_encoder.py) vor dem MLP
+        if blocks:
+            from block_encoder import BlockEncoder
+            self.blocks = BlockEncoder(in_dim, *blocks)
+            trunk_dim = self.blocks.out_dim
+        else:
+            self.blocks = None
+            trunk_dim = in_dim
         self.net = nn.Sequential(
-            nn.Linear(in_dim, hidden), nn.LayerNorm(hidden), nn.GELU(), nn.Dropout(0.2),
+            nn.Linear(trunk_dim, hidden), nn.LayerNorm(hidden), nn.GELU(), nn.Dropout(0.2),
             nn.Linear(hidden, hidden), nn.LayerNorm(hidden), nn.GELU(), nn.Dropout(0.2),
             nn.Linear(hidden, int(hidden/2)), nn.LayerNorm(int(hidden/2)), nn.GELU(), nn.Dropout(0.2),
             nn.Linear(int(hidden/2), 4)
@@ -51,12 +60,18 @@ class StateValueNet(nn.Module):
     def _normalize(self, x):
         return x if self.input_mean is None else (x - self.input_mean) * self.input_scale
 
-    def forward(self, x):
-        return self.net(self._normalize(x))
+    def _encode(self, x, raw=None):
+        """Input des MLP: die standardisierten Features, mit Block-Encodern deren Encodings (raw: die unskalierten
+        Features, falls x schon standardisiert ist, für die Koordinaten des Räubers)"""
+        normalized = self._normalize(x)
+        return normalized if self.blocks is None else self.blocks(normalized, x if raw is None else raw)
 
-    def forward_all(self, x):
+    def forward(self, x):
+        return self.net(self._encode(x))
+
+    def forward_all(self, x, raw=None):
         """Value Logits und, falls vorhanden, die Outputs der Aux Heads"""
-        features = self.net[:-1](self._normalize(x))
+        features = self.net[:-1](self._encode(x, raw))
         outputs = {"logits": self.net[-1](features)}
         if self.aux is not None:
             outputs["placements"] = self.aux["placements"](features).view(-1, PLAYER_COUNT, PLAYER_COUNT)
@@ -78,12 +93,19 @@ class StateValueNet(nn.Module):
 class StateValueModule(L.LightningModule):
     def __init__(self, in_dim, lr=1e-3, weight_decay=1e-4, constant_lr=False,
                  placement_weight=0.0, vp_share_weight=0.0, rounds_weight=0.0, ranking_weight=0.0, normalize_inputs=False,
-                 ranking_placement_weight=0.0, hidden=2048, policy_weight=0.0, policy_types=0, policy_vocabulary=0, policy_dim=64):
+                 ranking_placement_weight=0.0, hidden=2048, policy_weight=0.0, policy_types=0, policy_vocabulary=0, policy_dim=64,
+                 blocks=None, structured=False):
         super().__init__()
         self.save_hyperparameters()
         aux_heads = placement_weight > 0 or vp_share_weight > 0 or rounds_weight > 0 or ranking_placement_weight > 0
-        self.model = StateValueNet(in_dim, hidden=hidden, aux_heads=aux_heads, normalize_inputs=normalize_inputs,
-                                   policy_types=policy_types if policy_weight > 0 else 0, policy_vocabulary=policy_vocabulary, policy_dim=policy_dim)
+        policy = dict(policy_types=policy_types if policy_weight > 0 else 0, policy_vocabulary=policy_vocabulary, policy_dim=policy_dim)
+        if structured:
+            # v2.1: Block-Encoder mit relativen Sitzen, Nachbar-Features und Köpfen pro Spieler (siehe structured_net.py)
+            from structured_net import StructuredValueNet
+            self.model = StructuredValueNet(in_dim, hidden=hidden, aux_heads=aux_heads, normalize_inputs=normalize_inputs,
+                                            widths=tuple(blocks) if blocks else (32, 16, 8, 128), **policy)
+        else:
+            self.model = StateValueNet(in_dim, hidden=hidden, aux_heads=aux_heads, normalize_inputs=normalize_inputs, blocks=blocks, **policy)
         self.model.placements_trained = placement_weight > 0
 
     def set_input_normalization(self, states):
@@ -95,6 +117,9 @@ class StateValueModule(L.LightningModule):
         scale = np.where(binary, 1.0, 1.0 / np.maximum(states.std(axis=0), 1e-3))
         self.model.input_mean.copy_(torch.from_numpy(mean.astype(np.float32)))
         self.model.input_scale.copy_(torch.from_numpy(scale.astype(np.float32)))
+        # Modelle mit relativen Sitzen brauchen für alle Spieler dieselbe Standardisierung
+        if hasattr(self.model, "symmetrize_normalization"):
+            self.model.symmetrize_normalization()
         return int((~binary).sum())
 
     def forward(self, x):

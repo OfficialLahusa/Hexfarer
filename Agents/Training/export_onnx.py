@@ -29,11 +29,13 @@ class ExportedValueNet(nn.Module):
         self.model = model
 
     def forward(self, x):
+        raw = x
         if self.fp16:
             if self.input_mean is not None:
                 x = (x - self.input_mean) * self.input_scale
             x = x.half()
-        outputs = self.model.forward_all(x)
+        # Block-Encoder lesen die Koordinaten des Räubers aus den unskalierten Features
+        outputs = self.model.forward_all(x, raw)
         result = [outputs["logits"].float()]
         if self.with_placements:
             result.append(outputs["placements"].float())
