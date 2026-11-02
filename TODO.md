@@ -136,7 +136,9 @@
 		- Duell gegen das MLP mit gleichem Rezept (nur Value): v2.1 bei 5k +40 [+12, +69], bei 20k +46 [+16, +78] (beide H1), gleiche Denkzeit (0,1 s) Desktop +16 [−8, +41], Server +36 [+3, +69] (318/195 Paare, offen); Block-Encoder 5k +6 [−10, +23]; Self-Play ohne Policy 430k statt 740k Iterationen/s (−42%)
 		- v2.1 mit Policy Head von Grund auf (Schleife 3/4 60%, Iteration 3 10%, v2 30%, λ 0,8, T 2): Policy lernt bis zum Schluss (Top-Zug 63,7%), Value überfittet die Self-Play-Ausgänge (val 0,636 in Epoche 4, ab Epoche 10 ~0,85; Platzierungs-Loss steigt durchgehend; Präzisions-Bester-Zug 49,5%) => feinjustieren statt von Grund auf
 		- Feinjustiert wie E2 => P1 (von structured-abs bzw. MLP, 50% Schleife 3/4 + 50% v2, λ 0,5, T 2, 4 Epochen à 5M, 5 min auf dem Server): v2.1-ft gegen kt5fwcz5 +55 [+21, +90], gegen MLP-ft +89 [+43, +138] (5k, beide H1); Präzisions-KL 0,0102 statt 0,0176, bester Zug 57,3% statt 55,9%; Policy nach 4 Epochen nicht konvergiert; offen: gleiche Denkzeit gegen kt5fwcz5
-		- Offen: v2 per Reanalyse mit kt5fwcz5 mit Policy-Targets versehen (~11 Mrd. Iterationen bei 1600 pro Position, ~7 h), dann von Grund auf ohne Spielausgänge als Value-Target
+		- Reanalyse fertig (DatasetCollector --reanalyze, train.py --policy-dir): spielt v2 per Seed nach, sucht jede Position mit Wahl (~50%, Ø 11,6 Züge), Targets über alle legalen Züge; Test mit kt5fwcz5 auf 200 Matches: 207 Positionen/s, 330k Iterationen/s => ganz v2 (~5M Suchen à 1600) ~6-7 h auf einer Maschine
+		- Offen: v2 ganz reanalysieren, dann v2.1 von Grund auf mit Policy ohne Spielausgänge als Value-Target
+		- Self-Play-Targets in Positionen mit Gewinnzug haben nur diesen einen Zug (MCTS sucht nur ihn, SelfPlayGame schreibt die Root-Kinder) => kein Lernsignal dort; wie in der Reanalyse alle legalen Züge schreiben
 	- State Vectorizer über push/pop Architektur eine Index-Aufschlüsselung generieren lassen
 	- Expansionspotenzial mit den Pips der erreichbaren Bauplätze (die Endspiel-Features zählen nur die Bauplätze)
 	- Weit zurückliegende Spieler: Winrates oft exakt 0, der Platzierungs-Head liefert dort das Signal
