@@ -97,6 +97,14 @@ class RunlogTest(unittest.TestCase):
         self.assertEqual(crashed["end"]["exit"], 1)
         self.assertIn("boom", crashed["end"]["error"])
 
+    def test_every_kind_of_run_can_be_registered(self):
+        for kind in ("train", "export", "precision", "selfplay-loop", "selfplay-gen", "collect", "convert", "reanalysis", "duel", "bench", "other"):
+            runlog.start(kind, name=kind, argv=["x"]).end(0)
+        self.assertEqual([run["kind"] for run in runlog.load()][-3:], ["duel", "bench", "other"])
+        with self.assertRaises(ValueError):
+            runlog.start("unknown", argv=["x"])
+        self.assertEqual(runlog.main(["run", "--kind", "reanalysis", "--name", "via-cli", "--", sys.executable, "-c", "print('ok')"]), 0)
+
     def test_a_run_ends_once_and_tracked_commands_record_their_last_line(self):
         run = runlog.start("other", name="twice", argv=["x"])
         run.end(0)

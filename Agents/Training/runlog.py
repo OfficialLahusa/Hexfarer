@@ -35,7 +35,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 REGISTRY_FILE = "runs.jsonl"
-KINDS = ("train", "export", "precision", "selfplay-loop", "selfplay-gen", "collect", "convert", "duel", "bench", "other")
+KINDS = ("train", "export", "precision", "selfplay-loop", "selfplay-gen", "collect", "convert", "reanalysis", "duel", "bench", "other")
 
 # Set for the processes a run starts: the run they belong to, and whether they were started directly by the wrapper
 ENV_ID, ENV_DIRECT, ENV_PARENT = "HEXFARER_RUN_ID", "HEXFARER_RUN_DIRECT", "HEXFARER_RUN_PARENT"
