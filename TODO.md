@@ -130,6 +130,7 @@
 - Branching Factor Histogramm aus Playouts generieren
 - StateValueNetv2
 	- v2 erstmal auf v1 basiert mit Player/Tile Encoderblöcken, Embeddings statt OneHot, GraphConv auf v3 schieben
+		- Geplant: Nachbar-Features in den Block-Encodern (fester 1-Hop-Gather über den Brettgraphen) statt Positional Encoding (die Slot-Reihenfolge gibt dem Trunk die Position schon): Kreuzung + ihre bis zu 3 Tiles (Typ, Zahl, Räuber), Kante + Gebäude/Besitzer ihrer 2 Kreuzungen, Tile + Gebäude/Besitzer seiner 6 Kreuzungen, statisch Küste/Hafenseite; Kosten ~1,2-1,3x MLP
 	- State Vectorizer über push/pop Architektur eine Index-Aufschlüsselung generieren lassen
 	- Expansionspotenzial mit den Pips der erreichbaren Bauplätze (die Endspiel-Features zählen nur die Bauplätze)
 	- Weit zurückliegende Spieler: Winrates oft exakt 0, der Platzierungs-Head liefert dort das Signal
