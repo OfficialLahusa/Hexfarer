@@ -352,8 +352,14 @@ namespace Tests
             }
         }
 
-        [Fact]
-        public void ReanalysisSearchesEveryEntryWithAChoiceAndWritesItsVisitShares()
+        /// <param name="runsPerBatch">Match runs replayed at once: all 4 in one batch, or batches (single runs, 2 + 2, 3 + 1)
+        /// whose boundaries the rows, the overlapping replays and the chosen match runs cross</param>
+        [Theory]
+        [InlineData(2000)]
+        [InlineData(1)]
+        [InlineData(2)]
+        [InlineData(3)]
+        public void ReanalysisSearchesEveryEntryWithAChoiceAndWritesItsVisitShares(int runsPerBatch)
         {
             var settings = new CollectorSettings { Threads = 2, Matches = 4, SamplesPerMatch = 4, PlayoutsPerSample = 2, SiblingsPerGroup = 3, Seed = 171 };
             string datasetDirectory = CollectIntoTemporaryDirectory(settings, out _);
@@ -363,7 +369,7 @@ namespace Tests
                 var reanalysis = new ReanalysisSettings
                 {
                     ModelPath = TestUtil.FixturePath("ValueNet", "policy_tiny.onnx"), Iterations = 48, ConcurrentSearches = 3, Nets = 1,
-                    BatchRows = 32, LeavesPerBatch = 8, Provider = Agents.Inference.InferenceProvider.Cpu,
+                    BatchRows = 32, LeavesPerBatch = 8, Provider = Agents.Inference.InferenceProvider.Cpu, RunsPerBatch = runsPerBatch,
                 };
                 string output = Path.Combine(datasetDirectory, "reanalysis");
                 ReanalysisResult result = Reanalysis.Run(index, states, output, reanalysis, settings, TextWriter.Null);
@@ -450,6 +456,40 @@ namespace Tests
         }
 
         [Fact]
+        public void ReanalysisRowsGiveEachMoveItsOwnTokensAndShareOfTheVisits()
+        {
+            // A turn with cards for builds, trades and a development card: moves of several types and token counts
+            TestUtil.Seed(173);
+            GameState state = TestUtil.EmptyNormalTurn(1);
+            foreach (ResourceCardType type in new[] { ResourceCardType.Lumber, ResourceCardType.Brick, ResourceCardType.Wool, ResourceCardType.Grain, ResourceCardType.Ore })
+                TestUtil.GiveCards(state, 1, type, 4);
+            Action[] moves = [.. Agents.MCTS.MCTSTree.GetValidActions(state)];
+            Assert.True(moves.Length >= 5);
+            // A different number of visits for every move, some none
+            uint[] visits = moves.Select((_, m) => m % 4 == 1 ? 0u : (uint)(m + 1)).ToArray();
+
+            (short[] tokens, byte[] weights, float[] shares) = Reanalysis.EncodeMoves(moves, visits, 0);
+            int maxTokens = Agents.Inference.ActionEncoding.MaxTokens;
+            Assert.Equal((moves.Length * maxTokens, moves.Length * maxTokens, moves.Length), (tokens.Length, weights.Length, shares.Length));
+            double total = visits.Sum(v => (double)v);
+            short[] expectedTokens = new short[maxTokens];
+            float[] expectedWeights = new float[maxTokens];
+            for (int m = 0; m < moves.Length; m++)
+            {
+                int used = Agents.Inference.ActionEncoding.Encode(moves[m], expectedTokens, expectedWeights);
+                for (int t = 0; t < maxTokens; t++)
+                {
+                    Assert.Equal(t < used ? expectedTokens[t] : (short)-1, tokens[m * maxTokens + t]);
+                    Assert.Equal(t < used ? (byte)expectedWeights[t] : (byte)0, weights[m * maxTokens + t]);
+                }
+                Assert.Equal((float)(visits[m] / total), shares[m]);
+            }
+
+            // A search without visits at the root's moves stops the reanalysis instead of writing NaN targets
+            Assert.Throws<InvalidOperationException>(() => Reanalysis.EncodeMoves(moves, new uint[moves.Length], 7));
+        }
+
+        [Fact]
         public void TheCommandLineSetsTheReanalysis()
         {
             var commandLine = CommandLine.Parse(["--seed", "20261025", "--reanalyze", "index.csv", "states.npy", "out", "--model", "net.onnx", "--iterations", "800",
@@ -462,8 +502,7 @@ namespace Tests
                  reanalysis.BatchRows, reanalysis.LeavesPerBatch, reanalysis.Exploration, reanalysis.Provider));
             Assert.Null(CommandLine.Parse([]).Reanalyze);
             Assert.Throws<ArgumentException>(() => CommandLine.Parse(["--reanalyze", "i", "s", "o"]));
-            Assert.Throws<ArgumentException>(() => CommandLine.Parse(["--reanalyze", "i", "s", "o", "--model", "m", "--batch", "4", "--leaves", "8"]));
-            Assert.Throws<ArgumentException>(() => CommandLine.Parse(["--provider", "tpu"]));
+            Assert.Throws<ArgumentException>(() => CommandLine.Parse(["--reanalyze", "i", "s", "o", "--model", "m", "--batch", "4", "--leaves", "8"]));            Assert.Throws<ArgumentException>(() => CommandLine.Parse(["--provider", "tpu"]));
         }
 
         /// <summary>

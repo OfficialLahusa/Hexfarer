@@ -36,6 +36,11 @@ namespace DatasetCollector
         public double Exploration { get; init; } = 1.414;
         public InferenceProvider Provider { get; init; } = InferenceProvider.Auto;
 
+        /// <summary>
+        /// Match runs replayed at once; the next batch replays while the current one is searched
+        /// </summary>
+        internal int RunsPerBatch { get; init; } = 2000;
+
         public void Validate()
         {
             if (string.IsNullOrEmpty(ModelPath)) throw new ArgumentException("--reanalyze needs --model.");
@@ -47,6 +52,7 @@ namespace DatasetCollector
             if (LeavesPerBatch < 1) throw new ArgumentException("--leaves must be at least 1.");
             if (BatchRows < LeavesPerBatch) throw new ArgumentException("--batch must be at least --leaves.");
             if (Exploration < 0) throw new ArgumentException("--search-exploration must not be negative.");
+            if (RunsPerBatch < 1) throw new ArgumentException("A replay batch needs at least one match run.");
         }
     }
 
@@ -70,8 +76,6 @@ namespace DatasetCollector
     /// </summary>
     public static class Reanalysis
     {
-        private const int RunsPerBatch = 2000;
-
         private sealed record Entry(long Row, GameState? State);
         private sealed record Searched(Action[] Moves, uint[] Visits, double[] RootValues);
 
@@ -114,9 +118,7 @@ namespace DatasetCollector
             {
                 long row = 0;
                 byte[] offsetBytes = new byte[sizeof(long)], valueBytes = new byte[MCTSNode.PlayerCount * sizeof(float)];
-                byte[] tokenBytes = new byte[ActionEncoding.MaxTokens * sizeof(short)], weightBytes = new byte[ActionEncoding.MaxTokens];
-                short[] moveTokens = new short[ActionEncoding.MaxTokens];
-                float[] moveWeights = new float[ActionEncoding.MaxTokens];
+                byte[] tokenBytes = new byte[ActionEncoding.MaxTokens * sizeof(short)], shareBytes = new byte[sizeof(float)];
 
                 void WriteOffset()
                 {
@@ -127,22 +129,17 @@ namespace DatasetCollector
                 {
                     if (result != null)
                     {
-                        double total = result.Visits.Sum(v => (double)v);
-                        for (int m = 0; m < result.Moves.Length; m++)
+                        (short[] moveTokens, byte[] moveWeights, float[] shares) = EncodeMoves(result.Moves, result.Visits, row);
+                        for (int m = 0; m < shares.Length; m++)
                         {
-                            int used = ActionEncoding.Encode(result.Moves[m], moveTokens, moveWeights);
                             for (int t = 0; t < ActionEncoding.MaxTokens; t++)
-                            {
-                                BinaryPrimitives.WriteInt16LittleEndian(tokenBytes.AsSpan(t * sizeof(short)), t < used ? moveTokens[t] : (short)-1);
-                                weightBytes[t] = t < used ? checked((byte)moveWeights[t]) : (byte)0;
-                            }
+                                BinaryPrimitives.WriteInt16LittleEndian(tokenBytes.AsSpan(t * sizeof(short)), moveTokens[m * ActionEncoding.MaxTokens + t]);
                             tokens.WriteRow(tokenBytes);
-                            weights.WriteRow(weightBytes);
-                            Span<byte> share = stackalloc byte[sizeof(float)];
-                            BinaryPrimitives.WriteSingleLittleEndian(share, (float)(result.Visits[m] / total));
-                            targets.WriteRow(share);
+                            weights.WriteRow(moveWeights.AsSpan(m * ActionEncoding.MaxTokens, ActionEncoding.MaxTokens));
+                            BinaryPrimitives.WriteSingleLittleEndian(shareBytes, shares[m]);
+                            targets.WriteRow(shareBytes);
                         }
-                        moves += result.Moves.Length;
+                        moves += shares.Length;
                         searched++;
                     }
                     WriteOffset();
@@ -154,23 +151,27 @@ namespace DatasetCollector
 
                 WriteOffset();
                 // The replay of the next batch of match runs overlaps the searches of the current one
-                Task<Entry[]>? next = selected.Count > 0 ? Task.Run(() => Replay(selected.Take(RunsPerBatch).ToList(), settings, states, statesData)) : null;
-                for (int start = 0; next != null; start += RunsPerBatch)
+                int batchRuns = reanalysis.RunsPerBatch;
+                long totalEntries = selected.Sum(g => (long)g.entries.Count), entriesBefore = 0;
+                Task<Entry[]>? next = selected.Count > 0 ? Task.Run(() => Replay(selected.Take(batchRuns).ToList(), settings, states, statesData)) : null;
+                for (int start = 0; next != null; start += batchRuns)
                 {
                     Entry[] entries = next.GetAwaiter().GetResult();
-                    var following = selected.Skip(start + RunsPerBatch).Take(RunsPerBatch).ToList();
+                    var following = selected.Skip(start + batchRuns).Take(batchRuns).ToList();
                     next = following.Count > 0 ? Task.Run(() => Replay(following, settings, states, statesData)) : null;
 
                     while (row < entries[0].Row) WriteRow(null);
+                    long entriesDone = entriesBefore + entries.Length;
                     Searched?[] results = Search(entries, evaluator, nets[0], reanalysis, count => Interlocked.Add(ref iterations, count),
-                        () => Report(log, stopwatch, start + entries.Length, selected.Sum(g => g.entries.Count), searched, Interlocked.Read(ref iterations)), cancellation);
+                        () => Report(log, stopwatch, entriesDone, totalEntries, searched, Interlocked.Read(ref iterations)), cancellation);
+                    entriesBefore = entriesDone;
                     if (cancellation.IsCancellationRequested) throw new OperationCanceledException(cancellation);
                     for (int i = 0; i < entries.Length; i++)
                     {
                         if (entries[i].Row != row) throw new InvalidOperationException($"Entry of row {entries[i].Row} came where row {row} was due.");
                         WriteRow(results[i]);
                     }
-                    log.Write($"\r{Math.Min(start + RunsPerBatch, selected.Count)}/{selected.Count} match runs, {searched} entries searched, "
+                    log.Write($"\r{Math.Min(start + batchRuns, selected.Count)}/{selected.Count} match runs, {searched} entries searched, "
                         + $"{searched / Math.Max(stopwatch.Elapsed.TotalSeconds, 1e-9):F0}/s, {Interlocked.Read(ref iterations) / Math.Max(stopwatch.Elapsed.TotalSeconds, 1e-9):N0} iterations/s   ");
                 }
                 while (row < rows) WriteRow(null);
@@ -190,6 +191,33 @@ namespace DatasetCollector
             WriteMetadata(partial, modelPath, nets[0], reanalysis, settings, indexPath, statesPath, selected, started, DateTime.Now, result);
             Directory.Move(partial, outputDirectory);
             return result;
+        }
+
+        /// <summary>
+        /// A searched entry's rows of the policy arrays, one per move: its tokens (-1 after the used ones) and their weights,
+        /// MaxTokens each, and its share of the root visits
+        /// </summary>
+        internal static (short[] tokens, byte[] weights, float[] shares) EncodeMoves(Action[] moves, uint[] visits, long row)
+        {
+            double total = visits.Sum(v => (double)v);
+            // Shares of nothing would be NaN targets
+            if (total == 0) throw new InvalidOperationException($"The search of row {row} gave the root's moves no visits.");
+            short[] tokens = new short[moves.Length * ActionEncoding.MaxTokens];
+            byte[] weights = new byte[moves.Length * ActionEncoding.MaxTokens];
+            float[] shares = new float[moves.Length];
+            short[] moveTokens = new short[ActionEncoding.MaxTokens];
+            float[] moveWeights = new float[ActionEncoding.MaxTokens];
+            for (int m = 0; m < moves.Length; m++)
+            {
+                int used = ActionEncoding.Encode(moves[m], moveTokens, moveWeights);
+                for (int t = 0; t < ActionEncoding.MaxTokens; t++)
+                {
+                    tokens[m * ActionEncoding.MaxTokens + t] = t < used ? moveTokens[t] : (short)-1;
+                    weights[m * ActionEncoding.MaxTokens + t] = t < used ? checked((byte)moveWeights[t]) : (byte)0;
+                }
+                shares[m] = (float)(visits[m] / total);
+            }
+            return (tokens, weights, shares);
         }
 
         /// <summary>
