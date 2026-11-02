@@ -19,7 +19,7 @@ try:
     import numpy as np
     import onnxruntime as ort
     import torch
-    from export_onnx import export_model
+    from export_onnx import export_model, output_difference
     from state_value_net import StateValueModule, masked_kl, policy_cross_entropy, sibling_ranking
     from train import GroupBatchSampler, MixedDataset, MixSampler, StateDataset, policy_dirs, widen_state_dict
 except ImportError as error:  # pragma: no cover - depends on the environment
@@ -127,6 +127,20 @@ class TrainingTest(unittest.TestCase):
         loss_flat = sibling_ranking(logits, win_rates, groups, actors, torch.zeros(2, 4, 4), placement_labels, 0.5)[0]
         self.assertGreater(loss_flat.item(), 0.0)
         self.assertLess(loss_right.item(), loss_flat.item())
+
+    def test_the_export_parity_catches_small_values_off_next_to_large_ones(self):
+        tolerance = 1e-4  # export_model's for float32 exports
+        logits = np.array([[480.0, 0.5, -0.25, 3.0]], dtype=np.float32)
+        # float32 rounding of logits in the hundreds passes
+        self.assertLess(output_difference(logits, logits + np.array([[3e-3, 1e-6, 0, 2e-5]], dtype=np.float32)), tolerance)
+        # A small value 2% off next to a large one does not, though it is far below the largest value's rounding
+        off = logits.copy()
+        off[0, 1] += 0.01
+        self.assertGreater(output_difference(logits, off), tolerance)
+        # float16 queries: their rounding passes, a query 10% off does not
+        queries = np.array([[1.5, -0.002, 0.75]], dtype=np.float16)
+        self.assertLess(output_difference(queries, queries.astype(np.float32) * np.float32(1.001)), tolerance)
+        self.assertGreater(output_difference(queries, queries.astype(np.float32) * np.array([[1, 1, 1.1]], dtype=np.float32)), tolerance)
 
     def test_a_model_with_auxiliary_heads_exports_the_value_and_the_placements(self):
         torch.manual_seed(0)
