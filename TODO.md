@@ -66,7 +66,7 @@
 	- 5. Policy Head + PUCT: erledigt (siehe PolicyNet), P1 mhn8ihqb ist Default (auf HF), gegen E2 im 5k-Duell +122 Elo [+78, +169] (104 Paare), Wiederholung +73 [+33, +115] (125 Paare); PUCT mit uniformen Priors ±0 [−47, +47] => der Gewinn kommt von der gelernten Policy
 		- Tempo: Queries als float16, Priors in der Backpropagation => P1 223k statt 170k Iterationen/s (E2 ~310k); Query-Dim 32 gibt 257k bei gleichem Loss, spielte aber nur +13 [−34, +61] gegen E2 => bei 64 bleiben, Streuung zwischen Trainingsläufen desselben Rezepts prüfen
 		- Gleiche Denkzeit (0,25 s pro Zug) gegen E2: +132 Elo [+44, +242] (33 Paare, 16:4 doppelt gewonnen) => Policy lohnt sich trotz ~30% weniger Iterationen; offen: 60k-Duell
-		- c_puct (505oscbr gegen sich bei 1,414, 5k): 0,7 −44 [−92, +3], 1,0 +19 [−12, +50], 2,0 −78 [−147, −14], 3,0 −28 [−76, +19] => Optimum um 1,0-1,4, mehr Exploration schadet; Default bleibt vorerst 1,414; c 1,0 gegen 1,414 später mit SPRT [0, +20] prüfen (vielleicht ~+10-20 Elo)
+		- c_puct (505oscbr gegen sich bei 1,414, 5k): 0,7 −44 [−92, +3], 1,0 +19 [−12, +50], 2,0 −78 [−147, −14], 3,0 −28 [−76, +19] => Optimum um 1,0-1,4, mehr Exploration schadet; c 1,0 gegen 1,414 (kt5fwcz5, SPRT [0, +20]): −3 [−22, +15] (997 Spiele, H0) => 1,414 bleibt
 		- First Play Urgency (bei c 1,0): 0,0 −10 [−50, +29], 0,25 −37 [−92, +16] gegen 0,1, beide SPRT H0 => 0,1 bleibt
 		- 64 statt 256 Blätter pro Batch bei gleichen Iterationen +10 [−43, +64] (68 Paare), pro Zug ~3x langsamer => 256 bleibt
 		- Duelle mit SPRT [0, +40] (Arena mirror): alte Duelle wären nach 36-103 statt 50-269 Paaren entschieden gewesen; bisher liefen alle Duelle auf denselben Karten (Seeds ab 30000), jetzt eigener Seed-Bereich pro Duell aus dem Namen; P1 gegen E2 auf frischen Karten wiederholen
@@ -130,13 +130,17 @@
 - Branching Factor Histogramm aus Playouts generieren
 - StateValueNetv2
 	- v2 erstmal auf v1 basiert mit Player/Tile Encoderblöcken, Embeddings statt OneHot, GraphConv auf v3 schieben
-		- Geplant: Nachbar-Features in den Block-Encodern (fester 1-Hop-Gather über den Brettgraphen) statt Positional Encoding (die Slot-Reihenfolge gibt dem Trunk die Position schon): Kreuzung + ihre bis zu 3 Tiles (Typ, Zahl, Räuber), Kante + Gebäude/Besitzer ihrer 2 Kreuzungen, Tile + Gebäude/Besitzer seiner 6 Kreuzungen, statisch Küste/Hafenseite; Kosten ~1,2-1,3x MLP
+		- Offline (E2-Rezept von Grund auf, gleiche Daten, Präzisions-Set): MLP-Wiederholung = E2 (KL 0,0105); Block-Encoder (block_encoder.py) KL −13%, bester Zug 61,8% statt 61,4%, Breite egal
+		- v2.1 (structured_net.py): Nachbar-Features über den Brettgraphen (Kreuzung + Tiles/Nachbarn/Straßen, Kante + Enden/Nachbarkanten, Tile + Ecken), Besitz-Summen pro Spieler, Köpfe pro Spieler; mit absoluten Sitzen KL −34% (0,0070), bester Zug 64,2% (+2,9 Pp), Regret 0,30 statt 0,38 Pp
+		- Relative Sitze (Spieler am Zug = 0) kosten Ranking: bester Zug −2,5 Pp in Geschwistergruppen mit Wechsel des Spielers am Zug => absolute Sitze, Rotation weiter per Augmentation
+		- Duell gegen das MLP mit gleichem Rezept (nur Value, 5k): v2.1 +40 [+12, +69] (571 Spiele, H1), Block-Encoder +6 [−10, +23] (1474 Spiele, offen); Self-Play ohne Policy 430k statt 740k Iterationen/s (−42%)
 	- State Vectorizer über push/pop Architektur eine Index-Aufschlüsselung generieren lassen
 	- Expansionspotenzial mit den Pips der erreichbaren Bauplätze (die Endspiel-Features zählen nur die Bauplätze)
 	- Weit zurückliegende Spieler: Winrates oft exakt 0, der Platzierungs-Head liefert dort das Signal
 	- nn.Embedding für kategorische Inputs (jeweils eins pro Art)
 - Graph Transformer als Alternative
 	- Ein Token pro Tile, Intersection, Edge und Spieler plus globaler Token, Attention Bias nach Graph-Distanz, d=128 mit 4 Layern ~1-3x das MLP
+		- Gemessen (PyTorch fp16, Batch 1024): Transformer 4-37x, Message Passing 6-19x langsamer als das MLP => v2.1 (Gather statt Attention) zuerst
 	- Spieler-symmetrisch (geteilter Player Encoder, Value Head pro Spieler) => Rotation eingebaut statt Augmentation
 	- Erwartung ~+50 bis +180 Elo nach langsamerer Inference; Augmentation am MLP hat einen Teil schon geholt (Rotation -26%, Brett -2%)
 	- Stufen: spieler-symmetrisches MLP (DeepSets-artig) => Transformer, Vergleich bei gleichen Daten und gleicher Denkzeit
