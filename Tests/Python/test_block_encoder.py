@@ -5,6 +5,7 @@ Skipped when torch or onnxruntime are not installed.
 Run from the repository root:  python -m unittest discover -s Tests/Python -v
 """
 
+import copy
 import os
 import sys
 import tempfile
@@ -63,6 +64,71 @@ class BlockEncoderTest(unittest.TestCase):
         self.assertEqual(intersections.shape[1:], (54, 14))
         self.assertEqual(edges.shape[1:], (72, 7))
         self.assertEqual(encoder(x, x).shape, (1, encoder.out_dim))
+
+    def test_a_change_in_the_state_shows_up_in_the_block_of_its_element(self):
+        # Change one thing in the YAML, vectorize again, and check where the features changed: the index lists in
+        # block_indices must match what the vectorizer writes, also within the derived and endgame features
+        base = load_state_yaml(os.path.join(FIXTURES, "midgame.yaml"))["GameState"]
+        before = np.asarray(state_to_feature_vector(base))
+        indices = block_indices(FEATURE_DIM)
+        owner = {}
+        for name in ("tiles", "intersections", "edges", "players"):
+            for k, element in enumerate(indices[name]):
+                for i in element:
+                    owner[i] = (name, k)
+
+        def changes(edit):
+            state = copy.deepcopy(base)
+            edit(state)
+            changed = np.nonzero(np.asarray(state_to_feature_vector(state)) != before)[0]
+            self.assertGreater(len(changed), 0)
+            return {owner.get(int(i), ("global", 0)) for i in changed}
+
+        robber = base["Board"]["Robber"]["Y"] * CLASSIC_MAP_WIDTH + base["Board"]["Robber"]["X"]
+        board_blocks = {"tiles", "intersections", "edges", "global"}
+        # Changes that concern one player only, chosen to reach every kind of derived and endgame feature: the hand (build
+        # groups, race, victory points this turn), a knight card (knight lead), a port (trade rates), a city (production)
+        for p in range(4):
+            def more_lumber(state, p=p):
+                state["Players"][p]["ResourceCards"]["Lumber"] += 1
+
+            def knight_in_hand(state, p=p):
+                state["Players"][p]["DevelopmentCards"]["Knight"] += 1
+
+            def wool_port(state, p=p):
+                state["Players"][p]["PortPrivileges"] = "WoolTwoToOne"
+            for edit in (more_lumber, knight_in_hand, wool_port):
+                self.assertEqual(changes(edit), {("players", p)}, f"{edit.__name__} of player {p}")
+
+            settlement = next(i for i, x in enumerate(base["Board"]["Intersections"]) if x["Building"] == "Settlement" and x["Owner"] == p)
+
+            def upgrade(state, i=settlement):
+                state["Board"]["Intersections"][i]["Building"] = "City"
+            self.assertEqual(changes(upgrade), {("intersections", settlement), ("players", p)}, f"city of player {p}")
+
+        hexes = {h["Y"] * CLASSIC_MAP_WIDTH + h["X"]: h for h in base["Board"]["Map"]["Values"]}
+        for slot, tile in enumerate(LAND_TILES):
+            if tile == robber or hexes[tile]["Number"] is None:
+                continue
+            def other_number(state, tile=tile):
+                h = next(h for h in state["Board"]["Map"]["Values"] if h["Y"] * CLASSIC_MAP_WIDTH + h["X"] == tile)
+                h["Number"] = 5 if h["Number"] != 5 else 9
+            board = {element for element in changes(other_number) if element[0] in board_blocks}
+            self.assertEqual(board, {("tiles", slot)}, f"number of tile {tile}")
+
+        empty = [i for i, x in enumerate(base["Board"]["Intersections"]) if x["Building"] == "None"][:6]
+        for p, i in zip(range(4), empty):
+            def settle(state, i=i, p=p):
+                state["Board"]["Intersections"][i].update(Building="Settlement", Owner=p)
+            board = {element for element in changes(settle) if element[0] in board_blocks}
+            self.assertEqual(board, {("intersections", i)}, f"settlement of player {p} on intersection {i}")
+
+        free = [e for e, x in enumerate(base["Board"]["Edges"]) if x["Building"] == "None"][:6]
+        for p, e in zip(range(4), free):
+            def build_road(state, e=e, p=p):
+                state["Board"]["Edges"][e].update(Building="Road", Owner=p)
+            board = {element for element in changes(build_road) if element[0] in board_blocks}
+            self.assertEqual(board, {("edges", e)}, f"road of player {p} on edge {e}")
 
     def test_a_net_with_blocks_exports_with_parity(self):
         torch.manual_seed(0)
