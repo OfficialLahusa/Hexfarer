@@ -193,9 +193,7 @@ class StructuredValueNet(nn.Module):
     def forward(self, x):
         return self.forward_all(x)["logits"]
 
-    def policy_logits(self, query, tokens, weights):
-        """Logits of the moves, as in StateValueNet"""
-        embedded = (self.policy_embeddings(tokens.clamp(min=0)) * (weights * (tokens >= 0))[..., None]).sum(dim=2)
-        types = tokens[..., 0].clamp(min=0)
-        selected = query.gather(1, types[..., None].expand(-1, -1, query.shape[-1]))
-        return (selected * embedded).sum(dim=-1)
+    def policy_logits(self, query, rows, tokens, weights):
+        """Logits of the moves, one after another, as in StateValueNet"""
+        embedded = (self.policy_embeddings(tokens.clamp(min=0)) * (weights * (tokens >= 0))[..., None]).sum(dim=1)
+        return (query[rows, tokens[:, 0].clamp(min=0)] * embedded).sum(dim=-1)

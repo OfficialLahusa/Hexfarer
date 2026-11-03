@@ -18,6 +18,14 @@ from state_to_vector import FEATURE_DIM, VIEW_FEATURE_DIM  # noqa: E402
 AUX_ARRAYS = ("placements", "vp_shares", "rounds_left", "sibling_groups", "actors")
 # Policy-Targets aus selfplay_to_dataset.py: die legalen Züge pro Position als Tokens und ihr Anteil an den Root Visits
 POLICY_ARRAYS = ("policy_offsets", "policy_tokens", "policy_weights", "policy_targets")
+# Batch-Einträge mit einer Zeile pro Zug statt pro Position (siehe StateDataset._policy_batch)
+MOVE_KEYS = ("policy_tokens", "policy_weights", "policy_rows", "policy_slots")
+
+
+def single_item(batch):
+    """Ein Batch aus einer Position als einzelnes Sample: die Einträge pro Position ohne Batch-Dimension, die Züge (alle
+    von dieser Position) wie sie sind"""
+    return {key: value if key in MOVE_KEYS else value[0] for key, value in batch.items()}
 
 
 def read_policy_layout(directory):
@@ -38,8 +46,8 @@ class StateDataset(Dataset):
         self.target_lambda = None
         # Visit-Anteile als Policy-Target hoch 1/T (T < 1 schärft die flachen Verteilungen der UCT-Suche), pro Position normiert
         self.policy_temperature = policy_temperature
-        # Zeilen mit mehr legalen Zügen bekommen kein Policy-Target: der Batch wird auf die größte Zuganzahl aufgefüllt, und
-        # einzelne Zeilen mit tausenden Zügen (Abwürfe aus großen Händen in v2) blähen ihn auf Hunderte MB auf
+        # Zeilen mit mehr legalen Zügen bekommen kein Policy-Target (seit die Züge ungepolstert kommen, für den Speicher
+        # nicht mehr nötig)
         self.policy_max_moves = policy_max_moves
         self.target_paths = {}
         if target_lambda is not None and aux_dir is not None:
@@ -114,7 +122,7 @@ class StateDataset(Dataset):
         return len(self.states)
 
     def __getitem__(self, idx):
-        return {key: value[0] for key, value in self.__getitems__([idx]).items()}
+        return single_item(self.__getitems__([idx]))
 
     def __getitems__(self, indices):
         # Ganze Batches auf einmal (der DataLoader ruft das statt __getitem__ pro Sample auf): ein sortierter Zugriff pro
@@ -181,13 +189,17 @@ class StateDataset(Dataset):
 
     def _policy_batch(self, indices, ts):
         """
-        Die legalen Züge der Zeilen, aufgefüllt auf die größte Zuganzahl im Batch: Tokens (-1 = leer), ihre Gewichte, der
-        Anteil an den Root Visits und eine Maske der echten Züge. Zeilen ohne Policy-Targets haben keine Züge.
+        Die legalen Züge der Zeilen ungepolstert hintereinander, Zeile für Zeile: ihre Tokens [Züge, max_tokens] (-1 = leer)
+        mit Gewichten und pro Zug seine Zeile im Batch und seine Stelle in ihr. Nur der Anteil an den Root Visits und die
+        Maske der echten Züge sind auf die größte Zuganzahl im Batch aufgefüllt [Zeilen, Breite], eine Zahl pro Stelle.
+        Aufgefüllte Tokens wären in v2 im Mittel 14-mal so groß (Breite 75 bei 11k echten Zügen pro 2048 Zeilen), mit
+        einem Abwurf von 2486 Zügen im Batch rund 375-mal. Zeilen ohne Policy-Targets haben keine Züge.
         """
         n = len(indices)
         if not self.policy:
-            return {"policy_tokens": torch.full((n, 0, self.max_tokens), -1, dtype=torch.int64),
-                    "policy_weights": torch.zeros((n, 0, self.max_tokens)),
+            return {"policy_tokens": torch.full((0, self.max_tokens), -1, dtype=torch.int64),
+                    "policy_weights": torch.zeros((0, self.max_tokens)),
+                    "policy_rows": torch.zeros(0, dtype=torch.int64), "policy_slots": torch.zeros(0, dtype=torch.int64),
                     "policy_targets": torch.zeros((n, 0)), "policy_mask": torch.zeros((n, 0), dtype=torch.bool)}
         offsets = self.policy["policy_offsets"]
         starts, counts = offsets[indices], offsets[indices + 1] - offsets[indices]
@@ -195,8 +207,8 @@ class StateDataset(Dataset):
             counts = np.where(counts > self.policy_max_moves, 0, counts)
         width = max(int(counts.max()), 1)
         total = int(counts.sum())
-        row_of = np.repeat(np.arange(n), counts)
-        slot = np.arange(total) - np.repeat(np.cumsum(counts) - counts, counts)
+        row_of = np.repeat(np.arange(n, dtype=np.int64), counts)
+        slot = np.arange(total, dtype=np.int64) - np.repeat(np.cumsum(counts) - counts, counts)
         source = np.repeat(starts, counts) + slot
         # Sortiert aus den MemMaps lesen
         order = np.argsort(source, kind="stable")
@@ -206,17 +218,14 @@ class StateDataset(Dataset):
         def take(name, dtype):
             return np.asarray(self.policy[name][source[order]], dtype=dtype)[restore]
 
-        tokens = np.full((n, width, self.max_tokens), -1, dtype=np.int64)
-        weights = np.zeros((n, width, self.max_tokens), dtype=np.float32)
         targets = np.zeros((n, width), dtype=np.float32)
         mask = np.zeros((n, width), dtype=bool)
-        moved = take("policy_tokens", np.int64)
+        tokens = take("policy_tokens", np.int64)
         # Die Brett-Symmetrie der Zeile auch auf ihre Züge anwenden
-        symmetry = np.broadcast_to(ts[row_of][:, None], moved.shape)
-        valid = moved >= 0
-        moved[valid] = self.token_symmetries[symmetry[valid], moved[valid]]
-        tokens[row_of, slot] = moved
-        weights[row_of, slot] = take("policy_weights", np.float32)
+        symmetry = np.broadcast_to(ts[row_of][:, None], tokens.shape)
+        valid = tokens >= 0
+        tokens[valid] = self.token_symmetries[symmetry[valid], tokens[valid]]
+        weights = take("policy_weights", np.float32)
         shares = take("policy_targets", np.float32)
         if self.policy_temperature != 1.0:
             shares = shares ** (1.0 / self.policy_temperature)
@@ -226,6 +235,7 @@ class StateDataset(Dataset):
         targets[row_of, slot] = shares
         mask[row_of, slot] = True
         return {"policy_tokens": torch.from_numpy(tokens), "policy_weights": torch.from_numpy(weights),
+                "policy_rows": torch.from_numpy(row_of), "policy_slots": torch.from_numpy(slot),
                 "policy_targets": torch.from_numpy(targets), "policy_mask": torch.from_numpy(mask)}
 
 
@@ -239,12 +249,14 @@ class MixedDataset(Dataset):
         return int(self.offsets[-1])
 
     def __getitem__(self, idx):
-        return {key: value[0] for key, value in self.__getitems__([idx]).items()}
+        return single_item(self.__getitems__([idx]))
 
     def __getitems__(self, indices):
         indices = np.asarray(indices, dtype=np.int64)
         source = np.searchsorted(self.offsets, indices, side="right") - 1
         parts = [self.datasets[s].__getitems__(indices[source == s] - self.offsets[s]) for s in np.unique(source)]
+        # Die Teile kommen nach Quelle hintereinander; die Zeilen der Züge zählen ab dem Anfang ihres Teils
+        rows_before = np.cumsum([0] + [len(part["x"]) for part in parts])
         # Die Quellen können Labels in verschiedenen Typen speichern (v2 float16, Self-Play float32)
         batch = {}
         for key in parts[0]:
@@ -252,13 +264,16 @@ class MixedDataset(Dataset):
             for part in parts[1:]:
                 dtype = torch.promote_types(dtype, part[key].dtype)
             tensors = [part[key].to(dtype) for part in parts]
-            if key.startswith("policy_"):
+            if key in ("policy_tokens", "policy_weights"):
+                # Verschieden viele Tokens pro Zug (Daten ohne Layout: einer)
+                tokens = max(t.shape[1] for t in tensors)
+                tensors = [F.pad(t, [0, tokens - t.shape[1]], value=-1 if key == "policy_tokens" else 0) for t in tensors]
+            elif key == "policy_rows":
+                tensors = [t + int(before) for t, before in zip(tensors, rows_before)]
+            elif key in ("policy_targets", "policy_mask"):
                 # Die Quellen füllen auf verschieden viele Züge auf (Daten ohne Policy auf keinen)
-                # und auf verschieden viele Tokens pro Zug (Daten ohne Layout auf einen)
                 width = max(t.shape[1] for t in tensors)
-                tokens = max(t.shape[2] for t in tensors) if tensors[0].dim() == 3 else 0
-                tensors = [F.pad(t, ([0, tokens - t.shape[2]] if t.dim() == 3 else []) + [0, width - t.shape[1]],
-                                 value=-1 if key == "policy_tokens" else 0) for t in tensors]
+                tensors = [F.pad(t, [0, width - t.shape[1]]) for t in tensors]
             batch[key] = torch.cat(tensors)
         return batch
 

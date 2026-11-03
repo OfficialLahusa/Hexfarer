@@ -81,13 +81,11 @@ class StateValueNet(nn.Module):
             outputs["policy_query"] = self.policy_query(features).view(-1, self.policy_types, self.policy_dim)
         return outputs
 
-    def policy_logits(self, query, tokens, weights):
-        """Logits der Züge [batch, Züge] aus den Queries [batch, Typen, dim] und den Zug-Tokens [batch, Züge, Tokens]
-        (-1 = leer) mit ihren Gewichten"""
-        embedded = (self.policy_embeddings(tokens.clamp(min=0)) * (weights * (tokens >= 0))[..., None]).sum(dim=2)
-        types = tokens[..., 0].clamp(min=0)
-        selected = query.gather(1, types[..., None].expand(-1, -1, query.shape[-1]))
-        return (selected * embedded).sum(dim=-1)
+    def policy_logits(self, query, rows, tokens, weights):
+        """Logits der Züge [Züge] aus den Queries [batch, Typen, dim] und den Zügen hintereinander: ihre Zeile im Batch
+        [Züge] und ihre Tokens [Züge, Tokens] (-1 = leer) mit ihren Gewichten; der erste Token ist der Zugtyp"""
+        embedded = (self.policy_embeddings(tokens.clamp(min=0)) * (weights * (tokens >= 0))[..., None]).sum(dim=1)
+        return (query[rows, tokens[:, 0].clamp(min=0)] * embedded).sum(dim=-1)
 
 
 class StateValueModule(L.LightningModule):
@@ -193,10 +191,14 @@ def policy_cross_entropy(model, query, batch):
     """
     Kreuzentropie der Policy gegen den Anteil der Root Visits, Softmax nur über die legalen Züge (Maske); Zeilen ohne Züge
     (Daten ohne Policy-Targets) zählen nicht. Dazu der Anteil der Zeilen, in denen der meistbesuchte Zug auch das höchste
-    Logit hat.
+    Logit hat. Die Züge kommen hintereinander (Zeile und Stelle pro Zug), nur Targets und Maske sind aufgefüllt
+    [Zeilen, Breite]: jedes Logit kommt an seine Stelle in dieser Matrix, jede Stelle höchstens einmal, also ohne
+    Summieren und damit deterministisch.
     """
     mask, targets = batch["policy_mask"], batch["policy_targets"].float()
-    logits = model.policy_logits(query.float(), batch["policy_tokens"], batch["policy_weights"].float())
+    rows, slots = batch["policy_rows"], batch["policy_slots"]
+    moves = model.policy_logits(query.float(), rows, batch["policy_tokens"], batch["policy_weights"].float())
+    logits = torch.full(mask.shape, float("-inf"), device=moves.device, dtype=moves.dtype).index_put((rows, slots), moves)
     logits = logits.masked_fill(~mask, float("-inf"))
     has_moves = mask.any(dim=1)
     log_probs = torch.where(mask, F.log_softmax(logits.masked_fill(~has_moves[:, None], 0.0), dim=-1), torch.zeros_like(logits))

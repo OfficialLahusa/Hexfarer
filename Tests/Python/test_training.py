@@ -39,6 +39,92 @@ def write_source(directory, rows, features, label_dtype, self_play):
         np.save(os.path.join(directory, "winners.npy"), np.array([3, 2, 1] * (rows // 3 + 1), dtype=np.int8)[:rows])
 
 
+def random_moves(rng, counts, max_tokens=3):
+    """Moves per row as (tokens, weights, share): a move type, then board or resource tokens (-1 after the used ones),
+    and visit shares that add up to 1 per row"""
+    rows = []
+    for count in counts:
+        shares = rng.dirichlet(np.ones(count)) if count else []
+        moves = []
+        for m in range(count):
+            used = int(rng.integers(1, max_tokens + 1))
+            tokens = [int(rng.integers(0, 19))] + [int(rng.integers(19, 213)) for _ in range(used - 1)] + [-1] * (max_tokens - used)
+            weights = [1] + [int(rng.integers(1, 10)) for _ in range(used - 1)] + [0] * (max_tokens - used)
+            moves.append((tokens, weights, float(shares[m])))
+        rows.append(moves)
+    return rows
+
+
+def write_policy(directory, rows, max_tokens):
+    """The policy arrays of a dataset (as from selfplay_to_dataset.py or a reanalysis) with the given moves per row"""
+    os.makedirs(directory, exist_ok=True)
+    moves = [move for row in rows for move in row]
+    np.save(os.path.join(directory, "policy_offsets.npy"), np.concatenate([[0], np.cumsum([len(row) for row in rows])]).astype(np.int64))
+    np.save(os.path.join(directory, "policy_tokens.npy"), np.array([m[0] for m in moves], dtype=np.int16).reshape(-1, max_tokens))
+    np.save(os.path.join(directory, "policy_weights.npy"), np.array([m[1] for m in moves], dtype=np.uint8).reshape(-1, max_tokens))
+    np.save(os.path.join(directory, "policy_targets.npy"), np.array([m[2] for m in moves], dtype=np.float32))
+    with open(os.path.join(directory, "policy_layout.json"), "w") as file:
+        json.dump(POLICY_LAYOUT | {"max_tokens": [max_tokens]}, file)
+
+
+def flat_batch(rows, max_tokens, order):
+    """A policy batch as StateDataset builds it, with the moves in the given order instead of row by row (the rows and
+    slots say where each move belongs, so the order must not matter)"""
+    moves = [(r, s, move) for r, row in enumerate(rows) for s, move in enumerate(row)]
+    moves = [moves[i] for i in order]
+    width = max([len(row) for row in rows] + [1])
+    targets, mask = torch.zeros((len(rows), width)), torch.zeros((len(rows), width), dtype=torch.bool)
+    for r, s, (_, _, share) in moves:
+        targets[r, s], mask[r, s] = share, True
+    return {"policy_tokens": torch.tensor([m[2][0] for m in moves], dtype=torch.int64).reshape(-1, max_tokens),
+            "policy_weights": torch.tensor([m[2][1] for m in moves], dtype=torch.float32).reshape(-1, max_tokens),
+            "policy_rows": torch.tensor([m[0] for m in moves], dtype=torch.int64),
+            "policy_slots": torch.tensor([m[1] for m in moves], dtype=torch.int64),
+            "policy_targets": targets, "policy_mask": mask}
+
+
+def reference_policy_loss(embeddings, query, rows, temperature=1.0):
+    """The policy loss row by row in plain loops, independent of the batch layout: the logit of a move is the query of its
+    type times the weighted sum of its token embeddings, then a softmax over the row's moves against its visit shares
+    (to the power 1/T, normalized); rows without moves don't count. Also the share of rows whose most visited move has the
+    highest logit."""
+    losses, hits = [], []
+    for r, moves in enumerate(rows):
+        if not moves:
+            continue
+        logits = []
+        for tokens, weights, _ in moves:
+            embedded = sum(weight * embeddings[token] for token, weight in zip(tokens, weights) if token >= 0)
+            logits.append((query[r, tokens[0]] * embedded).sum())
+        logits = torch.stack(logits)
+        shares = torch.tensor([share for _, _, share in moves]) ** (1.0 / temperature)
+        shares = shares / shares.sum()
+        losses.append(-(shares * torch.log_softmax(logits, dim=0)).sum())
+        hits.append(float(int(logits.argmax()) == int(shares.argmax())))
+    return torch.stack(losses).mean(), sum(hits) / len(hits)
+
+
+def moves_of(batch, row):
+    """The moves of one batch row, found through their rows and slots, in slot order: tokens, weights and targets"""
+    pick = torch.nonzero(batch["policy_rows"] == row).flatten()
+    pick = pick[torch.argsort(batch["policy_slots"][pick])]
+    slots = batch["policy_slots"][pick]
+    return batch["policy_tokens"][pick], batch["policy_weights"][pick], batch["policy_targets"][row, slots]
+
+
+def check_layout(test, batch):
+    """Every move has its own cell, the cells of a row are its first slots, and the mask marks exactly those cells"""
+    rows, slots, mask = batch["policy_rows"], batch["policy_slots"], batch["policy_mask"]
+    test.assertEqual(len(rows), len(batch["policy_tokens"]))
+    test.assertEqual(len(rows), len(batch["policy_weights"]))
+    cells = set(zip(rows.tolist(), slots.tolist()))
+    test.assertEqual(len(rows), len(cells), "two moves in one cell")
+    test.assertEqual(cells, set(map(tuple, torch.nonzero(mask).tolist())), "the mask doesn't mark the moves' cells")
+    for r in range(mask.shape[0]):
+        test.assertEqual(sorted(s for row, s in cells if row == r), list(range(int(mask[r].sum()))), f"row {r} has gaps")
+    test.assertTrue((batch["policy_targets"][~mask] == 0).all())
+
+
 @unittest.skipIf(IMPORT_ERROR is not None, f"training dependencies missing: {IMPORT_ERROR}")
 class TrainingTest(unittest.TestCase):
     def test_a_widened_checkpoint_computes_the_same_on_the_old_features(self):
@@ -241,37 +327,122 @@ class TrainingTest(unittest.TestCase):
             victims = POLICY_LAYOUT["victims"][0]
             np.testing.assert_array_equal(table[t, victims:], np.arange(victims, POLICY_LAYOUT["vocabulary"][1]))
 
-    def test_the_policy_loss_covers_only_legal_moves_of_rows_with_moves(self):
+    def test_the_policy_loss_matches_a_row_by_row_reference_whatever_the_order_of_the_moves(self):
+        # Rows with 3, 0, 1, 7, 300 and 2 moves: the loss, the accuracy and the gradients of the queries and the token
+        # embeddings must equal the plain loop over the rows, for the moves row by row, reversed and shuffled
         torch.manual_seed(1)
+        rng = np.random.default_rng(1)
         module = StateValueModule(in_dim=8, hidden=16, policy_weight=1.0, policy_types=19, policy_vocabulary=213, policy_dim=4)
-        query = module.model.forward_all(torch.randn(2, 8))["policy_query"]
-        tokens = torch.tensor([[[0, -1], [5, 30], [-1, -1]], [[-1, -1], [-1, -1], [-1, -1]]])
-        batch = {"policy_tokens": tokens, "policy_weights": (tokens >= 0).float(),
-                 "policy_targets": torch.tensor([[0.0, 1.0, 0.0], [0.0, 0.0, 0.0]]),
-                 "policy_mask": torch.tensor([[True, True, False], [False, False, False]])}
-        loss, _ = policy_cross_entropy(module.model, query, batch)
-        logits = module.model.policy_logits(query, tokens, batch["policy_weights"])[0, :2]
-        self.assertAlmostEqual(-torch.log_softmax(logits, dim=0)[1].item(), loss.item(), places=5)
-        loss.backward()
-        self.assertTrue(torch.isfinite(module.model.policy_embeddings.weight.grad).all())
+        rows = random_moves(rng, [3, 0, 1, 7, 300, 2])
+        query = module.model.forward_all(torch.randn(len(rows), 8))["policy_query"].detach().requires_grad_()
+        embeddings = module.model.policy_embeddings.weight
+        expected, expected_hits = reference_policy_loss(embeddings, query, rows)
+        expected_query, expected_embeddings = torch.autograd.grad(expected, [query, embeddings])
+        total = sum(len(row) for row in rows)
+        for name, order in (("row by row", range(total)), ("reversed", range(total - 1, -1, -1)), ("shuffled", rng.permutation(total))):
+            with self.subTest(name):
+                batch = flat_batch(rows, 3, list(order))
+                loss, hits = policy_cross_entropy(module.model, query, batch)
+                self.assertAlmostEqual(expected.item(), loss.item(), places=5)
+                self.assertAlmostEqual(expected_hits, hits.item(), places=6)
+                gradient_query, gradient_embeddings = torch.autograd.grad(loss, [query, embeddings])
+                torch.testing.assert_close(gradient_query, expected_query, rtol=1e-4, atol=1e-6)
+                torch.testing.assert_close(gradient_embeddings, expected_embeddings, rtol=1e-4, atol=1e-6)
+                # Rows without moves get no gradient
+                self.assertTrue((gradient_query[1] == 0).all())
 
-    def test_mixed_sources_pad_the_moves_of_sources_without_policy(self):
+    def test_the_structured_net_scores_moves_like_the_mlp(self):
+        from structured_net import StructuredValueNet
+        rng = np.random.default_rng(2)
+        module = StateValueModule(in_dim=8, hidden=16, policy_weight=1.0, policy_types=19, policy_vocabulary=213, policy_dim=4)
+        batch = flat_batch(random_moves(rng, [4, 2, 5]), 3, list(rng.permutation(11)))
+        query = torch.randn(3, 19, 4)
+        args = (query, batch["policy_rows"], batch["policy_tokens"], batch["policy_weights"])
+        torch.testing.assert_close(StructuredValueNet.policy_logits(module.model, *args), module.model.policy_logits(*args))
+
+    def test_a_batch_without_any_moves_has_no_policy_loss(self):
+        module = StateValueModule(in_dim=8, hidden=16, policy_weight=1.0, policy_types=19, policy_vocabulary=213, policy_dim=4)
+        query = torch.randn(3, 19, 4, requires_grad=True)
+        loss, hits = policy_cross_entropy(module.model, query, flat_batch([[], [], []], 3, []))
+        self.assertEqual(0.0, loss.item())
+        self.assertEqual(0.0, hits.item())
+        loss.backward()
+        self.assertTrue((query.grad == 0).all())
+
+    def test_each_row_of_a_batch_gets_exactly_its_own_moves(self):
+        # Requested out of order and with a row twice (sampling with replacement), at temperature 2
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
-            first, second = os.path.join(directory, "a"), os.path.join(directory, "b")
-            write_source(first, rows=3, features=8, label_dtype=np.float32, self_play=True)
-            write_source(second, rows=4, features=8, label_dtype=np.float16, self_play=False)
-            np.save(os.path.join(first, "policy_offsets.npy"), np.array([0, 2, 5, 6]))
-            np.save(os.path.join(first, "policy_tokens.npy"), np.array([[0, -1], [5, 20], [1, -1], [2, -1], [3, 21], [4, -1]], dtype=np.int16))
-            np.save(os.path.join(first, "policy_weights.npy"), np.ones((6, 2), dtype=np.uint8))
-            np.save(os.path.join(first, "policy_targets.npy"), np.array([0.5, 0.5, 1, 0, 0, 1], dtype=np.float32))
-            with open(os.path.join(first, "policy_layout.json"), "w") as file:
-                json.dump(POLICY_LAYOUT | {"max_tokens": [2]}, file)
-            mixed = MixedDataset([StateDataset(os.path.join(d, "states.npy"), os.path.join(d, "win_rates.npy"), d) for d in (first, second)])
-            batch = mixed.__getitems__([1, 4, 0])
-            self.assertEqual((3, 3, 2), tuple(batch["policy_tokens"].shape))
-            np.testing.assert_array_equal(batch["policy_mask"].sum(dim=1).numpy(), [3, 2, 0])
-            np.testing.assert_array_equal(batch["policy_tokens"][2].numpy(), -1)
-            np.testing.assert_allclose(batch["policy_targets"][0].numpy(), [1, 0, 0])
+            source = os.path.join(directory, "v2")
+            write_source(source, rows=8, features=8, label_dtype=np.float16, self_play=False)
+            stored = random_moves(np.random.default_rng(3), [2, 0, 5, 1, 40, 0, 3, 6])
+            write_policy(source, stored, 3)
+            dataset = StateDataset(os.path.join(source, "states.npy"), os.path.join(source, "win_rates.npy"), source, policy_temperature=2.0)
+            indices = [6, 2, 4, 0, 5, 2, 7, 3, 1]
+            batch = dataset.__getitems__(indices)
+            check_layout(self, batch)
+            for row, index in enumerate(indices):
+                tokens, weights, targets = moves_of(batch, row)
+                moves = stored[index]
+                np.testing.assert_array_equal(tokens.numpy(), np.array([m[0] for m in moves], dtype=np.int64).reshape(-1, 3), f"row {row}")
+                np.testing.assert_array_equal(weights.numpy(), np.array([m[1] for m in moves], dtype=np.float32).reshape(-1, 3), f"row {row}")
+                shares = np.array([m[2] for m in moves]) ** 0.5
+                np.testing.assert_allclose(targets.numpy(), shares / shares.sum() if len(moves) else [], rtol=1e-5, err_msg=f"row {row}")
+            # The loss of the batch is the reference loss of the stored moves of the requested rows
+            module = StateValueModule(in_dim=8, hidden=16, policy_weight=1.0, policy_types=19, policy_vocabulary=213, policy_dim=4)
+            query = torch.randn(len(indices), 19, 4)
+            loss, _ = policy_cross_entropy(module.model, query, batch)
+            expected, _ = reference_policy_loss(module.model.policy_embeddings.weight, query, [stored[i] for i in indices], temperature=2.0)
+            self.assertAlmostEqual(expected.item(), loss.item(), places=5)
+
+    def test_each_row_turns_its_moves_with_its_own_board_symmetry(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            source = os.path.join(directory, "v2")
+            write_source(source, rows=4, features=8, label_dtype=np.float16, self_play=False)
+            # Board tokens only (intersections, edges, tiles), which every symmetry but the identity moves
+            stored = [[([5, 19 + i, 73 + j], [1, 1, 1], 0.5) for i, j in ((0, 3), (20, 40))] for _ in range(4)]
+            write_policy(source, stored, 3)
+            dataset = StateDataset(os.path.join(source, "states.npy"), os.path.join(source, "win_rates.npy"), source)
+            ts = np.array([3, 0, 7, 11])
+            batch = dataset._policy_batch(np.array([2, 0, 3, 1]), ts)
+            for row in range(4):
+                tokens, _, _ = moves_of(batch, row)
+                expected = dataset.token_symmetries[ts[row]][np.array([m[0] for m in stored[0]])]
+                np.testing.assert_array_equal(tokens.numpy(), expected, f"row {row} under symmetry {ts[row]}")
+            self.assertFalse((dataset.token_symmetries[3][[19, 73]] == [19, 73]).all(), "the symmetry must move the tokens")
+
+    def test_mixed_sources_keep_each_rows_moves_with_its_row(self):
+        # A source without policy targets (one token per move), then two with (3 and 2 tokens per move); the batch comes
+        # back source by source, and the moves of the later sources must point at their rows behind the earlier ones
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            rng = np.random.default_rng(4)
+            paths = [os.path.join(directory, name) for name in ("plain", "first", "second")]
+            write_source(paths[0], rows=5, features=8, label_dtype=np.float16, self_play=False)
+            write_source(paths[1], rows=6, features=8, label_dtype=np.float32, self_play=True)
+            write_source(paths[2], rows=6, features=8, label_dtype=np.float16, self_play=False)
+            stored = {1: random_moves(rng, [3, 1, 0, 4, 2, 6], 3), 2: random_moves(rng, [2, 5, 1, 0, 3, 2], 2)}
+            write_policy(paths[1], stored[1], 3)
+            write_policy(paths[2], stored[2], 2)
+            mixed = MixedDataset([StateDataset(os.path.join(p, "states.npy"), os.path.join(p, "win_rates.npy"), p) for p in paths])
+            indices = np.array([12, 3, 5, 16, 0, 8, 11, 13, 6])
+            batch = mixed.__getitems__(indices)
+            check_layout(self, batch)
+            self.assertEqual(3, batch["policy_tokens"].shape[1])
+            source = np.searchsorted(mixed.offsets, indices, side="right") - 1
+            order = [(s, i - mixed.offsets[s]) for s in np.unique(source) for i in indices[source == s]]
+            expected_rows = []
+            for row, (s, index) in enumerate(order):
+                np.testing.assert_array_equal(batch["x"][row].numpy(), np.load(os.path.join(paths[s], "states.npy"))[index])
+                moves = stored[s][index] if s in stored else []
+                expected_rows.append([(m[0] + [-1] * (3 - len(m[0])), m[1] + [0] * (3 - len(m[1])), m[2]) for m in moves])
+                tokens, weights, targets = moves_of(batch, row)
+                np.testing.assert_array_equal(tokens.numpy(), np.array([m[0] for m in expected_rows[-1]], dtype=np.int64).reshape(-1, 3), f"row {row}")
+                np.testing.assert_array_equal(weights.numpy(), np.array([m[1] for m in expected_rows[-1]], dtype=np.float32).reshape(-1, 3), f"row {row}")
+                np.testing.assert_allclose(targets.numpy(), [m[2] for m in moves], rtol=1e-6, err_msg=f"row {row}")
+            module = StateValueModule(in_dim=8, hidden=16, policy_weight=1.0, policy_types=19, policy_vocabulary=213, policy_dim=4)
+            query = torch.randn(len(indices), 19, 4)
+            loss, _ = policy_cross_entropy(module.model, query, batch)
+            expected, _ = reference_policy_loss(module.model.policy_embeddings.weight, query, expected_rows)
+            self.assertAlmostEqual(expected.item(), loss.item(), places=5)
 
     def test_policy_targets_can_come_from_another_directory(self):
         # A reanalysis of a value-only source: one entry per state, entries without moves stay out of the policy loss
@@ -303,7 +474,7 @@ class TrainingTest(unittest.TestCase):
             batch = dataset.__getitems__([0, 1, 2])
             np.testing.assert_array_equal(batch["policy_mask"].sum(dim=1).numpy(), [0, 3, 0])
             np.testing.assert_allclose(batch["policy_targets"][1].numpy(), [0.25, 0.75, 0])
-            np.testing.assert_array_equal(batch["policy_tokens"][1, 2].numpy(), [3, 21])
+            np.testing.assert_array_equal(moves_of(batch, 1)[0][2].numpy(), [3, 21])
             # The value labels stay the source's
             np.testing.assert_allclose(batch["y"].numpy(), plain.__getitems__([0, 1, 2])["y"].numpy())
 
@@ -339,9 +510,11 @@ class TrainingTest(unittest.TestCase):
             capped, full = batch(policy_max_moves=3), batch()
             np.testing.assert_array_equal(full["policy_mask"].sum(dim=1).numpy(), [4, 3, 2, 0])
             np.testing.assert_array_equal(capped["policy_mask"].sum(dim=1).numpy(), [0, 3, 2, 0])
-            self.assertEqual((4, 3, 2), tuple(capped["policy_tokens"].shape))
-            np.testing.assert_array_equal(capped["policy_tokens"][0].numpy(), -1)
-            np.testing.assert_array_equal(capped["policy_tokens"][1, :, 0].numpy(), [3, 4, 5])
+            self.assertEqual((4, 3), tuple(capped["policy_mask"].shape))
+            self.assertEqual((5, 2), tuple(capped["policy_tokens"].shape))
+            check_layout(self, capped)
+            self.assertEqual(0, len(moves_of(capped, 0)[0]))
+            np.testing.assert_array_equal(moves_of(capped, 1)[0][:, 0].numpy(), [3, 4, 5])
             np.testing.assert_allclose(capped["policy_targets"][1].numpy(), [0.2, 0.3, 0.5])
             np.testing.assert_allclose(capped["policy_targets"][2].numpy(), [0.5, 0.5, 0])
             np.testing.assert_allclose(capped["y"].numpy(), full["y"].numpy())
