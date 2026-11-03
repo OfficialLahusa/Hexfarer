@@ -142,10 +142,12 @@
 		- v2.1 mit Policy Head von Grund auf (Schleife 3/4 60%, Iteration 3 10%, v2 30%, λ 0,8, T 2): Policy lernt bis zum Schluss (Top-Zug 63,7%), Value überfittet die Self-Play-Ausgänge (val 0,636 in Epoche 4, ab Epoche 10 ~0,85; Platzierungs-Loss steigt durchgehend; Präzisions-Bester-Zug 49,5%) => feinjustieren statt von Grund auf
 		- Feinjustiert wie E2 => P1 (von structured-abs bzw. MLP, 50% Schleife 3/4 + 50% v2, λ 0,5, T 2, 4 Epochen à 5M, 5 min auf dem Server): v2.1-ft gegen kt5fwcz5 +55 [+21, +90], gegen MLP-ft +89 [+43, +138] (5k, beide H1); Präzisions-KL 0,0102 statt 0,0176, bester Zug 57,3% statt 55,9%; Policy nach 4 Epochen nicht konvergiert; gleiche Denkzeit (0,1 s, ~24k statt ~31k Iterationen) +18 [−12, +49] (248 Paare, offen)
 		- Länger feinjustiert (ft16, 16 Epochen, Epoche 7 nach Gesamt-Loss): Policy-Top-Zug 62,8% statt 60,0%, Value minimal schlechter; gegen v2.1-ft bei 5k −3 [−21, +15] (H0), bei 800 Iterationen +22 [+4, +39] (H1) => bessere Policy zählt nur bei kleinem Budget; gleiche Denkzeit (0,1 s, beide FP16, Server) gegen kt5fwcz5 +51 [+18, +85] (199 Paare, H1) => ft16 ist Standard-Net (n0e4owde, auf HF, Präzisions-KL 0,0107 statt 0,0176); Tempo (Net-Auswertungen pro Zug ft16/kt5fwcz5 bei gleicher Zeit): DirectML 0,66-0,8, CPU mit 4-8 Kernen 0,72-0,86, Desktop-CPU (16 Kerne) nur ~0,34 (v2.1 skaliert auf der CPU nicht über ~8 Threads, das MLP schon); offen: ggf. CPU-Duell auf 16 Kernen
-		- Reanalyse fertig (DatasetCollector --reanalyze, train.py --policy-dir): spielt v2 per Seed nach, sucht jede Position mit Wahl (~50%, Ø 11,6 Züge), Targets über alle legalen Züge; Test mit kt5fwcz5 auf 200 Matches: 207 Positionen/s, 330k Iterationen/s => ganz v2 (~5M Suchen à 1600) ~6-7 h auf einer Maschine
-		- Offen: v2 ganz reanalysieren, dann v2.1 von Grund auf mit Policy ohne Spielausgänge als Value-Target
+		- Reanalyse (DatasetCollector --reanalyze, merge_reanalysis.py, train.py --policy-dir): spielt v2 per Seed nach, sucht jede Position mit Wahl, Targets über alle legalen Züge; ganz v2 mit n0e4owde in 2x ~3,2 h (Desktop FP32 + Server FP16): 5,05M von 10M Positionen gesucht (Ø 10,7 Züge), der Rest hat nur einen legalen Zug (meist Würfeln oder Zugende ohne Bezahlbares)
+		- Offen: v2.1 von Grund auf nur auf v2 (Value aus den Playouts, Policy aus der Reanalyse, 40 Epochen, läuft), dann Präzisions-Set und Duell gegen n0e4owde
 		- Danach: Value-Gewicht pro Datenquelle (Self-Play-Zeilen nur Policy, Value 0 bzw. 0,25), falls der Value beim Feinjustieren weiter driftet (64,2% => 57,3% Präzisions-Bester-Zug)
 		- Self-Play-Targets in Positionen mit Gewinnzug hatten nur diesen einen Zug (MCTS sucht nur ihn) => kein Lernsignal dort; behoben: Self-Play und Reanalyse schreiben alle legalen Züge (MCTSTree.LegalMoveVisits), gilt ab der nächsten Sammlung; ältere Daten haben die Lücke weiter
+		- Idee: nur den Policy-Head auf eingefrorenem structured-abs trainieren (Value bit-gleich) => Duell gegen structured-abs misst nur den Beitrag der Policy, zeigt ob der Value-Trunk die Zuginfos schon trägt
+		- Training unter Windows: jeder DataLoader-Worker belegt ~5,9 GB Commit (vermutlich torch/CUDA-DLLs), Train- und Val-Loader mit je 16 kamen auf ~240 von ~253 GB => jetzt 8; offen: Val-Loader mit eigenen, wenigen Workern
 	- State Vectorizer über push/pop Architektur eine Index-Aufschlüsselung generieren lassen
 	- Expansionspotenzial mit den Pips der erreichbaren Bauplätze (die Endspiel-Features zählen nur die Bauplätze)
 	- Weit zurückliegende Spieler: Winrates oft exakt 0, der Platzierungs-Head liefert dort das Signal
@@ -167,12 +169,15 @@
 		- Ein Query pro Zugtyp aus dem letzten Hidden Layer (19 x 64), Logit = Query · Summe der Token-Embeddings, Softmax nur über die legalen Züge
 		- ONNX gibt Queries und die Embedding-Tabelle aus, C# rechnet die Logits pro Knoten (feste Batch-Form für DirectML, Value-Pfad unverändert)
 		- Targets aus den gespeicherten Root Visits: SelfPlayCollector policy-targets spielt alte Runs nach, neue Runs schreiben die Züge direkt; Brett-Augmentation permutiert die Tokens mit
+		- Batches ungepolstert (Züge hintereinander mit Zeile und Stelle, nur Targets, Maske und Logits auf die breiteste Zeile aufgefüllt): +30% Schritte/s, Spitzen-GPU-Speicher 2,0 => 0,6 GB, im Training bei knappem GPU-Speicher 4,3 => 45 Schritte/s; kein Zug-Limit mehr nötig
+		- Offen: Logit-Matrix bleibt [Zeilen × breiteste Zeile] (mit 2486er-Abwurf 5M Zellen) => ggf. Softmax pro Zeile direkt über die flachen Züge; doppelte (Zeile, Stelle) würden still überschrieben => billiger Check im Loader; Gradienten-Summen und wechselnde Shapes wie vorher (nicht bit-reproduzierbar, keine CUDA Graphs)
 		- Suche: PUCT mit Priors an jeder Entscheidung (auch Gegner unter MaxN), Dirichlet-Rauschen an der Root im Self-Play
 - RandomAgent
 	- Illegale Instanzen örtlich begrenzter Actions besser abgrenzen
 - MCTSAgent
 	- Subtree-Reuse nach Gegnerzügen nur ~13% (Gegnerzüge selten expandiert) => Root vorab expandieren, Pondering, Gegnermodell
 	- Bei Pflicht-Roll direkt würfeln statt weiterrechnen (Achtung: Dev Cards vor dem Roll)
+	- Breite Abwürfe: bis 2486 Optionen (19 von ~38 Karten), 1600 Iterationen besuchen 117 (Top 3 mit 58% der Visits), 0,05% der v2-Positionen; Einzelabwürfe verworfen (mehrere Wege zum selben Ergebnis, die Regeln werfen auf einmal ab); offen: Progressive Widening nach Prior an breiten Knoten
 	- Compute Budget
 		- Zeitlimit pro Turn
 		- Discards kriegen eigene Extrazeit
