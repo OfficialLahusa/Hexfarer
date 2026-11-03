@@ -25,7 +25,7 @@
 		- InformationSetMCTSAgent (Arena-Option is) bei 5000 Iterationen: gegen Cheating MCTS +51 Elo [+11, +92] (505oscbr, 137 Paare), gegen PIMC d1 +70 [−19, +171] (P1, 30 Paare)
 		- Ablation isfull (gleiche Suche auf dem wahren State) gegen Cheating MCTS +97 [+31, +171] (44 Paare, gleiche Karten) => die IS-Baumstruktur ist besser als MCTSTree, verdeckte Info kostet nur ~45 Elo, kein Hinweis auf ein Leck
 		- Gleiche Denkzeit (0,1 s): ISMCTS gegen Cheating MCTS +5 [−18, +28] (288 Paare) => fair ohne Stärkeverlust; ISMCTS ~1,5x langsamer pro Iteration
-		- Client ruckelte mit ISMCTS-Bots: jeder IS-Knoten trug ein ConcurrentDictionary (~1,5 KB bei 32 Threads, 60% der Knoten nie besucht) => GC-Pausen bis 0,9 s, 25% der Zeit; jetzt erst beim ersten Besuch: längster Frame 0,2 s, GC 4,8%, ISMCTS +25% Iterationen/s (Faktor 1,5 oben damit veraltet); Open-hand-Baum mit Kindern erst bei der ersten Auswahl: Suche identisch, Knoten −64%, Heap −45%, Einzelsuche +12%, aber Self-Play −8% (325-337k => 304-307k) und Client ruckeliger (Referenzen alt => jung) => verworfen; Lock und Scores in den Knoten statt eigener Objekte: Heap −14%, aber mit Client-GC 25-28% statt 18% Pausen => verworfen, Knotenlayout allein behebt die Pausen nicht
+		- Client ruckelte mit ISMCTS-Bots: jeder IS-Knoten trug ein ConcurrentDictionary (~1,5 KB bei 32 Threads, 60% der Knoten nie besucht) => GC-Pausen bis 0,9 s, 25% der Zeit; jetzt erst beim ersten Besuch: längster Frame 0,2 s, GC 4,8%, ISMCTS +25% Iterationen/s (Faktor 1,5 oben damit veraltet); Open-hand-Baum mit Kindern erst bei der ersten Auswahl: Suche identisch, Knoten −64%, Heap −45%, Einzelsuche +12%, aber Self-Play −8% (325-337k => 304-307k) und Client ruckeliger (Referenzen alt => jung) => verworfen; Lock und Scores in den Knoten statt eigener Objekte: Heap −14%, aber mit Client-GC 25-28% statt 18% Pausen => verworfen, Knotenlayout allein behebt die Pausen nicht; lazy IS-Knoten (60% nie besucht, ~35 MB von ~250 MB, gleicher Mechanismus) daher vorerst nicht
 		- Leck-Tests (ISMCTSLeakTests): Baum, Agent, Handel, geforkte Partien und PIMC entscheiden in ununterscheidbaren Welten gleich, 5 eingebaute Lecks werden erkannt; dabei Absturz bei offenen Angeboten behoben (Welten halten das Angebot legal)
 		- MCTSTree bewertete neue Knoten nie selbst, sondern einen zufälligen Folgezug (uniforme Priors): EvaluateNewLeaves ist jetzt Default (Arena noleaf = alt), +93 [+26, +168] bei 5k, +41 [+10, +73] bei 0,1 s, +28 [−14, +71] bei 15k (Gewinn schrumpft mit dem Budget); gegen ISMCTS mit voller Info noch −58 [−121, +2]; ohne Effekt: Normalisierung, Tree Reuse, zusammengelegte verdeckte Ausgänge => betrifft auch die Self-Play-Labels
 		- MCTS Easy/Medium/Hard (früher Fair MCTS) spielen mit ISMCTS statt PIMC und sind die Standard-Bots; die alles sehenden heißen Open-hand MCTS
@@ -37,6 +37,7 @@
 			- Bleibt: VP1 lernte aus Open-hand-Partien und nimmt hinter dem Blatt hellseherisches Spiel an => erst ISMCTS-Self-Play mit Views behebt das
 	- 5. Particle MCTS / POMCP erst mit Spielerhandel (Angebote schwer als Constraints)
 - Client
+	- Bots in eigenem Prozess (z.B. lokaler Server): ihre GC-Pausen (mit Lobby-Bots noch bis ~0,2 s) frieren dann nicht mehr das Zeichnen ein
 	- Zwei Admin-Buttons unten am Bildschirm (nur für Admins): Karte zurücksetzen (Kartenlayout und Lobby-Einstellungen bleiben, der Rest des GameState wird neu) und neue Karte (dasselbe mit neu generierter Karte)
 	- Herkunft fehlender Assets/Sounds klären und herausfinden, welche Sounds noch ergänzt werden sollten
 	- Linux-Port: RenderDataImpl.dll (nur Windows, ohne Quellcode) ersetzen, ShowWindow nur unter Windows (Ressourcen kommen schon aus res/ neben der Exe)
@@ -181,6 +182,7 @@
 	- Expansion ~47 us GetValidActions, ~43 us Outcome Variants, relevant sobald die Inference schneller ist; Quantisierung nur mit Abgleich
 	- State Value Netzwerkarchitekturen aus Initial Placement Paper prüfen
 	- State Hashes zusätzlich für Validation und Caching?
+	- Suchbäume als wenige große Struct-Arrays statt eines Objekts pro Knoten: der GC hat kaum etwas zu verfolgen und zu kopieren (Self-Play ~20% GC-Pause, Client-Ruckler); beide Bäume (MCTSTree, ISMCTSTree) umschreiben
 - GreedyAgent
 	- Variable Baumtiefe?
 - SimpleAgent
