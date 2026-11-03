@@ -178,6 +178,8 @@
 - MCTSAgent
 	- Subtree-Reuse nach Gegnerzügen nur ~13% (Gegnerzüge selten expandiert) => Root vorab expandieren, Pondering, Gegnermodell
 	- Bei Pflicht-Roll direkt würfeln statt weiterrechnen (Achtung: Dev Cards vor dem Roll)
+		- Umgesetzt: MCTS und PIMC spielen jeden einzigen legalen Zug sofort (ISMCTS und Self-Play schon vorher), ~1/3 weniger Zeit pro Spiel; gegen die alte Suche (searchforced, nur im Code und in der Arena) bei 800 −27 [−48, −6], weil die Suche auf dem Pflichtzug den nächsten Zug per Baum-Wiederverwendung vorheizte => frühere Duelle gaben dem Open-hand-MCTS diese Gratis-Iterationen, auch gegen ISMCTS
+	- ISMCTS baut für jede Entscheidung einen neuen Baum: Wiederverwendung (Reroot nach eigenen und beobachteten Zügen, verdeckte Ausgänge sind schon zusammengelegt) und danach Pondering versuchen; beim Open-hand-MCTS ist Wiederverwendung ~25-40 Elo wert (ohne bei 5k −39 [−103, +23], ohne Vorheizen bei 800 −27 [−48, −6])
 	- Breite Abwürfe (über 64 Optionen, 0,05% der v2-Positionen, bis 2486): 1-Ply-Sweep mit n0e4owde gegen die Reanalyse: bis 200 Optionen besucht die Suche fast alle und den 1-Ply-Besten in 96-99%, erst darüber (156 Positionen) bleiben viele unbesucht (Bester besucht 45-83%, ~1 Pp verschenkt) => kein eigener Fix nötig; Policy bei Abwürfen schwach (1-Ply-Bester im Prior Rang 19 statt 3); Einzelabwürfe verworfen (mehrere Wege zum selben Ergebnis, die Regeln werfen auf einmal ab)
 	- Gumbel-Root wie Gumbel AlphaZero: Kandidaten per Gumbel-Top-k ohne Zurücklegen nach Prior ziehen, Budget per Sequential Halving verteilen, Policy-Target aus vervollständigten Q-Werten (unbesuchte Züge mit dem Value-Schätzwert statt 0); für Self-Play und Reanalyse, im Spiel optional; braucht eigene Duelle
 	- Compute Budget
