@@ -317,6 +317,35 @@ class TrainingTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 policy_dirs([reanalysis], [source])
 
+    def test_rows_with_more_moves_than_the_cap_get_no_policy_target(self):
+        # Rows with 2, 3 (the cap), 4 and no moves: the one over the cap keeps its value label but no moves, and the batch is
+        # only as wide as the largest row left
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            source, reanalysis = os.path.join(directory, "v2"), os.path.join(directory, "reanalysis")
+            write_source(source, rows=4, features=8, label_dtype=np.float16, self_play=False)
+            os.makedirs(reanalysis)
+            np.save(os.path.join(reanalysis, "policy_offsets.npy"), np.array([0, 2, 5, 9, 9]))
+            np.save(os.path.join(reanalysis, "policy_tokens.npy"), np.array([[token, -1] for token in range(1, 10)], dtype=np.int16))
+            np.save(os.path.join(reanalysis, "policy_weights.npy"), np.ones((9, 2), dtype=np.uint8))
+            np.save(os.path.join(reanalysis, "policy_targets.npy"), np.array([0.5, 0.5, 0.2, 0.3, 0.5, 0.1, 0.2, 0.3, 0.4], dtype=np.float32))
+            with open(os.path.join(reanalysis, "policy_layout.json"), "w") as file:
+                json.dump(POLICY_LAYOUT | {"max_tokens": [2]}, file)
+
+            def batch(**cap):
+                dataset = StateDataset(os.path.join(source, "states.npy"), os.path.join(source, "win_rates.npy"), source,
+                                       policy_dir=reanalysis, **cap)
+                return dataset.__getitems__([2, 1, 0, 3])
+
+            capped, full = batch(policy_max_moves=3), batch()
+            np.testing.assert_array_equal(full["policy_mask"].sum(dim=1).numpy(), [4, 3, 2, 0])
+            np.testing.assert_array_equal(capped["policy_mask"].sum(dim=1).numpy(), [0, 3, 2, 0])
+            self.assertEqual((4, 3, 2), tuple(capped["policy_tokens"].shape))
+            np.testing.assert_array_equal(capped["policy_tokens"][0].numpy(), -1)
+            np.testing.assert_array_equal(capped["policy_tokens"][1, :, 0].numpy(), [3, 4, 5])
+            np.testing.assert_allclose(capped["policy_targets"][1].numpy(), [0.2, 0.3, 0.5])
+            np.testing.assert_allclose(capped["policy_targets"][2].numpy(), [0.5, 0.5, 0])
+            np.testing.assert_allclose(capped["y"].numpy(), full["y"].numpy())
+
     def test_a_model_with_a_policy_head_exports_queries_and_embeddings(self):
         module = StateValueModule(in_dim=32, hidden=16, policy_weight=1.0, policy_types=19, policy_vocabulary=213, policy_dim=4)
         with tempfile.TemporaryDirectory() as directory:

@@ -30,7 +30,7 @@ def read_policy_layout(directory):
 
 class StateDataset(Dataset):
     def __init__(self, states_path, labels_path, aux_dir=None, augment_rotation=False, augment_numbers=False, augment_board=False,
-                 target_lambda=None, policy_temperature=1.0, policy_dir=None):
+                 target_lambda=None, policy_temperature=1.0, policy_dir=None, policy_max_moves=None):
         self.states_path = states_path
         self.labels_path = labels_path
         # Self-Play-Daten (selfplay_to_dataset.py): Target λ·onehot(Sieger) + (1-λ)·Root-q statt der gespeicherten Labels,
@@ -38,6 +38,9 @@ class StateDataset(Dataset):
         self.target_lambda = None
         # Visit-Anteile als Policy-Target hoch 1/T (T < 1 schärft die flachen Verteilungen der UCT-Suche), pro Position normiert
         self.policy_temperature = policy_temperature
+        # Zeilen mit mehr legalen Zügen bekommen kein Policy-Target: der Batch wird auf die größte Zuganzahl aufgefüllt, und
+        # einzelne Zeilen mit tausenden Zügen (Abwürfe aus großen Händen in v2) blähen ihn auf Hunderte MB auf
+        self.policy_max_moves = policy_max_moves
         self.target_paths = {}
         if target_lambda is not None and aux_dir is not None:
             paths = {name: os.path.join(aux_dir, f"{name}.npy") for name in ("root_q", "winners")}
@@ -188,6 +191,8 @@ class StateDataset(Dataset):
                     "policy_targets": torch.zeros((n, 0)), "policy_mask": torch.zeros((n, 0), dtype=torch.bool)}
         offsets = self.policy["policy_offsets"]
         starts, counts = offsets[indices], offsets[indices + 1] - offsets[indices]
+        if self.policy_max_moves is not None:
+            counts = np.where(counts > self.policy_max_moves, 0, counts)
         width = max(int(counts.max()), 1)
         total = int(counts.sum())
         row_of = np.repeat(np.arange(n), counts)
@@ -451,6 +456,8 @@ def main():
     parser.add_argument("--policy-dim", type=int, default=64)
     # Temperatur der Policy-Targets: Visit-Anteile hoch 1/T, T < 1 schärft
     parser.add_argument("--policy-temperature", type=float, default=1.0)
+    # Zeilen mit mehr legalen Zügen ohne Policy-Target (v2: 87 von 5M Zeilen über 256, bis zu 2486 Züge)
+    parser.add_argument("--policy-max-moves", type=int, default=None)
     # Wonach Checkpoints und Early Stopping gehen: val_loss ist nur der Value Loss, val_total_loss zählt auch Policy und
     # Aux Heads mit ihren Gewichten (bei Policy-Training wählt val_loss sonst Epochen mit schwächerer Policy)
     parser.add_argument("--monitor", default="val_loss", choices=["val_loss", "val_total_loss"])
@@ -478,7 +485,7 @@ def run_training(args):
     policy_dir_for = policy_dirs(args.policy_dir, [args.aux_dir] + [directory for directory, _ in sources])
 
     full_ds = StateDataset(args.states, args.labels, args.aux_dir, target_lambda=args.target_lambda, policy_temperature=args.policy_temperature,
-                           policy_dir=policy_dir_for(args.aux_dir))
+                           policy_dir=policy_dir_for(args.aux_dir), policy_max_moves=args.policy_max_moves)
     for name, weight in [("placements", args.placement_weight), ("vp_shares", args.vp_share_weight),
                          ("rounds_left", args.rounds_weight), ("sibling_groups", args.ranking_weight),
                          ("placements", args.ranking_placement_weight)]:
@@ -496,13 +503,14 @@ def run_training(args):
     train_ds = StateDataset(args.states, args.labels, args.aux_dir, augment_rotation=args.augment_rotation,
                             augment_numbers=args.augment_numbers, augment_board=args.augment_board,
                             target_lambda=args.target_lambda, policy_temperature=args.policy_temperature,
-                            policy_dir=policy_dir_for(args.aux_dir)) if augment else full_ds
+                            policy_dir=policy_dir_for(args.aux_dir), policy_max_moves=args.policy_max_moves) if augment else full_ds
     loader_args = dict(num_workers=args.num_workers, pin_memory=True, persistent_workers=True, collate_fn=keep_batch)
     if len(sources) > 1:
         datasets = [train_ds] + [StateDataset(os.path.join(directory, args.features), os.path.join(directory, "win_rates.npy"), directory,
                                               augment_rotation=args.augment_rotation, augment_numbers=args.augment_numbers,
                                               augment_board=args.augment_board, target_lambda=args.target_lambda,
-                                              policy_temperature=args.policy_temperature, policy_dir=policy_dir_for(directory))
+                                              policy_temperature=args.policy_temperature, policy_dir=policy_dir_for(directory),
+                                              policy_max_moves=args.policy_max_moves)
                                  for directory, _ in sources[1:]]
         if len({dataset.states.shape[1] for dataset in datasets}) != 1:
             raise SystemExit("The --data sources have different feature layouts")
