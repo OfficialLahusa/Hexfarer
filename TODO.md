@@ -177,7 +177,8 @@
 - MCTSAgent
 	- Subtree-Reuse nach Gegnerzügen nur ~13% (Gegnerzüge selten expandiert) => Root vorab expandieren, Pondering, Gegnermodell
 	- Bei Pflicht-Roll direkt würfeln statt weiterrechnen (Achtung: Dev Cards vor dem Roll)
-	- Breite Abwürfe: bis 2486 Optionen (19 von ~38 Karten), 1600 Iterationen besuchen 117 (Top 3 mit 58% der Visits), 0,05% der v2-Positionen; Einzelabwürfe verworfen (mehrere Wege zum selben Ergebnis, die Regeln werfen auf einmal ab); offen: Progressive Widening nach Prior an breiten Knoten
+	- Breite Abwürfe: bis 2486 Optionen (19 von ~38 Karten), 1600 Iterationen besuchen 117 (Top 3 mit 58% der Visits), 0,05% der v2-Positionen; Einzelabwürfe verworfen (mehrere Wege zum selben Ergebnis, die Regeln werfen auf einmal ab); ungleiche Visits sind gewollt, aber unbesuchte Züge bekommen Target 0 und die Policy bestätigt sich selbst
+	- Gumbel-Root wie Gumbel AlphaZero: Kandidaten per Gumbel-Top-k ohne Zurücklegen nach Prior ziehen, Budget per Sequential Halving verteilen, Policy-Target aus vervollständigten Q-Werten (unbesuchte Züge mit dem Value-Schätzwert statt 0); für Self-Play und Reanalyse, im Spiel optional; braucht eigene Duelle
 	- Compute Budget
 		- Zeitlimit pro Turn
 		- Discards kriegen eigene Extrazeit
