@@ -60,8 +60,9 @@ namespace Arena
             every hand. Ablations of the search: norm/nonorm (values scaled to the range seen in the tree or not; MCTS
             scales, ISMCTS not), ob (ISMCTS branches on outcomes its seat can't see), noreuse (MCTS and ISMCTS start on
             a new tree every decision), noleaf (MCTS evaluates one of a new leaf's moves instead of the leaf itself, the old
-            search) and searchforced (MCTS and PIMC search a decision with a single legal move instead of playing it at once,
-            the old search).
+            search), searchforced (MCTS and PIMC search a decision with a single legal move instead of playing it at once,
+            the old search) and gX (ISMCTS scales the statistics of the subtree it goes on with by X, above 0 and at most 1;
+            default 1).
 
               --challenger AGENT     The agent tested
               --baseline AGENT       The agent it is compared with

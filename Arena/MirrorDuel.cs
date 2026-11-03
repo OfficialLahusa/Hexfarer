@@ -141,7 +141,8 @@ namespace Arena
                     {
                         FullKnowledge = spec.FullKnowledge,
                         BranchHiddenOutcomes = spec.BranchHiddenOutcomes,
-                        NormalizeValues = spec.NormalizeValues ?? false
+                        NormalizeValues = spec.NormalizeValues ?? false,
+                        ReuseDecay = spec.ReuseDecay
                     };
                 }
                 return spec.Determinizations > 0 ? (Agent)new DeterminizedMCTSAgent(search, start, spec.Determinizations) : search;

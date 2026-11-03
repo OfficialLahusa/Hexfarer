@@ -150,6 +150,28 @@ namespace Agents.MCTS
         internal void Detach() => Parent = null;
 
         /// <summary>
+        /// Scales the statistics of the subtree by the factor (above 0, at most 1) before a search goes on with it: visits,
+        /// availability and score sums alike, so every mean stays and only weighs less against the new iterations, whose
+        /// worlds come from the seat's current beliefs. Counts are rounded half up; the score sums follow the rounded count.
+        /// Only between searches.
+        /// </summary>
+        internal void Decay(double factor)
+        {
+            uint resolved = Scaled(_resolved, factor);
+            lock (_lock)
+            {
+                double keep = _resolved == 0 ? 0 : (double)resolved / _resolved;
+                for (int player = 0; player < _scores.Length; player++) _scores[player] *= keep;
+                _resolved = resolved;
+            }
+            _visits = Math.Max(Scaled(_visits, factor), resolved);
+            _availability = Scaled(_availability, factor);
+            foreach (ISNode child in Volatile.Read(ref _children)) child.Decay(factor);
+        }
+
+        internal static uint Scaled(uint count, double factor) => (uint)Math.Round(count * factor, MidpointRounding.AwayFromZero);
+
+        /// <summary>
         /// The child of a chance node for the outcome as the seat saw it, created if it's new
         /// </summary>
         internal ISNode Outcome(Action seen)

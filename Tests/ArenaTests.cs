@@ -71,6 +71,12 @@ namespace Tests
             AgentSpec searching = AgentSpec.Parse("S=a.onnx=searchforced");
             Assert.False(searching.PlayForcedMovesAtOnce);
             Assert.Equal("S a.onnx MaxN searchforced", searching.ToString());
+            Assert.Equal(1, AgentSpec.Parse("G=a.onnx=is").ReuseDecay);
+            AgentSpec decaying = AgentSpec.Parse("G=a.onnx=is=g0.25");
+            Assert.Equal(0.25, decaying.ReuseDecay);
+            Assert.Equal("G a.onnx MaxN is g0.25", decaying.ToString());
+            Assert.Throws<ArgumentException>(() => AgentSpec.Parse("G=a.onnx=g0"));
+            Assert.Throws<ArgumentException>(() => AgentSpec.Parse("G=a.onnx=g1.5"));
         }
 
         [Theory]

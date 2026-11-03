@@ -13,12 +13,13 @@ namespace Arena
     /// the range seen in the tree (MCTS normalizes, ISMCTS not), ob lets ISMCTS branch on outcomes its seat can't see,
     /// noreuse starts MCTS and ISMCTS on a new tree every decision, noleaf lets MCTS evaluate one of a new leaf's
     /// moves instead of the leaf itself (the old search; leaf is the default), searchforced lets MCTS and PIMC search a
-    /// decision with a single legal move instead of playing it at once (the old search).
+    /// decision with a single legal move instead of playing it at once (the old search), gX scales the statistics of the
+    /// subtree ISMCTS goes on with by X (above 0, at most 1; 1, full weight, if not given).
     /// </summary>
     internal sealed record AgentSpec(string Name, string ModelPath, OpponentModel OpponentModel, double Exploration, int LeavesPerBatch,
         double FirstPlayReduction, double PlacementWeight, bool UniformPriors, int Determinizations = 0, bool InformationSets = false,
         bool FullKnowledge = false, bool? NormalizeValues = null, bool BranchHiddenOutcomes = false, bool ReuseTree = true,
-        bool EvaluateNewLeaves = true, bool PlayForcedMovesAtOnce = true)
+        bool EvaluateNewLeaves = true, bool PlayForcedMovesAtOnce = true, double ReuseDecay = 1)
     {
         public static AgentSpec Parse(string spec)
         {
@@ -48,6 +49,7 @@ namespace Arena
                     ['f', ..] => result with { FirstPlayReduction = Number() },
                     ['p', ..] => result with { PlacementWeight = Number() },
                     ['d', ..] => result with { Determinizations = int.Parse(option[1..], CultureInfo.InvariantCulture) },
+                    ['g', ..] => Number() is > 0 and <= 1 ? result with { ReuseDecay = Number() } : throw new ArgumentException($"The decay \"{option}\" in agent \"{spec}\" is not above 0 and at most 1."),
                     _ => throw new ArgumentException($"Unknown option \"{option}\" in agent \"{spec}\"."),
                 };
             }
@@ -72,6 +74,7 @@ namespace Arena
             if (!ReuseTree) options.Add("noreuse");
             if (!EvaluateNewLeaves) options.Add("noleaf");
             if (!PlayForcedMovesAtOnce) options.Add("searchforced");
+            if (ReuseDecay != 1) options.Add($"g{ReuseDecay.ToString(CultureInfo.InvariantCulture)}");
             return $"{Name} {Path.GetFileName(ModelPath)} {string.Join(" ", options)}";
         }
     }

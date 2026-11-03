@@ -61,6 +61,18 @@ namespace Agents.MCTS
         public bool ReuseTree => _search.ReuseTree;
 
         /// <summary>
+        /// Factor (above 0, at most 1) by which the statistics of a reused subtree are scaled before the next search (see
+        /// ISNode.Decay): they come from worlds drawn from earlier beliefs, so they weigh less against the new iterations
+        /// </summary>
+        public double ReuseDecay
+        {
+            get => _reuseDecay;
+            init => _reuseDecay = value is > 0 and <= 1 ? value : throw new ArgumentOutOfRangeException(nameof(value), value, "The decay of a reused tree is above 0 and at most 1.");
+        }
+
+        private readonly double _reuseDecay = 1;
+
+        /// <summary>
         /// The tree of the last decision, for showing the search
         /// </summary>
         public ISMCTSTree? LastTree { get; private set; }
@@ -80,7 +92,9 @@ namespace Agents.MCTS
             List<Action> legal = MCTSTree.GetValidActions(state);
             if (legal.Count == 1) return legal[0].Clone();
 
-            ISMCTSTree tree = new ISMCTSTree(state, _beliefs, _search.ExplorationParameter, _random.Next(), FullKnowledge, ReuseTree ? _reusable : null)
+            ISNode? reused = ReuseTree ? _reusable : null;
+            if (reused != null && ReuseDecay < 1) reused.Decay(ReuseDecay);
+            ISMCTSTree tree = new ISMCTSTree(state, _beliefs, _search.ExplorationParameter, _random.Next(), FullKnowledge, reused)
             {
                 FirstPlayReduction = _search.FirstPlayReduction,
                 BranchHiddenOutcomes = BranchHiddenOutcomes,

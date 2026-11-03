@@ -313,6 +313,77 @@ namespace Tests
         }
 
         [Fact]
+        public void DecayScalesTheSubtreesCountsAndKeepsItsMeans()
+        {
+            (GameState truth, BeliefTracker beliefs) = Decisions(2, 1).First();
+            ISMCTSTree tree = Search(truth, beliefs, 2000);
+            var before = Nodes(tree.RootNode).Select(node => (node, node.Visits, node.ResolvedVisits, node.Availability,
+                means: Enumerable.Range(0, MCTSNode.PlayerCount).Select(node.MeanValue).ToArray(), children: node.Children.ToArray())).ToList();
+            Assert.True(before.Count > 100);
+
+            tree.RootNode.Decay(0.3);
+
+            foreach ((ISNode node, uint visits, uint resolved, uint availability, double[] means, ISNode[] children) in before)
+            {
+                uint scaled = (uint)Math.Round(resolved * 0.3, MidpointRounding.AwayFromZero);
+                Assert.Equal(scaled, node.ResolvedVisits);
+                Assert.Equal(Math.Max((uint)Math.Round(visits * 0.3, MidpointRounding.AwayFromZero), scaled), node.Visits);
+                Assert.Equal((uint)Math.Round(availability * 0.3, MidpointRounding.AwayFromZero), node.Availability);
+                for (int player = 0; player < MCTSNode.PlayerCount; player++)
+                    Assert.Equal(scaled == 0 ? 0 : means[player], node.MeanValue(player), 1e-9);
+                Assert.Equal(children, node.Children);
+            }
+        }
+
+        [Fact]
+        public void TheAgentDecaysTheSubtreeItGoesOnWith()
+        {
+            GameState state = NewGame(36);
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.Cpu);
+            InformationSetMCTSAgent agent = new(new MCTSAgent(1, state, valueNet: net, iterationLimit: 256, leavesPerBatch: 16, parallelSelection: false), state, seed: 2)
+            {
+                ReuseDecay = 0.5
+            };
+            Agent[] agents = TestUtil.RandomAgents();
+            int decisions = 0, decayed = 0;
+            while (!state.HasEnded && decisions < 40)
+            {
+                sbyte acting = TestUtil.ActingPlayer(state);
+                Action action;
+                if (acting == 1)
+                {
+                    bool searches = MCTSTree.GetValidActions(state).Count > 1;
+                    uint carried = agent.ReusableRoot?.Visits ?? 0;
+                    action = agent.Act(new GameState(state));
+                    if (searches)
+                    {
+                        decisions++;
+                        // The carried visits at half weight, then one visit per new iteration
+                        Assert.Equal((uint)Math.Round(carried * 0.5, MidpointRounding.AwayFromZero) + agent.Search.LastSearch!.Iterations, agent.LastTree!.RootNode.Visits);
+                        if (carried > 1) decayed++;
+                    }
+                }
+                else action = agents[acting].Act(state);
+                action.Apply(state);
+                agent.HandleAction(action);
+            }
+            Assert.True(decayed >= 5, $"only {decayed} decisions went on with a decayed subtree");
+        }
+
+        [Theory]
+        [InlineData(0.0)]
+        [InlineData(-0.5)]
+        [InlineData(1.5)]
+        [InlineData(double.NaN)]
+        public void TheDecayIsAboveZeroAndAtMostOne(double decay)
+        {
+            GameState state = NewGame(36);
+            MCTSAgent search = new(1, state, valueNet: new StateValueNet(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.Cpu));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new InformationSetMCTSAgent(search, state) { ReuseDecay = decay });
+            Assert.Equal(1, new InformationSetMCTSAgent(search, state).ReuseDecay);
+        }
+
+        [Fact]
         public void WithoutReuseEveryDecisionStartsANewTree()
         {
             GameState state = NewGame(36);
