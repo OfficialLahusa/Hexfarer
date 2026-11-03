@@ -67,6 +67,10 @@ namespace Tests
             AgentSpec old = AgentSpec.Parse("O=a.onnx=noleaf");
             Assert.False(old.EvaluateNewLeaves);
             Assert.Equal("O a.onnx MaxN noleaf", old.ToString());
+            Assert.True(AgentSpec.Parse("F=a.onnx").PlayForcedMovesAtOnce);
+            AgentSpec searching = AgentSpec.Parse("S=a.onnx=searchforced");
+            Assert.False(searching.PlayForcedMovesAtOnce);
+            Assert.Equal("S a.onnx MaxN searchforced", searching.ToString());
         }
 
         [Theory]

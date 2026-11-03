@@ -92,6 +92,13 @@ namespace Agents.MCTS
         public bool EvaluateNewLeaves { get; set; } = true;
 
         /// <summary>
+        /// Play the only legal move at once instead of searching (a roll without a playable development card, the end of a
+        /// turn without anything affordable); the search would only grow the subtree behind it, of which the next decision
+        /// keeps one branch
+        /// </summary>
+        public bool PlayForcedMovesAtOnce { get; set; } = true;
+
+        /// <summary>
         /// Search by PUCT with uniform priors instead of the policy head's (see MCTSSearch.UniformPriors)
         /// </summary>
         public bool UniformPriors
@@ -185,6 +192,12 @@ namespace Agents.MCTS
         {
             // Trades between players are decided outside the tree: the value of the position with and without the trade
             if (TradeDecisions.Decide(state, PlayerIndex, TradeUtility) is Action trade) return trade;
+
+            if (PlayForcedMovesAtOnce)
+            {
+                List<Action> legal = MCTSTree.GetValidActions(state);
+                if (legal.Count == 1) return legal[0].Clone();
+            }
 
             // Reuse the tree kept up to date by HandleAction as long as it describes exactly this state.
             // Otherwise (first move, missed or manual actions, undo, another opponent model) start over on a private copy of the state.

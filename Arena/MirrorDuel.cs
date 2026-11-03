@@ -131,7 +131,7 @@ namespace Arena
                     valueNet: nets[spec], placementWeight: spec.PlacementWeight, opponentModel: spec.OpponentModel,
                     iterationLimit: settings.Iterations, leavesPerBatch: spec.LeavesPerBatch)
                 { UniformPriors = spec.UniformPriors, FirstPlayReduction = spec.FirstPlayReduction, NormalizeValues = spec.NormalizeValues ?? true, ReuseTree = spec.ReuseTree,
-                    EvaluateNewLeaves = spec.EvaluateNewLeaves };
+                    EvaluateNewLeaves = spec.EvaluateNewLeaves, PlayForcedMovesAtOnce = spec.PlayForcedMovesAtOnce };
 
                 // Under hidden information the agent sees only its seat's view: one tree over its information sets, or the
                 // iterations split between its determinizations

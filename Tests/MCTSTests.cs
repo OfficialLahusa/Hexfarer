@@ -377,6 +377,8 @@ namespace Tests
             TestUtil.Seed(147);
             GameState state = TestUtil.NewGame();
             TestUtil.PlayRandomGame(state, maxActions: 60);
+            // A decision with a choice (a single legal move is played without a search)
+            Assert.True(TestUtil.PlayUntil(state, s => MCTSTree.GetValidActions(s).Count >= 2));
             sbyte acting = TestUtil.ActingPlayer(state);
 
             // A time limit far too long for the test, so only the iteration limit can end the search
@@ -398,18 +400,21 @@ namespace Tests
             Agent[] agents = [mcts, new RandomAgent(1), new RandomAgent(2), new RandomAgent(3)];
             int reusedAfterOwnMove = 0, ownFollowUps = 0, actions = 0;
             sbyte lastActor = -1;
+            bool lastSearched = false;
 
             while (!state.HasEnded && actions < 400)
             {
                 sbyte acting = TestUtil.ActingPlayer(state);
-                if (acting == 0 && lastActor == 0)
+                // After a searched own move the tree goes on with its subtree; a single legal move is played without one
+                if (acting == 0 && lastActor == 0 && lastSearched)
                 {
                     ownFollowUps++;
                     if (mcts.Tree != null && mcts.Tree.RootState.Equals(state)) reusedAfterOwnMove++;
                 }
 
+                bool searched = acting == 0 && MCTSTree.GetValidActions(state).Count >= 2;
                 Action action = agents[acting].Act(state);
-                if (acting == 0)
+                if (searched)
                     Assert.DoesNotContain(mcts.Tree!.RootNode.Children, child => ReferenceEquals(child.LastAction, action));
 
                 action.Apply(state);
@@ -423,6 +428,7 @@ namespace Tests
                 }
 
                 lastActor = acting;
+                lastSearched = searched;
                 actions++;
             }
 
@@ -460,7 +466,8 @@ namespace Tests
             TestUtil.Seed(147);
 
             GameState state = TestUtil.NewGame();
-            Assert.True(TestUtil.PlayUntil(state, TestUtil.IsFreeTurn));
+            // A free turn with a choice (a single legal move is played without a tree)
+            Assert.True(TestUtil.PlayUntil(state, s => TestUtil.IsFreeTurn(s) && MCTSTree.GetValidActions(s).Count >= 2));
             ProbeAgent agent = new((sbyte)state.Turn.PlayerIndex, state);
 
             agent.Act(state);

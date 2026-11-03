@@ -59,8 +59,9 @@ namespace Arena
             information sets) and isfull (that search on the true position, an ablation); without dN or is the agent sees
             every hand. Ablations of the search: norm/nonorm (values scaled to the range seen in the tree or not; MCTS
             scales, ISMCTS not), ob (ISMCTS branches on outcomes its seat can't see), noreuse (MCTS starts on a new
-            tree every decision) and noleaf (MCTS evaluates one of a new leaf's moves instead of the leaf itself, the old
-            search).
+            tree every decision), noleaf (MCTS evaluates one of a new leaf's moves instead of the leaf itself, the old
+            search) and searchforced (MCTS and PIMC search a decision with a single legal move instead of playing it at once,
+            the old search).
 
               --challenger AGENT     The agent tested
               --baseline AGENT       The agent it is compared with
