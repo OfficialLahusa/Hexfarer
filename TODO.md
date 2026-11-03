@@ -252,6 +252,9 @@
 - Catan MCTS mit Trades und interessantem Evaluationsansatz => Monte Carlo Tree Search in the "Settlers of Catan" Strategy Game https://dias.library.tuc.gr/entities/publication/8c6bab5f-58f8-4eb7-9687-0de7e500b65d
 - Initial Placements + Architecture => Papadam, Chalkiadakis: "Adversarial Search and Deep Learning for Strategic Settlement Placement in the “Settlers of Catan”" https://dl.acm.org/doi/10.1007/978-3-031-93930-3_4 
 - Catan RL => https://settlers-rl.github.io/
+- Catan Deep RL (ein LSTM pro Aktion, online, schlägt JSettlers) => Xenou, Chalkiadakis, Afantenos: "Deep Reinforcement Learning in Strategic Board Game Environments" (EUMAS 2018) https://doi.org/10.1007/978-3-030-14174-5_16
+- Catan Policy Gradient mit Self-Play (schlägt JSettlers) => Gendre, Kaneko: "Playing Catan with Cross-dimensional Neural Network" (ICONIP 2020) https://arxiv.org/abs/2008.07079
+- Catan RL + MCTS (Hobbyprojekt: Strategie per RL wählen, dann heuristisch spielen) => https://github.com/kvombatkere/Catan-AI
 - Catanatron => https://github.com/bcollazo/catanatron
 - JSettlers => https://nand.net/jsettlers/
 - LLMs für Tabletalking => Martinenghi et al.: "LLMs of Catan: Exploring Pragmatic Capabilities of Generative Chatbots Through Prediction and Classification of Dialogue Acts in Boardgames’ Multi-party Dialogues"
@@ -262,6 +265,13 @@
 	- Strategy Fusion und Non-Locality => Frank, Basin: "Search in Games with Incomplete Information: A Case Study Using Bridge Card Play" (Artificial Intelligence 1998)
 	- Wann Determinisierung funktioniert => Long, Sturtevant, Buro, Furtak: "Understanding the Success of Perfect Information Monte Carlo Sampling in Game Tree Search" (AAAI 2010)
 	- POMCP => Silver, Veness: "Monte-Carlo Planning in Large POMDPs" (NIPS 2010)
+	- IS-MCTS mit Nets bei kontrollierten Kosten, Weltzustände per Siamese-Sampling (Phantom Go, Dark Hex) => Li, Guei, Wu, Wu: "MAPLE: Multi-State Aggregated Policy Evaluation for AlphaZero in Imperfect-Information Games" (arXiv 2026) https://arxiv.org/abs/2605.24139
+- Suche mit Nets
+	- Gumbel AlphaZero/MuZero (Kandidaten ohne Zurücklegen, Sequential Halving, Targets aus vervollständigten Q-Werten) => Danihelka, Guez, Schrittwieser, Silver: "Policy improvement by planning with Gumbel" (ICLR 2022) https://openreview.net/forum?id=bERaNdoegnO
+	- mctx (JAX, Referenz-Implementierung von Gumbel MuZero) => https://github.com/google-deepmind/mctx
+- Mehr als zwei Spieler
+	- Max^n-artige MCTS-Varianten (perfekte Information) => Cohen-Solal: "Study and Improvement of Search Algorithms in Multi-Player Perfect-Information Games" (arXiv 2026) https://arxiv.org/abs/2604.17378
+	- Gegnerzüge per Policy-Net vorhersagen (DouDiZhu, 3 Spieler, Hidden Information) => Zhang et al.: "Combining Tree Search and Action Prediction for State-of-the-Art Performance in DouDiZhu" (IJCAI 2021) https://www.ijcai.org/proceedings/2021/470
 - MCTS Tree State Hashes => https://github.com/uranium62/xxHash
 - Interfacing => https://github.com/dnmfarrell/Settlers-Game-Notation
 - Interfacing => https://en.wikipedia.org/wiki/Universal_Chess_Interface
