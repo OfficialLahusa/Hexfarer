@@ -265,13 +265,23 @@
 	- Strategy Fusion und Non-Locality => Frank, Basin: "Search in Games with Incomplete Information: A Case Study Using Bridge Card Play" (Artificial Intelligence 1998)
 	- Wann Determinisierung funktioniert => Long, Sturtevant, Buro, Furtak: "Understanding the Success of Perfect Information Monte Carlo Sampling in Game Tree Search" (AAAI 2010)
 	- POMCP => Silver, Veness: "Monte-Carlo Planning in Large POMDPs" (NIPS 2010)
+	- ReBeL (RL und Suche über öffentliche Belief States, Garantie nur für 2 Spieler mit Nullsumme; Poker, Liar's Dice) => Brown, Bakhtin, Lerer, Gong: "Combining Deep Reinforcement Learning and Search for Imperfect-Information Games" (NeurIPS 2020) https://arxiv.org/abs/2007.13544
+	- Student of Games (ein Verfahren für perfekte und versteckte Information: Schach, Go, Poker, Scotland Yard) => Schmid et al.: "Student of Games: A unified learning algorithm for both perfect and imperfect information games" (Science Advances 2023) https://doi.org/10.1126/sciadv.adg3256
 	- IS-MCTS mit Nets bei kontrollierten Kosten, Weltzustände per Siamese-Sampling (Phantom Go, Dark Hex) => Li, Guei, Wu, Wu: "MAPLE: Multi-State Aggregated Policy Evaluation for AlphaZero in Imperfect-Information Games" (arXiv 2026) https://arxiv.org/abs/2605.24139
 - Suche mit Nets
+	- AlphaZero => Silver et al.: "A general reinforcement learning algorithm that masters chess, shogi, and Go through self-play" (Science 2018) https://doi.org/10.1126/science.aar6404
+	- Expert Iteration (Net als Lehrling der Suche, Hex) => Anthony, Tian, Barber: "Thinking Fast and Slow with Deep Learning and Tree Search" (NIPS 2017) https://arxiv.org/abs/1705.08439
+	- KataGo (Forced Playouts mit Policy Target Pruning, Playout Cap Randomization, Hilfs-Targets; laut v5 ~50x weniger Rechenaufwand) => Wu: "Accelerating Self-Play Learning in Go" (AAAI-20 RLG Workshop) https://arxiv.org/abs/1902.10565
+	- Reanalyse alter Daten mit aktueller Suche (MuZero Unplugged) => Schrittwieser, Hubert, Mandhane, Barekatain, Antonoglou, Silver: "Online and Offline Reinforcement Learning by Planning with a Learned Model" (NeurIPS 2021) https://arxiv.org/abs/2104.06294
+	- Stochastic MuZero (gelerntes Zufallsmodell mit Afterstates; 2048, Backgammon) => Antonoglou, Schrittwieser, Ozair, Hubert, Silver: "Planning in Stochastic Environments with a Learned Model" (ICLR 2022) https://mlanthology.org/iclr/2022/antonoglou2022iclr-planning
 	- Gumbel AlphaZero/MuZero (Kandidaten ohne Zurücklegen, Sequential Halving, Targets aus vervollständigten Q-Werten) => Danihelka, Guez, Schrittwieser, Silver: "Policy improvement by planning with Gumbel" (ICLR 2022) https://openreview.net/forum?id=bERaNdoegnO
 	- mctx (JAX, Referenz-Implementierung von Gumbel MuZero) => https://github.com/google-deepmind/mctx
 - Mehr als zwei Spieler
 	- Max^n-artige MCTS-Varianten (perfekte Information) => Cohen-Solal: "Study and Improvement of Search Algorithms in Multi-Player Perfect-Information Games" (arXiv 2026) https://arxiv.org/abs/2604.17378
 	- Gegnerzüge per Policy-Net vorhersagen (DouDiZhu, 3 Spieler, Hidden Information) => Zhang et al.: "Combining Tree Search and Action Prediction for State-of-the-Art Performance in DouDiZhu" (IJCAI 2021) https://www.ijcai.org/proceedings/2021/470
+	- DouZero (ohne Suche: Monte-Carlo-RL mit Nets und Action Encoding, 3 Spieler) => Zha et al.: "DouZero: Mastering DouDizhu with Self-Play Deep Reinforcement Learning" (ICML 2021) https://arxiv.org/abs/2106.06135
+	- Suphx (Riichi Mahjong, 4 Spieler: Oracle Guiding, globale Reward-Vorhersage, Anpassung der Policy zur Laufzeit) => Li et al.: "Suphx: Mastering Mahjong with Deep Reinforcement Learning" (arXiv 2020) https://arxiv.org/abs/2003.13590
+	- Cicero (Diplomacy, 7 Spieler, Verhandeln in Sprache plus strategisches Planen) => Meta FAIR Diplomacy Team: "Human-level play in the game of Diplomacy by combining language models with strategic reasoning" (Science 2022) https://doi.org/10.1126/science.ade9097
 - MCTS Tree State Hashes => https://github.com/uranium62/xxHash
 - Interfacing => https://github.com/dnmfarrell/Settlers-Game-Notation
 - Interfacing => https://en.wikipedia.org/wiki/Universal_Chess_Interface
