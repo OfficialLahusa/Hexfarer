@@ -20,8 +20,19 @@ namespace Agents.MCTS
         // The policy's logits of moves at this node (from the evaluation of a world here), for its children
         private (Action move, float logit)[]? _logits;
 
-        // The legal moves of the acting player in a world, by its hand: everything else at the node is the same in every world
-        internal readonly ConcurrentDictionary<(ulong, ulong), List<Action>> LegalByHand = new();
+        // The legal moves of the acting player in a world, by its hand: everything else at the node is the same in every world.
+        // Made on the node's first visit (most children are never visited) with one lock: at the default concurrency every
+        // node of the tree carried ~1.5 KB of lock stripes on 32 threads, which the GC had to copy while the tree grew.
+        private ConcurrentDictionary<(ulong, ulong), List<Action>>? _legalByHand;
+        internal ConcurrentDictionary<(ulong, ulong), List<Action>> LegalByHand
+        {
+            get
+            {
+                if (Volatile.Read(ref _legalByHand) is { } table) return table;
+                var created = new ConcurrentDictionary<(ulong, ulong), List<Action>>(concurrencyLevel: 1, capacity: 1);
+                return Interlocked.CompareExchange(ref _legalByHand, created, null) ?? created;
+            }
+        }
 
         public ISNode? Parent { get; }
 

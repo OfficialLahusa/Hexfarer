@@ -170,6 +170,23 @@ namespace Tests
         }
 
         [Fact]
+        public void OnlyVisitedNodesCacheTheirLegalMoves()
+        {
+            // Most children are never visited: a cache on every node (~1.5 KB on 32 threads) made the client stall in the GC;
+            // only the nodes a world passed through get one, and keep it
+            System.Reflection.FieldInfo cache = typeof(ISNode).GetField("_legalByHand", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+            (GameState truth, BeliefTracker beliefs) = Decisions(0, 1).First();
+            ISMCTSTree tree = new ISMCTSTree(truth, beliefs, seed: 5);
+            new MCTSSearch(new FixedEvaluator(), new StateVectorizer(), 16, parallelSelection: false).Run(tree, double.PositiveInfinity, 3000);
+
+            List<ISNode> nodes = Nodes(tree.RootNode).ToList();
+            Assert.Contains(nodes, node => node.Visits == 0);
+            Assert.All(nodes.Where(node => node.Visits == 0), node => Assert.Null(cache.GetValue(node)));
+            Assert.NotNull(cache.GetValue(tree.RootNode));
+            Assert.Same(tree.RootNode.LegalByHand, tree.RootNode.LegalByHand);
+        }
+
+        [Fact]
         public void TheAblationsBranchOnHiddenOutcomesAndNormalize()
         {
             // Outcome branching splits another seat's development card draw by the drawn card; both still play legal moves
