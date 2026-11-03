@@ -216,6 +216,15 @@
 	- Agent Bridge als eigenes Projekt: Konsolen-App verbindet sich mit Agent-Token für einen Sitz und spielt ihn mit lokalem Agent (MCTS mit beliebigem Net) oder reicht die Entscheidungen per JSON über stdin/stdout an externe Bots weiter (Python, Catanatron)
 - Share Links: Klick öffnet direkt ein Replay, eine Position oder ein Match mit gegebener Konfiguration (Sitze, Regeln, Agents), z.B. per URL-Schema im Client oder Web-Client
 - Lobby-Chat für Netzwerkspiele: eigener Tab neben dem Log oder ins Log integriert
+- Bridges zu Catanatron und JSettlers in beide Richtungen: Nabe und Speichen über ein Sitz-Protokoll (die Agent-Bridge-Rolle des Servers: new_game, observe geschwärzt, decide), je Bot-Familie ein Adapter, je Schiedsrichter ein Treiber => jeder Bot unter jedem Schiedsrichter, gemischte Partien im Client verfolgen
+	- Lizenz: Repo bleibt vorerst ARR, nur die Adapter in eigenem Unterordner unter GPL-3.0 (eigene LICENSE, Satz im README); vorher Root-LICENSE mit ARR, sonst hält GitHub das ganze Repo für GPL; Kern und Adapter nur über die Prozessgrenze (JSON), kein Hexfarer-Code in den Adaptern, Fremdcode nur als Abhängigkeit
+	- Regelsätze als Spieleinstellung: Catanatron-Regeln (kein Spielerhandel, die Engine wirft zufällig ab, Zuglimit 1000 = Remis) neben den vollen Regeln; Agents deklarieren ihre Regelsätze, die Lobby bietet nur passende Sitze an
+	- 1. Bridge-Host (C#): Replik pro Sitz, nach jeder Aktion öffentlichen Zustand und legale Züge gegen den Schiedsrichter prüfen, Koordinaten-Mapping aus der Geometrie mit Tests (~1-2 Tage)
+	- 2. Hexfarer als Gast bei Catanatron (Player.decide bekommt das ganze Spiel => selbst schwärzen; Räuber = Feld + Opfer in einer Aktion): fair und open-hand, 2v2 gespiegelt und 1v3, 5k Iterationen und gleiche Denkzeit, gegen AlphaBeta (~2 Tage)
+	- 3. Catanatron-Bots in der Hexfarer-Sim: Python-Adapter als Agent-Bridge-Client mit synchroner Catanatron-Partie, im Client als open-hand gekennzeichnet oder mit gezogener Welt fair (~2 Tage) => erste gemischte Partien im Client
+	- 4. Relay-Matches: von fremden Schiedsrichtern geleitete Partien in den Client streamen (Catanatron mit allen Händen, JSettlers nur öffentlich plus eigene Sitze) (~2 Tage)
+	- 5. Hexfarer-Roboter bei JSettlers (Vorlage Sample3PClient/Sample3PBrain, Robot-Cookie, Bot-Spiele mit fast_pause_percent ~2 min pro Partie): fair, erst ohne Handel, 2v2 und 1v3 (~3-5 Tage), dann mit Handel
+	- 6. JSettlers-Bots in der Hexfarer-Sim nur über eine Emulation ihres Server-Protokolls (~1-2 Wochen, fragil); sonst gemischte Partien auf ihrem Server laufen lassen und per Relay verfolgen
 - Interface für JSettlers Agents/Server
 - Tabletalking über LLMs
 	- Zusätzlich zu Value Functions von einem Basisbot
