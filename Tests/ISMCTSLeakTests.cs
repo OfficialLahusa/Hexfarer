@@ -112,9 +112,12 @@ namespace Tests
         /// <summary>
         /// The whole tree as text: every node's move, visits and availability in tree order, and the root's values
         /// </summary>
-        private static List<string> Shape(ISMCTSTree tree) => Nodes(tree.RootNode)
-            .Select(node => $"{node.Move?.ToString() ?? "root"} {node.Visits} {node.Availability}")
+        private static List<string> Shape(ISMCTSTree tree) => Shape(tree.RootNode)
             .Append(string.Join(" ", tree.RootValues()))
+            .ToList();
+
+        private static List<string> Shape(ISNode root) => Nodes(root)
+            .Select(node => $"{node.Move?.ToString() ?? "root"} {node.Visits} {node.Availability}")
             .ToList();
 
         private static ISMCTSTree Search(GameState truth, BeliefTracker beliefs, bool fullKnowledge = false, bool viewFeatures = false)
@@ -129,9 +132,9 @@ namespace Tests
         /// The agent of the seat as the Arena builds it, with one-thread selection so its search repeats; its MCTS agent is
         /// given the true position too, so a leak through it would show
         /// </summary>
-        private static InformationSetMCTSAgent NewAgent(GameState truth, int seat, string net, bool fullKnowledge = false)
+        private static InformationSetMCTSAgent NewAgent(GameState truth, int seat, string net, bool fullKnowledge = false, int iterations = 96)
         {
-            MCTSAgent search = new MCTSAgent((sbyte)seat, truth, valueNet: Nets.Value[net], iterationLimit: 96, leavesPerBatch: 16, parallelSelection: false);
+            MCTSAgent search = new MCTSAgent((sbyte)seat, truth, valueNet: Nets.Value[net], iterationLimit: iterations, leavesPerBatch: 16, parallelSelection: false);
             return new InformationSetMCTSAgent(search, truth, seed: 4) { FullKnowledge = fullKnowledge };
         }
 
@@ -380,6 +383,92 @@ namespace Tests
                 }
             }
             Assert.True(compared >= 20, $"only {compared} games reached an outsider's decision");
+        }
+
+        [Theory]
+        [InlineData("steal")]
+        [InlineData("draw")]
+        public void AReusedTreeCarriesNothingOfAHiddenOutcome(string kind)
+        {
+            // An outsider searches at its last decision before a hidden outcome and goes on with that tree through it (see
+            // InformationSetMCTSAgent.ReuseTree): in two games that differ only in the outcome, the node it carries past the
+            // outcome and its next decision must be the same
+            int compared = 0, carried = 0;
+            for (int seed = 900; seed < 1600 && compared < 12; seed++)
+            {
+                Func<GameState, Action, bool> isEvent = kind == "steal"
+                    ? (state, action) => IsSteal(state, action) && DistinctTypes(state.Players[((RobberAction)action).TargetPlayerIndex!.Value].ResourceCards) >= 2
+                    : (state, action) => action is BuyDevelopmentCardAction && DistinctTypesOfDeck(state) >= 2;
+                if (PlayUntilNext(seed, isEvent) is not (Followed game, Action next)) continue;
+                HashSet<int> insiders = [next.PlayerIndex];
+                if (next is RobberAction { TargetPlayerIndex: sbyte victim }) insiders.Add(victim);
+
+                // The last decision with a choice of an outsider before the event
+                GameState position = new GameState(game.Start);
+                int searchAt = -1, outsider = -1;
+                for (int i = 0; i < game.Played.Count; i++)
+                {
+                    sbyte acting = TestUtil.ActingPlayer(position);
+                    if (!insiders.Contains(acting) && MCTSTree.GetValidActions(position).Count > 1) (searchAt, outsider) = (i, acting);
+                    game.Played[i].Clone().Apply(position);
+                }
+                if (searchAt < 0) continue;
+
+                // The same public moves on in both games until the outsider decides again
+                (Followed a, Followed b) = TwoOutcomes(game, next, move => move is RobberAction robber ? robber.History!.StolenCard : ((BuyDevelopmentCardAction)move).History!.DrawnType);
+                Agent[] agents = TestUtil.RandomAgents();
+                bool reached = false;
+                for (int step = 0; step < 400 && !a.Truth.HasEnded; step++)
+                {
+                    sbyte acting = TestUtil.ActingPlayer(a.Truth);
+                    if (acting == outsider && MCTSTree.GetValidActions(a.Truth).Count > 1)
+                    {
+                        reached = true;
+                        break;
+                    }
+                    Action action = agents[acting].Act(a.Truth);
+                    a.Play(action);
+                    Action replay = action.Clone();
+                    if (!replay.IsValidFor(b.Truth)) break;
+                    b.Play(replay);
+                }
+                if (!reached) continue;
+
+                foreach (string net in new[] { "view_tiny.onnx", "sensitive_tiny.onnx" })
+                {
+                    (List<string>? carriedA, (Action, List<string>?) decisionA) = SearchThroughTheEvent(a, outsider, searchAt, game.Played.Count, net);
+                    (List<string>? carriedB, (Action, List<string>?) decisionB) = SearchThroughTheEvent(b, outsider, searchAt, game.Played.Count, net);
+                    Assert.Equal(carriedA, carriedB);
+                    AssertSameDecision(decisionA, decisionB, $"seat {outsider}, {net}");
+                    if (carriedA != null) carried++;
+                }
+                compared++;
+            }
+            Assert.True(compared >= 12, $"only {compared} games reached the outsider's next decision");
+            // Most paths leave the tree before the outcome (the games go on with random moves the search rarely explored); about
+            // a fifth of the searches carry a subtree past it (8 and 5 of 24 when written)
+            Assert.True(carried >= 4, $"only {carried} searches carried a subtree past the outcome");
+        }
+
+        /// <summary>
+        /// An agent of the seat that follows the game from its start, searches at the given move (the game goes on with the
+        /// move played there) and decides at the end: the node it carried past the move at eventAt and its last decision
+        /// </summary>
+        private static (List<string>? carried, (Action move, List<string>? tree) decision) SearchThroughTheEvent(Followed game, int seat, int searchAt, int eventAt, string net)
+        {
+            InformationSetMCTSAgent agent = NewAgent(game.Start, seat, net, iterations: 2000);
+            GameState position = new GameState(game.Start);
+            List<string>? carried = null;
+            for (int i = 0; i < game.Played.Count; i++)
+            {
+                if (i == searchAt) agent.Act(new GameState(position));
+                Action played = game.Played[i];
+                played.Clone().Apply(position);
+                agent.HandleAction(played);
+                if (i == eventAt) carried = agent.ReusableRoot is ISNode node ? Shape(node) : null;
+            }
+            Action move = agent.Act(new GameState(game.Truth));
+            return (carried, (move, Shape(agent.LastTree!)));
         }
 
         private static void CompareOutsider(Followed a, Followed b, int seat, string net)

@@ -34,7 +34,7 @@ namespace Agents.MCTS
             }
         }
 
-        public ISNode? Parent { get; }
+        public ISNode? Parent { get; private set; }
 
         /// <summary>
         /// The move into this node as the seat sees it (for an outcome: the move with its outcome, redacted), null at the root
@@ -130,6 +130,26 @@ namespace Agents.MCTS
         }
 
         /// <summary>
+        /// The child the game went on to after the move was played, as the seat saw it: for a move with a random outcome the
+        /// outcome node the search would have followed (only what the seat sees of the outcome); null if the search never got
+        /// there, or for a move outside the tree (a trade between players)
+        /// </summary>
+        internal ISNode? Follow(Action played, sbyte observer, bool branchHiddenOutcomes)
+        {
+            ISNode? move = Find(Volatile.Read(ref _children), played);
+            if (move == null || !move.IsChance) return move;
+            Action seen = branchHiddenOutcomes ? played : played.RedactedFor(observer);
+            foreach (ISNode outcome in move.Children)
+                if (outcome.Move is IOutputRandomnessAction known && known.HasSameOutcome(seen)) return outcome;
+            return null;
+        }
+
+        /// <summary>
+        /// Cuts the link to the parent, so the node can be the root of a tree that goes on with its subtree
+        /// </summary>
+        internal void Detach() => Parent = null;
+
+        /// <summary>
         /// The child of a chance node for the outcome as the seat saw it, created if it's new
         /// </summary>
         internal ISNode Outcome(Action seen)
@@ -190,7 +210,7 @@ namespace Agents.MCTS
         private readonly double _exploration;
         private long _iterations;
 
-        public ISNode RootNode { get; } = new ISNode(null, null, false);
+        public ISNode RootNode { get; }
 
         /// <summary>
         /// A world of the root (drawn from the view): the root's moves are the seat's, the same in every world
@@ -225,8 +245,13 @@ namespace Agents.MCTS
         /// <param name="truth">The true position; only its view through the beliefs is used</param>
         /// <param name="beliefs">What the searching seat knows</param>
         /// <param name="fullKnowledge">Every world is the true position (an ablation: the same search without hidden information)</param>
-        public ISMCTSTree(GameState truth, BeliefTracker beliefs, double exploration = 1.414, int seed = 0, bool fullKnowledge = false)
+        /// <param name="root">The node of an earlier tree for this position, whose subtree the search goes on with (see
+        /// ISNode.Follow); its statistics come from worlds drawn from the seat's earlier beliefs, the new iterations draw them
+        /// from the current ones</param>
+        public ISMCTSTree(GameState truth, BeliefTracker beliefs, double exploration = 1.414, int seed = 0, bool fullKnowledge = false, ISNode? root = null)
         {
+            RootNode = root ?? new ISNode(null, null, false);
+            RootNode.Detach();
             _beliefs = new BeliefTracker(beliefs);
             _fullKnowledge = fullKnowledge;
             _view = fullKnowledge ? new GameState(truth) : _beliefs.View(truth);
@@ -431,11 +456,13 @@ namespace Agents.MCTS
         public double[] RootValues() => Enumerable.Range(0, MCTSNode.PlayerCount).Select(RootNode.MeanValue).ToArray();
 
         /// <summary>
-        /// The most visited move of the root, without an outcome: the real game decides it
+        /// The most visited move of the root, without an outcome: the real game decides it. With the legal moves given, only
+        /// among them (a reused root keeps every child it ever had)
         /// </summary>
-        public Action GetMostPromisingMove()
+        public Action GetMostPromisingMove(IReadOnlyList<Action>? legal = null)
         {
-            ISNode best = RootNode.Children.MaxBy(child => child.Visits) ?? throw new InvalidOperationException("The root has no moves; search first.");
+            ISNode best = RootNode.Children.Where(child => legal == null || legal.Any(move => move.IsSameDecision(child.Move!)))
+                .MaxBy(child => child.Visits) ?? throw new InvalidOperationException("The root has no legal moves; search first.");
             Action move = best.Move!.Clone();
             if (move is IReplayAction replay) replay.ClearHistory();
             return move;

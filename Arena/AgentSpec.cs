@@ -11,7 +11,7 @@ namespace Arena
     /// information sets (see InformationSetMCTSAgent), isfull the same search on the true position (an ablation); without
     /// these the agent sees every hand. Ablations of the search: norm or nonorm selects with or without values scaled to
     /// the range seen in the tree (MCTS normalizes, ISMCTS not), ob lets ISMCTS branch on outcomes its seat can't see,
-    /// noreuse starts MCTS on a new tree every decision (ISMCTS always does), noleaf lets MCTS evaluate one of a new leaf's
+    /// noreuse starts MCTS and ISMCTS on a new tree every decision, noleaf lets MCTS evaluate one of a new leaf's
     /// moves instead of the leaf itself (the old search; leaf is the default), searchforced lets MCTS and PIMC search a
     /// decision with a single legal move instead of playing it at once (the old search).
     /// </summary>

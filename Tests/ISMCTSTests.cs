@@ -266,5 +266,99 @@ namespace Tests
             Assert.Equal(40, decisions);
             Assert.Equal(new BeliefTracker(agent.Beliefs), agent.Beliefs);
         }
+
+        [Fact]
+        public void TheNextDecisionGoesOnWithTheSubtreeOfTheMovesPlayedSince()
+        {
+            // The agent follows the game down its last tree: at its next decision the search starts at the node the game
+            // reached, cut off from the old tree, with the visits it had, and still plays legal moves
+            GameState state = NewGame(36);
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.Cpu);
+            InformationSetMCTSAgent agent = new(new MCTSAgent(1, state, valueNet: net, iterationLimit: 256, leavesPerBatch: 16, parallelSelection: false), state, seed: 2);
+            Assert.True(agent.ReuseTree);
+            Agent[] agents = TestUtil.RandomAgents();
+            int decisions = 0, reused = 0;
+            while (!state.HasEnded && decisions < 40)
+            {
+                sbyte acting = TestUtil.ActingPlayer(state);
+                Action action;
+                if (acting == 1)
+                {
+                    bool searches = MCTSTree.GetValidActions(state).Count > 1;
+                    ISNode? carried = agent.ReusableRoot;
+                    uint carriedVisits = carried?.Visits ?? 0;
+                    action = agent.Act(new GameState(state));
+                    Assert.True(action.IsValidFor(state), $"{action} is not legal");
+                    if (searches)
+                    {
+                        decisions++;
+                        ISNode root = agent.LastTree!.RootNode;
+                        Assert.Null(root.Parent);
+                        Assert.Same(agent.ReusableRoot, root);
+                        if (carried != null)
+                        {
+                            Assert.Same(carried, root);
+                            Assert.True(root.Visits >= carriedVisits + 256, $"{root.Visits} visits after {carriedVisits} carried");
+                            if (carriedVisits > 0) reused++;
+                        }
+                        else Assert.Null(root.Move);
+                    }
+                }
+                else action = agents[acting].Act(state);
+                action.Apply(state);
+                agent.HandleAction(action);
+            }
+            Assert.Equal(40, decisions);
+            Assert.True(reused >= 5, $"only {reused} of {decisions} decisions went on with an earlier subtree");
+        }
+
+        [Fact]
+        public void WithoutReuseEveryDecisionStartsANewTree()
+        {
+            GameState state = NewGame(36);
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.Cpu);
+            MCTSAgent search = new(1, state, valueNet: net, iterationLimit: 64, leavesPerBatch: 16) { ReuseTree = false };
+            InformationSetMCTSAgent agent = new(search, state, seed: 2);
+            Agent[] agents = TestUtil.RandomAgents();
+            int decisions = 0;
+            while (!state.HasEnded && decisions < 10)
+            {
+                sbyte acting = TestUtil.ActingPlayer(state);
+                Action action = acting == 1 ? agent.Act(new GameState(state)) : agents[acting].Act(state);
+                if (acting == 1 && agent.LastTree != null && MCTSTree.GetValidActions(state).Count > 1)
+                {
+                    decisions++;
+                    Assert.Null(agent.LastTree.RootNode.Move);
+                }
+                action.Apply(state);
+                agent.HandleAction(action);
+                Assert.Null(agent.ReusableRoot);
+            }
+            Assert.Equal(10, decisions);
+        }
+
+        [Fact]
+        public void AResetOrAMoveOutsideTheTreeEndsTheReuse()
+        {
+            (GameState truth, BeliefTracker beliefs) = Decisions(0, 1).First();
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.Cpu);
+            InformationSetMCTSAgent agent = new(new MCTSAgent(0, truth, valueNet: net, iterationLimit: 64, leavesPerBatch: 16), truth, seed: 2);
+            agent.ResetTo(truth, beliefs);
+            agent.Act(new GameState(truth));
+            Assert.NotNull(agent.ReusableRoot);
+            agent.ResetToState(truth);
+            Assert.Null(agent.ReusableRoot);
+
+            agent.ResetTo(truth, beliefs);
+            agent.Act(new GameState(truth));
+            Assert.NotNull(agent.ReusableRoot);
+            agent.ResetTo(truth, beliefs);
+            Assert.Null(agent.ReusableRoot);
+
+            agent.Act(new GameState(truth));
+            Assert.NotNull(agent.ReusableRoot);
+            // A move that is no child of the tree (another player's end of turn) leaves it
+            Assert.Null(agent.ReusableRoot!.Follow(new EndTurnAction((sbyte)((truth.Turn.PlayerIndex + 1) % 4)), 0, false));
+        }
     }
 }

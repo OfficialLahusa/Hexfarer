@@ -19,6 +19,10 @@ namespace Agents.MCTS
         private GameState _mirror;
         private BeliefTracker _beliefs;
 
+        // The node of the last tree for the position the game has reached (moves followed as the seat saw them), whose subtree
+        // the next search goes on with; null once the game left the tree
+        private ISNode? _reusable;
+
         /// <param name="search">The MCTS agent of the same seat, whose net, budget and settings the search uses</param>
         /// <param name="seed">Seed of the worlds, random if null</param>
         public InformationSetMCTSAgent(MCTSAgent search, GameState initialState, int? seed = null)
@@ -51,9 +55,20 @@ namespace Agents.MCTS
         public bool NormalizeValues { get; init; }
 
         /// <summary>
+        /// Whether the next decision goes on with the subtree of the moves played since the last search (the MCTS agent's
+        /// ReuseTree, as for the open-hand search) instead of a new tree
+        /// </summary>
+        public bool ReuseTree => _search.ReuseTree;
+
+        /// <summary>
         /// The tree of the last decision, for showing the search
         /// </summary>
         public ISMCTSTree? LastTree { get; private set; }
+
+        /// <summary>
+        /// The node the next search would go on with (for tests)
+        /// </summary>
+        internal ISNode? ReusableRoot => _reusable;
 
         public override Action Act(GameState state) => Act(state, CancellationToken.None);
 
@@ -65,7 +80,7 @@ namespace Agents.MCTS
             List<Action> legal = MCTSTree.GetValidActions(state);
             if (legal.Count == 1) return legal[0].Clone();
 
-            ISMCTSTree tree = new ISMCTSTree(state, _beliefs, _search.ExplorationParameter, _random.Next(), FullKnowledge)
+            ISMCTSTree tree = new ISMCTSTree(state, _beliefs, _search.ExplorationParameter, _random.Next(), FullKnowledge, ReuseTree ? _reusable : null)
             {
                 FirstPlayReduction = _search.FirstPlayReduction,
                 BranchHiddenOutcomes = BranchHiddenOutcomes,
@@ -74,7 +89,8 @@ namespace Agents.MCTS
             LastTree = tree;
             _searched = new GameState(state);
             _search.RunSearch(tree, cancellation);
-            return tree.GetMostPromisingMove();
+            _reusable = ReuseTree ? tree.RootNode : null;
+            return tree.GetMostPromisingMove(legal);
         }
 
         // The position of the last tree, for showing its search
@@ -95,6 +111,8 @@ namespace Agents.MCTS
             }
             replayed.Apply(_mirror);
             _beliefs.Observe(before, replayed, _mirror);
+            // Down the tree only by what the seat saw of the move (its own moves and their outcomes in full)
+            _reusable = _reusable?.Follow(replayed, PlayerIndex, BranchHiddenOutcomes);
         }
 
         /// <summary>
@@ -105,6 +123,7 @@ namespace Agents.MCTS
             if (beliefs.Observer != PlayerIndex) throw new ArgumentException($"The beliefs are seat {beliefs.Observer}'s, not seat {PlayerIndex}'s.", nameof(beliefs));
             _mirror = new GameState(state);
             _beliefs = new BeliefTracker(beliefs);
+            _reusable = null;
         }
 
         public override void ResetToState(GameState state)
@@ -112,6 +131,7 @@ namespace Agents.MCTS
             // Without the history the agent knows the hands of the given position (see BeliefTracker's constructor)
             _mirror = new GameState(state);
             _beliefs = new BeliefTracker(PlayerIndex, state);
+            _reusable = null;
         }
     }
 }

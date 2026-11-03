@@ -58,8 +58,8 @@ namespace Arena
             only its seat's view, searched as N determinizations), is (hidden information searched as one tree over the seat's
             information sets) and isfull (that search on the true position, an ablation); without dN or is the agent sees
             every hand. Ablations of the search: norm/nonorm (values scaled to the range seen in the tree or not; MCTS
-            scales, ISMCTS not), ob (ISMCTS branches on outcomes its seat can't see), noreuse (MCTS starts on a new
-            tree every decision), noleaf (MCTS evaluates one of a new leaf's moves instead of the leaf itself, the old
+            scales, ISMCTS not), ob (ISMCTS branches on outcomes its seat can't see), noreuse (MCTS and ISMCTS start on
+            a new tree every decision), noleaf (MCTS evaluates one of a new leaf's moves instead of the leaf itself, the old
             search) and searchforced (MCTS and PIMC search a decision with a single legal move instead of playing it at once,
             the old search).
 
