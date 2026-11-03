@@ -170,6 +170,17 @@ namespace Tests
         }
 
         [Fact]
+        public void IterationSeedsAreTheSameInEveryProcess()
+        {
+            // HashCode.Combine changes with every process, so a search with the same seed went differently in every run;
+            // fixed values here can't
+            Assert.Equal(-788417095, ISMCTSTree.IterationSeed(5, 1));
+            Assert.Equal(1058536233, ISMCTSTree.IterationSeed(5, 2));
+            Assert.Equal(-1258074185, ISMCTSTree.IterationSeed(1000, 1));
+            Assert.Equal(323208503, ISMCTSTree.IterationSeed(-3, 7));
+        }
+
+        [Fact]
         public void OnlyVisitedNodesCacheTheirLegalMoves()
         {
             // Most children are never visited: a cache on every node (~1.5 KB on 32 threads) made the client stall in the GC;

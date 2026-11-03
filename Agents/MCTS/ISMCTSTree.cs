@@ -236,6 +236,21 @@ namespace Agents.MCTS
             RootState = DrawWorld(new Random(seed));
         }
 
+        /// <summary>
+        /// The random seed of an iteration, mixed from the tree's seed and the iteration's number (SplitMix64). Not
+        /// HashCode.Combine: .NET randomizes it per process, so the same search went differently in every run.
+        /// </summary>
+        internal static int IterationSeed(int seed, long iteration)
+        {
+            unchecked
+            {
+                ulong z = (ulong)seed * 0x9E3779B97F4A7C15UL + (ulong)iteration;
+                z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
+                z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL;
+                return (int)(z ^ (z >> 31));
+            }
+        }
+
         private GameState DrawWorld(Random random) => _fullKnowledge ? new GameState(_view) : _beliefs.Determinize(_view, random);
 
         public bool RootHasPolicyPriors => RootNode.HasLogits;
@@ -246,7 +261,7 @@ namespace Agents.MCTS
         {
             // A world of its own and random numbers of its own per iteration, so the search repeats with the seed
             long iteration = Interlocked.Increment(ref _iterations);
-            Random random = new Random(HashCode.Combine(_seed, iteration));
+            Random random = new Random(IterationSeed(_seed, iteration));
             GameState world = DrawWorld(random);
 
             ISNode node = RootNode;
