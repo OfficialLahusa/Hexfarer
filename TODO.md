@@ -113,6 +113,7 @@
 	- Web-Oberfläche des Leaderboard-Servers: Leaderboards pro Regelsatz, komplette Match-Historie (filterbar nach Agent und Regelsatz), Klick auf ein Match öffnet das Replay im Web-Client (Save File mit allen Actions); kommt mit dem Web-Client
 	- Turnier-Runner als eigenes Projekt "Arena": zufällige 4er-Besetzungen, Sitze rotieren, feste Denkzeit pro Eintrag
 		- Eigenes Leaderboard pro Regelsatz (Perfect/Hidden Information × Handel aus/an, ggf. Zeitklasse), Ratings nicht übergreifend vergleichbar; Agents deklarieren unterstützte Regelsätze, Anker BuilderAgent auf jedem Board; Regelsatz-Feld von Anfang an
+		- Auch nach Budget-Art trennen: feste Iterationen (hardwareunabhängig, misst Suche und Net pro Iteration) und feste Denkzeit (was Spieler erleben, aber nur auf fester Maschine, Provider und Präzision vergleichbar: ft16 bekommt je nach Hardware 0,34-0,86 der Net-Auswertungen von kt5fwcz5); BuilderAgent = 0 in jedem Pool als gemeinsamer Nullpunkt
 		- Mit Handel nur ein Sitz pro Agent und Spiel (gleiche Kopien bewerten gleich => nehmen gegenseitige Angebote leichter an, Kingmaking): Leaderboard über verschiedene Agents, A/B-Tests als Gauntlet gegen dieselben drei Referenz-Agents statt gespiegeltem Duell; ohne Handel bleibt das 2-gegen-2-Duell
 		- Agents maximieren immer das Ergebnis ihres eigenen Sitzes, Team-Wertung nur in der Auswertung
 	- A/B-Tests per gespiegeltem Duell: nur doppelt gewonnene Paare zählen, Intervall pro Paar, SPRT als Abbruch
