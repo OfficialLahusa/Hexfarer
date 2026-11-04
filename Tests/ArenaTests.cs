@@ -1,6 +1,8 @@
+using Agents;
 using Agents.Inference;
 using Agents.MCTS;
 using Arena;
+using Common;
 
 namespace Tests
 {
@@ -92,7 +94,7 @@ namespace Tests
         [Fact]
         public void TheCommandLineSetsTheDuel()
         {
-            MirrorSettings settings = CommandLine.Parse(["mirror", "--challenger", "C=c.onnx", "--baseline", "B=b.onnx=c1.0", "--iterations", "800",
+            DuelSettings settings = CommandLine.Parse(["mirror", "--challenger", "C=c.onnx", "--baseline", "B=b.onnx=c1.0", "--iterations", "800",
                 "--parallel", "8", "--max-games", "1000", "--name", "loop_g009", "--sprt", "-10", "20", "--max-minutes", "90", "--provider", "cuda"]).Settings!;
 
             Assert.Equal("C", settings.Challenger.Name);
@@ -110,7 +112,7 @@ namespace Tests
         [Fact]
         public void ATimeBudgetReplacesTheIterations()
         {
-            MirrorSettings settings = CommandLine.Parse(["mirror", "--challenger", "C=c.onnx", "--baseline", "B=b.onnx", "--seconds", "0.5"]).Settings!;
+            DuelSettings settings = CommandLine.Parse(["mirror", "--challenger", "C=c.onnx", "--baseline", "B=b.onnx", "--seconds", "0.5"]).Settings!;
 
             Assert.Equal(0, settings.Iterations);
             Assert.Equal(0.5, settings.Seconds);
@@ -123,6 +125,91 @@ namespace Tests
             Assert.Equal(CommandLine.SeedOf("loop_g003"), CommandLine.SeedOf("loop_g003"));
             Assert.NotEqual(CommandLine.SeedOf("loop_g003"), CommandLine.SeedOf("loop_g006"));
             Assert.InRange(CommandLine.SeedOf("loop_g003"), 100_000, int.MaxValue - 10_000);
+        }
+
+        [Fact]
+        public void AnAgentSpecReadsItsTradeOffers()
+        {
+            AgentSpec plain = AgentSpec.Parse("T=a.onnx=is");
+            Assert.Equal((true, 0.005, 3, 8, false), (plain.MakeOffers, plain.OfferMargin, plain.MaxOffers, plain.OfferWorlds, plain.TwoForTwo));
+            AgentSpec spec = AgentSpec.Parse("T=a.onnx=is=om0.01=on1=ow4=o22=ob");
+            Assert.Equal((true, 0.01, 1, 4, true, true), (spec.MakeOffers, spec.OfferMargin, spec.MaxOffers, spec.OfferWorlds, spec.TwoForTwo, spec.BranchHiddenOutcomes));
+            Assert.EndsWith("is ob om0.01 on1 ow4 o22", spec.ToString());
+            Assert.False(AgentSpec.Parse("T=a.onnx=nooffers").MakeOffers);
+            Assert.Contains("nooffers", AgentSpec.Parse("T=a.onnx=nooffers").ToString());
+            Assert.Throws<ArgumentException>(() => AgentSpec.Parse("T=a.onnx=ow0"));
+
+            // The agent built from it offers as asked, with any search
+            GameState start = new GameState(MapGenerator.GenerateRandomClassic(), 4);
+            var net = new StateValueNet(PlainModelPath, provider: InferenceProvider.Cpu);
+            foreach (string kind in new[] { "is", "d2", "c1.414" })
+            {
+                Agent agent = AgentSpec.Parse($"T={PlainModelPath}={kind}=om0.01=on1=ow4=o22").Create(1, start, net, 16, 0);
+                MCTSAgent search = agent switch { InformationSetMCTSAgent i => i.Search, DeterminizedMCTSAgent d => d.Search, _ => (MCTSAgent)agent };
+                Assert.Equal((true, 0.01f, 1, 4, true), (search.Offers.Enabled, search.Offers.Margin, search.Offers.MaxPerTurn, search.Offers.Worlds, search.Offers.TwoForTwo));
+            }
+            Assert.False(((InformationSetMCTSAgent)AgentSpec.Parse($"T={PlainModelPath}=is=nooffers").Create(1, start, net, 16, 0)).Search.Offers.Enabled);
+        }
+
+        [Fact]
+        public void ATableDuelHasFreeTradeAndWinRateHypotheses()
+        {
+            CommandLine table = CommandLine.Parse(["table", "--challenger", "C=c.onnx", "--baseline", "B=b.onnx=nooffers"]);
+            Assert.True(table.Table);
+            Assert.True(table.Settings!.FreeTrade);
+            Assert.Equal((0.0, 3.0), (table.Settings.Elo0, table.Settings.Elo1));
+            Assert.Equal((-1.0, 1.0), (CommandLine.Parse(["table", "--challenger", "C=c.onnx", "--baseline", "B=b.onnx", "--sprt", "-1", "1"]).Settings!.Elo0, 1.0));
+
+            CommandLine mirror = CommandLine.Parse(["mirror", "--challenger", "C=c.onnx", "--baseline", "B=b.onnx"]);
+            Assert.False(mirror.Table);
+            Assert.False(mirror.Settings!.FreeTrade);
+            Assert.True(CommandLine.Parse(["mirror", "--challenger", "C=c.onnx", "--baseline", "B=b.onnx", "--free-trade"]).Settings!.FreeTrade);
+        }
+
+        [Fact]
+        public void GroupResultsTestTheWinRate()
+        {
+            GroupStatistics strong = GroupStatistics.Of([.. Enumerable.Repeat(0.5, 40)], 0.25, 0.28);
+            Assert.Equal(0.5, strong.Mean, 9);
+            // No spread: the variance floor of 0.01
+            Assert.Equal(40 * 0.03 * (1 - 0.53) / 0.02, strong.Llr, 6);
+            Assert.Equal(1, strong.Verdict);
+
+            double[] even = [.. Enumerable.Repeat(0.0, 15), .. Enumerable.Repeat(0.25, 10), .. Enumerable.Repeat(0.5, 10), .. Enumerable.Repeat(0.75, 5)];
+            GroupStatistics s = GroupStatistics.Of(even, 0.25, 0.28);
+            Assert.Equal(0.28125, s.Mean, 9);
+            Assert.True(s.Low < 0.25 && s.High > 0.3);
+            Assert.Equal(0, s.Verdict);
+            Assert.Equal(0, GroupStatistics.Of([.. Enumerable.Repeat(1.0, 29)], 0.25, 0.28).Verdict);
+        }
+
+        [Fact]
+        public void AShortTableDuelPutsTheChallengerInEverySeat()
+        {
+            var settings = new DuelSettings
+            {
+                Challenger = AgentSpec.Parse($"C={PlainModelPath}=b8"),
+                Baseline = AgentSpec.Parse($"B={PlainModelPath}=b8=nooffers"),
+                Iterations = 16,
+                Parallel = 4,
+                MaxGames = 4,
+                SeedBase = 321,
+                Provider = InferenceProvider.Cpu,
+                FreeTrade = true,
+                Elo0 = 0,
+                Elo1 = 3,
+            };
+            var log = new StringWriter();
+
+            GroupStatistics result = new TableDuel(settings, log).Run();
+
+            string text = log.ToString();
+            Assert.Equal(1, result.Groups);
+            string[] games = text.Split('\n').Where(line => line.Contains(" done): ")).ToArray();
+            Assert.Equal(4, games.Length);
+            for (int seat = 1; seat <= 4; seat++) Assert.Single(games, line => line.Contains($"challenger in seat {seat},"));
+            Assert.All(games, line => Assert.Matches(@"offers C \d+ \(\d+ traded\), B 0 \(0 traded, 0 with C\)", line));
+            Assert.Contains("all games played: 4 games", text);
         }
 
         [Theory]
@@ -188,7 +275,7 @@ namespace Tests
         [Fact]
         public void AShortMirrorDuelPlaysAllPairs()
         {
-            var settings = new MirrorSettings
+            var settings = new DuelSettings
             {
                 Challenger = AgentSpec.Parse($"P={PolicyModelPath}=b8"),
                 Baseline = AgentSpec.Parse($"V={PlainModelPath}=b8"),

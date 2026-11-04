@@ -9,7 +9,7 @@ using Action = Common.Actions.Action;
 
 namespace Arena
 {
-    internal sealed record MirrorSettings
+    internal sealed record DuelSettings
     {
         public required AgentSpec Challenger { get; init; }
         public required AgentSpec Baseline { get; init; }
@@ -35,6 +35,9 @@ namespace Arena
         public TimeSpan MaxDuration { get; init; } = TimeSpan.FromHours(2);
 
         public InferenceProvider Provider { get; init; } = InferenceProvider.Auto;
+
+        // Trades between players (FreeTrade), off in a mirror duel unless asked, always on at a table
+        public bool FreeTrade { get; init; }
     }
 
     /// <summary>
@@ -45,7 +48,7 @@ namespace Arena
     /// cancelled and not counted. With an iteration budget several games run at once (the search quality per move doesn't
     /// depend on the load), with a time budget one after another.
     /// </summary>
-    internal sealed class MirrorDuel(MirrorSettings settings, TextWriter log)
+    internal sealed class MirrorDuel(DuelSettings settings, TextWriter log)
     {
         private readonly object _lock = new();
         private readonly Dictionary<int, string?[]> _pairWinners = [];
@@ -122,31 +125,9 @@ namespace Arena
                 : [settings.Baseline, settings.Challenger, settings.Baseline, settings.Challenger];
             Utils.Random.SeedCurrentThread(settings.SeedBase + game / 2);
             state = new GameState(MapGenerator.GenerateRandomClassic(), 4);
+            state.Settings.FreeTrade = settings.FreeTrade;
             GameState start = state;
-            Agent[] agents = Enumerable.Range(0, 4).Select(seat =>
-            {
-                AgentSpec spec = seats[seat];
-                // The agent picks the encoding of its net (see Vectorizers): a belief-aware net sees its seat's view
-                MCTSAgent search = new MCTSAgent((sbyte)seat, start, explorationParameter: spec.Exploration, timeLimitSeconds: settings.Seconds,
-                    valueNet: nets[spec], placementWeight: spec.PlacementWeight, opponentModel: spec.OpponentModel,
-                    iterationLimit: settings.Iterations, leavesPerBatch: spec.LeavesPerBatch)
-                { UniformPriors = spec.UniformPriors, FirstPlayReduction = spec.FirstPlayReduction, NormalizeValues = spec.NormalizeValues ?? true, ReuseTree = spec.ReuseTree,
-                    EvaluateNewLeaves = spec.EvaluateNewLeaves, PlayForcedMovesAtOnce = spec.PlayForcedMovesAtOnce };
-
-                // Under hidden information the agent sees only its seat's view: one tree over its information sets, or the
-                // iterations split between its determinizations
-                if (spec.InformationSets)
-                {
-                    return new InformationSetMCTSAgent(search, start)
-                    {
-                        FullKnowledge = spec.FullKnowledge,
-                        BranchHiddenOutcomes = spec.BranchHiddenOutcomes,
-                        NormalizeValues = spec.NormalizeValues ?? false,
-                        ReuseDecay = spec.ReuseDecay
-                    };
-                }
-                return spec.Determinizations > 0 ? (Agent)new DeterminizedMCTSAgent(search, start, spec.Determinizations) : search;
-            }).ToArray();
+            Agent[] agents = Enumerable.Range(0, 4).Select(seat => seats[seat].Create((sbyte)seat, start, nets[seats[seat]], settings.Iterations, settings.Seconds)).ToArray();
 
             var stopwatch = Stopwatch.StartNew();
             while (!state.HasEnded && state.Turn.RoundCounter < 300)

@@ -1,4 +1,7 @@
+using Agents;
+using Agents.Inference;
 using Agents.MCTS;
+using Common;
 using System.Globalization;
 
 namespace Arena
@@ -14,12 +17,15 @@ namespace Arena
     /// noreuse starts MCTS and ISMCTS on a new tree every decision, noleaf lets MCTS evaluate one of a new leaf's
     /// moves instead of the leaf itself (the old search; leaf is the default), searchforced lets MCTS and PIMC search a
     /// decision with a single legal move instead of playing it at once (the old search), gX scales the statistics of the
-    /// subtree ISMCTS goes on with by X (above 0, at most 1; 1, full weight, if not given).
+    /// subtree ISMCTS goes on with by X (above 0, at most 1; 1, full weight, if not given). Trade offers (with free trade, see
+    /// TradeOffers): nooffers makes none, omX needs a mean gain above X (default 0.005), onN makes at most N per turn
+    /// (default 3), owN judges them over N worlds (default 8), o22 looks at two cards for two too.
     /// </summary>
     internal sealed record AgentSpec(string Name, string ModelPath, OpponentModel OpponentModel, double Exploration, int LeavesPerBatch,
         double FirstPlayReduction, double PlacementWeight, bool UniformPriors, int Determinizations = 0, bool InformationSets = false,
         bool FullKnowledge = false, bool? NormalizeValues = null, bool BranchHiddenOutcomes = false, bool ReuseTree = true,
-        bool EvaluateNewLeaves = true, bool PlayForcedMovesAtOnce = true, double ReuseDecay = 1)
+        bool EvaluateNewLeaves = true, bool PlayForcedMovesAtOnce = true, double ReuseDecay = 1, bool MakeOffers = true,
+        double OfferMargin = 0.005, int MaxOffers = 3, int OfferWorlds = 8, bool TwoForTwo = false)
     {
         public static AgentSpec Parse(string spec)
         {
@@ -43,6 +49,12 @@ namespace Arena
                     "leaf" => result with { EvaluateNewLeaves = true },
                     "noleaf" => result with { EvaluateNewLeaves = false },
                     "searchforced" => result with { PlayForcedMovesAtOnce = false },
+                    "nooffers" => result with { MakeOffers = false },
+                    "o22" => result with { TwoForTwo = true },
+                    ['o', 'm', ..] => result with { OfferMargin = double.Parse(option[2..], CultureInfo.InvariantCulture) },
+                    ['o', 'n', ..] => result with { MaxOffers = int.Parse(option[2..], CultureInfo.InvariantCulture) },
+                    ['o', 'w', ..] => int.Parse(option[2..], CultureInfo.InvariantCulture) is int worlds and > 0 ? result with { OfferWorlds = worlds }
+                        : throw new ArgumentException($"Option \"{option}\" in agent \"{spec}\" needs at least one world."),
                     _ when Enum.TryParse(option, out OpponentModel model) => result with { OpponentModel = model },
                     ['c', ..] => result with { Exploration = Number() },
                     ['b', ..] => result with { LeavesPerBatch = int.Parse(option[1..], CultureInfo.InvariantCulture) },
@@ -75,7 +87,46 @@ namespace Arena
             if (!EvaluateNewLeaves) options.Add("noleaf");
             if (!PlayForcedMovesAtOnce) options.Add("searchforced");
             if (ReuseDecay != 1) options.Add($"g{ReuseDecay.ToString(CultureInfo.InvariantCulture)}");
+            if (!MakeOffers) options.Add("nooffers");
+            if (OfferMargin != 0.005) options.Add($"om{OfferMargin.ToString(CultureInfo.InvariantCulture)}");
+            if (MaxOffers != 3) options.Add($"on{MaxOffers}");
+            if (OfferWorlds != 8) options.Add($"ow{OfferWorlds}");
+            if (TwoForTwo) options.Add("o22");
             return $"{Name} {Path.GetFileName(ModelPath)} {string.Join(" ", options)}";
+        }
+
+        /// <summary>
+        /// The agent for a seat, searching with the given net and budget (iterations, or seconds if 0)
+        /// </summary>
+        public Agent Create(sbyte seat, GameState start, StateValueNet net, long iterations, double seconds)
+        {
+            // The agent picks the encoding of its net (see Vectorizers): a belief-aware net sees its seat's view
+            MCTSAgent search = new MCTSAgent(seat, start, explorationParameter: Exploration, timeLimitSeconds: seconds,
+                valueNet: net, placementWeight: PlacementWeight, opponentModel: OpponentModel,
+                iterationLimit: iterations, leavesPerBatch: LeavesPerBatch)
+            {
+                UniformPriors = UniformPriors, FirstPlayReduction = FirstPlayReduction, NormalizeValues = NormalizeValues ?? true, ReuseTree = ReuseTree,
+                EvaluateNewLeaves = EvaluateNewLeaves, PlayForcedMovesAtOnce = PlayForcedMovesAtOnce
+            };
+            search.Offers.Enabled = MakeOffers;
+            search.Offers.Margin = (float)OfferMargin;
+            search.Offers.MaxPerTurn = MaxOffers;
+            search.Offers.Worlds = OfferWorlds;
+            search.Offers.TwoForTwo = TwoForTwo;
+
+            // Under hidden information the agent sees only its seat's view: one tree over its information sets, or the
+            // iterations split between its determinizations
+            if (InformationSets)
+            {
+                return new InformationSetMCTSAgent(search, start)
+                {
+                    FullKnowledge = FullKnowledge,
+                    BranchHiddenOutcomes = BranchHiddenOutcomes,
+                    NormalizeValues = NormalizeValues ?? false,
+                    ReuseDecay = ReuseDecay
+                };
+            }
+            return Determinizations > 0 ? new DeterminizedMCTSAgent(search, start, Determinizations) : search;
         }
     }
 }

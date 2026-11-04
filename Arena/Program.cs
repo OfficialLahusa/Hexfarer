@@ -34,23 +34,30 @@ namespace Arena
                 cancellation.Cancel();
             };
 
-            PairStatistics result = new MirrorDuel(commandLine.Settings, Console.Out).Run(cancellation.Token);
+            int verdict = commandLine.Table
+                ? new TableDuel(commandLine.Settings, Console.Out).Run(cancellation.Token).Verdict
+                : new MirrorDuel(commandLine.Settings, Console.Out).Run(cancellation.Token).Verdict;
             // 10 if H1 is accepted, 11 if H0 is accepted, 0 if the test stayed open
-            return result.Verdict switch { 1 => 10, -1 => 11, _ => 0 };
+            return verdict switch { 1 => 10, -1 => 11, _ => 0 };
         }
     }
 
     /// <summary>
     /// What the command line asks for; no settings for the help
     /// </summary>
-    internal sealed record CommandLine(MirrorSettings? Settings)
+    internal sealed record CommandLine(DuelSettings? Settings, bool Table = false)
     {
         public const string Usage = """
             Usage: Arena mirror --challenger AGENT --baseline AGENT [options]
+                   Arena table --challenger AGENT --baseline AGENT [options]
 
-            Mirror duel of two MCTS agents with two seats each: every map is played twice with the sides swapped. Stops when
+            mirror: duel of two MCTS agents with two seats each: every map is played twice with the sides swapped. Stops when
             the SPRT on the map pairs decides, after --max-games or after --max-minutes. Exit code 10 if H1 is accepted (the
             challenger is stronger by about ELO1), 11 if H0 is accepted, 0 if the test is still open.
+
+            table: the challenger against three copies of the baseline with trades between players, every map four times with
+            the challenger in each seat once; the SPRT tests its win rate 25% + ELO0 against 25% + ELO1 percentage points
+            (default 0 3), on the share of each map's four games it won. Same stops and exit codes.
 
             An AGENT is NAME=MODEL.onnx[=OPTION...] with the options MaxN, Paranoid or Random (opponent model, default MaxN),
             cX (exploration constant, default 1.414), bN (leaves per batch, default 256), fX (first play reduction, default
@@ -62,7 +69,8 @@ namespace Arena
             a new tree every decision), noleaf (MCTS evaluates one of a new leaf's moves instead of the leaf itself, the old
             search), searchforced (MCTS and PIMC search a decision with a single legal move instead of playing it at once,
             the old search) and gX (ISMCTS scales the statistics of the subtree it goes on with by X, above 0 and at most 1;
-            default 1).
+            default 1). Trade offers, with free trade: nooffers (none), omX (mean gain needed, default 0.005), onN (at most N
+            per turn, default 3), owN (judged over N worlds, default 8), o22 (two cards for two too).
 
               --challenger AGENT     The agent tested
               --baseline AGENT       The agent it is compared with
@@ -77,22 +85,25 @@ namespace Arena
               --beta B               False negative rate of the SPRT (default 0.05)
               --max-minutes M        Stop after M minutes even if the SPRT is open (default 120)
               --provider cpu|dml|cuda  Where the nets run (default: the GPU if available)
+              --free-trade           Trades between players in a mirror duel too (always on at a table)
               --help                 Show this help
             """;
 
         public static CommandLine Parse(string[] args)
         {
             if (args.Length == 0 || args.Any(a => a is "--help" or "-h"))
-                return new CommandLine((MirrorSettings?)null);
-            if (args[0] != "mirror")
+                return new CommandLine((DuelSettings?)null);
+            if (args[0] is not ("mirror" or "table"))
                 throw new ArgumentException($"Unknown mode \"{args[0]}\".");
+            bool table = args[0] == "table";
 
             AgentSpec? challenger = null, baseline = null;
             string? name = null;
             int? seedBase = null;
             long iterations = 5000;
             double? seconds = null;
-            var settings = new MirrorSettings { Challenger = null!, Baseline = null! };
+            var settings = new DuelSettings { Challenger = null!, Baseline = null! };
+            bool sprt = false;
 
             for (int i = 1; i < args.Length; i++)
             {
@@ -110,7 +121,8 @@ namespace Arena
                     case "--max-games": settings = settings with { MaxGames = IntValue() }; break;
                     case "--name": name = Value(); break;
                     case "--seed-base": seedBase = IntValue(); break;
-                    case "--sprt": settings = settings with { Elo0 = DoubleValue(), Elo1 = DoubleValue() }; break;
+                    case "--sprt": settings = settings with { Elo0 = DoubleValue(), Elo1 = DoubleValue() }; sprt = true; break;
+                    case "--free-trade": settings = settings with { FreeTrade = true }; break;
                     case "--alpha": settings = settings with { Alpha = DoubleValue() }; break;
                     case "--beta": settings = settings with { Beta = DoubleValue() }; break;
                     case "--max-minutes": settings = settings with { MaxDuration = TimeSpan.FromMinutes(DoubleValue()) }; break;
@@ -131,7 +143,12 @@ namespace Arena
             }
 
             if (challenger == null || baseline == null)
-                throw new ArgumentException("A mirror duel needs --challenger and --baseline.");
+                throw new ArgumentException("A duel needs --challenger and --baseline.");
+            if (table)
+            {
+                settings = settings with { FreeTrade = true };
+                if (!sprt) settings = settings with { Elo0 = 0, Elo1 = 3 };
+            }
             if (challenger.Name == baseline.Name)
                 throw new ArgumentException("The challenger and the baseline need different names.");
             if (settings.Elo1 <= settings.Elo0)
@@ -146,7 +163,7 @@ namespace Arena
                 Iterations = seconds == null ? iterations : 0,
                 Seconds = seconds ?? settings.Seconds,
                 SeedBase = seedBase ?? (name == null ? settings.SeedBase : SeedOf(name)),
-            });
+            }, table);
         }
 
         /// <summary>
