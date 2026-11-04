@@ -140,6 +140,8 @@ namespace Tests
             Assert.False(AgentSpec.Parse("T=a.onnx=nooffers").MakeOffers);
             Assert.Contains("nooffers", AgentSpec.Parse("T=a.onnx=nooffers").ToString());
             Assert.Throws<ArgumentException>(() => AgentSpec.Parse("T=a.onnx=ow0"));
+            Assert.Equal(0.5, AgentSpec.Parse("T=a.onnx=af0.5").AnswerFairness);
+            Assert.Equal(0, plain.AnswerFairness);
             AgentSpec answers = AgentSpec.Parse("T=a.onnx=am0.01=co");
             Assert.Equal((0.01, true), (answers.AnswerMargin, answers.Counters));
             Assert.Equal((0.002, false), (plain.AnswerMargin, plain.Counters));
@@ -150,10 +152,10 @@ namespace Tests
             var net = new StateValueNet(PlainModelPath, provider: InferenceProvider.Cpu);
             foreach (string kind in new[] { "is", "d2", "c1.414" })
             {
-                Agent agent = AgentSpec.Parse($"T={PlainModelPath}={kind}=om0.01=on1=ow4=o22=am0.02=co=o31").Create(1, start, net, 16, 0);
+                Agent agent = AgentSpec.Parse($"T={PlainModelPath}={kind}=om0.01=on1=ow4=o22=am0.02=co=o31=af0.5").Create(1, start, net, 16, 0);
                 MCTSAgent search = agent switch { InformationSetMCTSAgent i => i.Search, DeterminizedMCTSAgent d => d.Search, _ => (MCTSAgent)agent };
                 Assert.Equal((true, 0.01f, 1, 4, true), (search.Offers.Enabled, search.Offers.Margin, search.Offers.MaxPerTurn, search.Offers.Worlds, search.Offers.TwoForTwo));
-                Assert.Equal((0.02f, true, true), (search.AnswerMargin, search.Offers.Counters, search.Offers.ThreeForOne));
+                Assert.Equal((0.02f, true, true, 0.5f), (search.AnswerMargin, search.Offers.Counters, search.Offers.ThreeForOne, search.AnswerFairness));
             }
             Assert.False(((InformationSetMCTSAgent)AgentSpec.Parse($"T={PlainModelPath}=is=nooffers").Create(1, start, net, 16, 0)).Search.Offers.Enabled);
         }

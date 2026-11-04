@@ -347,7 +347,7 @@ namespace Tests
         public void ValueNetAgentsCounterWithLegalTerms()
         {
             // Offers of one card for another in random games, answered by each kind of value-net agent with every gain counted
-            int counters = 0, answers = 0;
+            int counters = 0, answers = 0, acceptsAll = 0, acceptsFair = 0;
             StateValueNet net = Net("plain_tiny.onnx");
             for (int seed = 1; seed <= 40 && counters < 12; seed++)
             {
@@ -367,15 +367,15 @@ namespace Tests
                     game.Play(new OfferTradeAction(acting, Cards((offered, 1)), Cards((wanted, 1)), OfferTradeAction.Everyone(game.Truth, acting)));
                     while (game.Truth.Turn.PendingTrade is TradeOffer { NextResponder: sbyte responder })
                     {
-                        Agent[] Agents(bool withCounters, float answerMargin)
+                        Agent[] Agents(bool withCounters, float answerMargin, float fairness = 0)
                         {
-                            MCTSAgent search = new MCTSAgent(responder, game.Truth, valueNet: net, iterationLimit: 16, leavesPerBatch: 8) { AnswerMargin = answerMargin };
+                            MCTSAgent search = new MCTSAgent(responder, game.Truth, valueNet: net, iterationLimit: 16, leavesPerBatch: 8) { AnswerMargin = answerMargin, AnswerFairness = fairness };
                             search.Offers.Counters = withCounters;
                             search.Offers.Margin = 0;
                             InformationSetMCTSAgent ismcts = new InformationSetMCTSAgent(search, game.Truth, seed: 3);
                             ismcts.ResetTo(game.Truth, game.Trackers[responder]);
                             DeterminizedMCTSAgent pimc = new DeterminizedMCTSAgent(new MCTSAgent(responder, game.Truth, valueNet: net, iterationLimit: 16, leavesPerBatch: 8)
-                                { AnswerMargin = answerMargin, Offers = { Counters = withCounters, Margin = 0 } }, game.Truth, 2, seed: 3);
+                                { AnswerMargin = answerMargin, AnswerFairness = fairness, Offers = { Counters = withCounters, Margin = 0 } }, game.Truth, 2, seed: 3);
                             pimc.ResetTo(game.Truth, game.Trackers[responder]);
                             return [search, ismcts, pimc];
                         }
@@ -395,6 +395,9 @@ namespace Tests
                             // The answer margin decides: any gain or none is enough
                             Assert.Equal(canAccept, Agents(false, -1)[kind].Act(new GameState(game.Truth)) is RespondToTradeAction { Accept: true });
                             Assert.True(Agents(false, 1)[kind].Act(new GameState(game.Truth)) is RespondToTradeAction { Accept: false });
+                            // Asking for a thousand times the offerer's gain turns down what any gain would take
+                            if (canAccept) acceptsAll++;
+                            if (Agents(false, -1, 1000)[kind].Act(new GameState(game.Truth)) is RespondToTradeAction { Accept: true }) acceptsFair++;
                         }
                         game.Play(new RespondToTradeAction(responder, false));
                     }
@@ -403,6 +406,25 @@ namespace Tests
                 }
             }
             Assert.True(counters >= 12, $"only {counters} counteroffers in {answers} answers");
+            Assert.True(acceptsFair < acceptsAll, $"fairness turned down nothing ({acceptsFair} of {acceptsAll})");
+        }
+        #endregion
+
+        #region Answers
+        [Fact]
+        public void AFairAnswerNeedsAShareOfTheOfferersGain()
+        {
+            (GameState state, sbyte active) = MainPhase();
+            sbyte responder = Seat(active, 1);
+            Play(state, new OfferTradeAction(active, Cards((Lumber, 1)), Cards((Ore, 1)), To(responder)));
+            // The responder gains 0.01 from a lumber, the offerer 0.05 from an ore
+            float Value(GameState s, int player) => player == responder ? 0.01f * s.Players[responder].ResourceCards.Get(Lumber)
+                : player == active ? 0.05f * s.Players[active].ResourceCards.Get(Ore) : 0;
+
+            Assert.True(TradeDecisions.Decide(state, responder, Value) is RespondToTradeAction { Accept: true });
+            Assert.True(TradeDecisions.Decide(state, responder, Value, fairness: 0.1f) is RespondToTradeAction { Accept: true });
+            Assert.True(TradeDecisions.Decide(state, responder, Value, fairness: 0.5f) is RespondToTradeAction { Accept: false });
+            Assert.True(TradeDecisions.Decide(state, responder, Value, margin: 0.02f) is RespondToTradeAction { Accept: false });
         }
         #endregion
 

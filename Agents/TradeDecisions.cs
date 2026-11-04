@@ -23,7 +23,9 @@ namespace Agents
         /// </summary>
         /// <param name="value">The agent's utility of a position for a player, or null for the hand heuristic</param>
         /// <param name="margin">How much better a trade has to be by the value function to accept it</param>
-        public static Action? Decide(GameState state, sbyte player, Func<GameState, int, float>? value = null, float margin = ValueMargin)
+        /// <param name="fairness">With a value function, an offer is only accepted if it raises the agent's value by at least
+        /// this share of what it raises the offerer's (0: any gain above the margin)</param>
+        public static Action? Decide(GameState state, sbyte player, Func<GameState, int, float>? value = null, float margin = ValueMargin, float fairness = 0)
         {
             if (state.Turn.PendingTrade is not TradeOffer offer) return null;
 
@@ -36,7 +38,10 @@ namespace Agents
                 if (state.Players[offer.Offerer].VictoryPoints.Total >= state.Settings.VictoryPoints - LeaderDistance) return reject;
 
                 GameState traded = AfterTrade(state, offer.Offerer, player, offer.Give, offer.Get);
-                return IsBetter(traded, state, player, value, margin) ? accept : reject;
+                if (!IsBetter(traded, state, player, value, margin)) return reject;
+                if (value != null && fairness > 0
+                    && value(traded, player) - value(state, player) < fairness * (value(traded, offer.Offerer) - value(state, offer.Offerer))) return reject;
+                return accept;
             }
 
             if (offer.Offerer == player && offer.NextResponder == null)

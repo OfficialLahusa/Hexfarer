@@ -20,7 +20,7 @@ namespace Arena
     /// subtree ISMCTS goes on with by X (above 0, at most 1; 1, full weight, if not given). Trade offers (with free trade, see
     /// TradeOffers): nooffers makes none, omX needs a mean gain above X (default 0.005), onN makes at most N per turn
     /// (default 3), owN judges them over N worlds (default 8), o22 looks at two cards for two too, o31 at three cards for one
-    /// and one for three. Answers: amX accepts an
+    /// and one for three. Answers: afX accepts an offer only if it gains at least X times what the offerer gains, amX accepts an
     /// offer from a gain above X (default 0.002), co answers an offer it turns down with a counteroffer.
     /// </summary>
     internal sealed record AgentSpec(string Name, string ModelPath, OpponentModel OpponentModel, double Exploration, int LeavesPerBatch,
@@ -28,7 +28,7 @@ namespace Arena
         bool FullKnowledge = false, bool? NormalizeValues = null, bool BranchHiddenOutcomes = false, bool ReuseTree = true,
         bool EvaluateNewLeaves = true, bool PlayForcedMovesAtOnce = true, double ReuseDecay = 1, bool MakeOffers = true,
         double OfferMargin = 0.005, int MaxOffers = 3, int OfferWorlds = 8, bool TwoForTwo = false, double AnswerMargin = 0.002, bool Counters = false,
-        bool ThreeForOne = false)
+        bool ThreeForOne = false, double AnswerFairness = 0)
     {
         public static AgentSpec Parse(string spec)
         {
@@ -56,6 +56,7 @@ namespace Arena
                     "o22" => result with { TwoForTwo = true },
                     "co" => result with { Counters = true },
                     "o31" => result with { ThreeForOne = true },
+                    ['a', 'f', ..] => result with { AnswerFairness = double.Parse(option[2..], CultureInfo.InvariantCulture) },
                     ['a', 'm', ..] => result with { AnswerMargin = double.Parse(option[2..], CultureInfo.InvariantCulture) },
                     ['o', 'm', ..] => result with { OfferMargin = double.Parse(option[2..], CultureInfo.InvariantCulture) },
                     ['o', 'n', ..] => result with { MaxOffers = int.Parse(option[2..], CultureInfo.InvariantCulture) },
@@ -101,6 +102,7 @@ namespace Arena
             if (ThreeForOne) options.Add("o31");
             if (AnswerMargin != 0.002) options.Add($"am{AnswerMargin.ToString(CultureInfo.InvariantCulture)}");
             if (Counters) options.Add("co");
+            if (AnswerFairness != 0) options.Add($"af{AnswerFairness.ToString(CultureInfo.InvariantCulture)}");
             return $"{Name} {Path.GetFileName(ModelPath)} {string.Join(" ", options)}";
         }
 
@@ -125,6 +127,7 @@ namespace Arena
             search.Offers.Counters = Counters;
             search.Offers.ThreeForOne = ThreeForOne;
             search.AnswerMargin = (float)AnswerMargin;
+            search.AnswerFairness = (float)AnswerFairness;
 
             // Under hidden information the agent sees only its seat's view: one tree over its information sets, or the
             // iterations split between its determinizations

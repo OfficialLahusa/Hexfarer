@@ -71,7 +71,7 @@ namespace Arena
             the old search) and gX (ISMCTS scales the statistics of the subtree it goes on with by X, above 0 and at most 1;
             default 1). Trade offers, with free trade: nooffers (none), omX (mean gain needed, default 0.005), onN (at most N
             per turn, default 3), owN (judged over N worlds, default 8), o22 (two cards for two too), o31 (three for one and
-            one for three too); answers: amX (accept
+            one for three too); answers: afX (accept only a gain of at least X times the offerer's), amX (accept
             from a gain above X, default 0.002), co (counteroffers to offers turned down).
 
               --challenger AGENT     The agent tested

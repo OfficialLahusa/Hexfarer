@@ -60,7 +60,12 @@ namespace Agents.MCTS
         /// <summary>
         /// The agent's answer or pick in an open trade between players, decided outside the tree (see TradeDecisions), or null
         /// </summary>
-        public Action? DecideTrade(GameState state) => TradeDecisions.Decide(state, PlayerIndex, TradeUtility, AnswerMargin);
+        public Action? DecideTrade(GameState state) => TradeDecisions.Decide(state, PlayerIndex, TradeUtility, AnswerMargin, AnswerFairness);
+
+        /// <summary>
+        /// The share of the offerer's gain an offer has to give the agent for it to accept (0: any gain above AnswerMargin)
+        /// </summary>
+        public float AnswerFairness { get; set; }
 
         /// <summary>
         /// How much a trade has to raise the agent's value for it to accept an offer
