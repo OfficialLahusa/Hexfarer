@@ -158,6 +158,15 @@ namespace Tests
                 Assert.Equal((0.02f, true, true, 0.5f), (search.AnswerMargin, search.Offers.Counters, search.Offers.ThreeForOne, search.AnswerFairness));
             }
             Assert.False(((InformationSetMCTSAgent)AgentSpec.Parse($"T={PlainModelPath}=is=nooffers").Create(1, start, net, 16, 0)).Search.Offers.Enabled);
+
+            // An agent that ignores what trades show keeps doing so after a reset
+            InformationSetMCTSAgent deaf = (InformationSetMCTSAgent)AgentSpec.Parse($"T={PlainModelPath}=is=nolearn").Create(1, start, net, 16, 0);
+            Assert.False(deaf.Beliefs.LearnsFromTrades);
+            deaf.ResetToState(start);
+            Assert.False(deaf.Beliefs.LearnsFromTrades);
+            deaf.ResetTo(start, new BeliefTracker(1, start));
+            Assert.False(deaf.Beliefs.LearnsFromTrades);
+            Assert.True(((InformationSetMCTSAgent)AgentSpec.Parse($"T={PlainModelPath}=is").Create(1, start, net, 16, 0)).Beliefs.LearnsFromTrades);
         }
 
         [Fact]

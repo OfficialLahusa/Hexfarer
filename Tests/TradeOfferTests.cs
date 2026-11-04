@@ -451,9 +451,16 @@ namespace Tests
                     if (unknown is ResourceCardType type && OfferTradeAction.IsTurnValid(game.Truth, acting) && random.NextDouble() < 0.5)
                     {
                         ResourceCardType wanted = CardTypeExtensions.ResourceTypes.First(t => t != type);
-                        uint needed = hand.Get(type);
-                        game.Play(new OfferTradeAction(acting, Cards((type, needed)), Cards((wanted, 1)), OfferTradeAction.Everyone(game.Truth, acting)));
+                        uint needed = hand.Get(type), knownBefore = beliefs.Hand(acting).Known.Get(type);
+                        // An observer that ignores what trades show (an ablation) learns nothing from the offer
+                        BeliefTracker deaf = new BeliefTracker(beliefs) { LearnsFromTrades = false };
+                        GameState before = new GameState(game.Truth);
+                        OfferTradeAction shown = new OfferTradeAction(acting, Cards((type, needed)), Cards((wanted, 1)), OfferTradeAction.Everyone(game.Truth, acting));
+                        game.Play(shown);
+                        deaf.Observe(before, shown, game.Truth);
                         Assert.Equal(needed, beliefs.Hand(acting).Known.Get(type));
+                        Assert.Equal(knownBefore, deaf.Hand(acting).Known.Get(type));
+                        Assert.False(new BeliefTracker(deaf).LearnsFromTrades);
                         offers++;
                         continue;
                     }

@@ -123,7 +123,14 @@ namespace Common
             _totals = new CardSet<ResourceCardType>(copy._totals);
             _hiddenDevelopment = new CardSet<DevelopmentCardType>(copy._hiddenDevelopment);
             _othersDevelopment = copy._othersDevelopment;
+            LearnsFromTrades = copy.LearnsFromTrades;
         }
+
+        /// <summary>
+        /// Whether the observer takes in the cards an offer, an accept or a counteroffer shows (an ablation if not: it then
+        /// learns only from the hands changing)
+        /// </summary>
+        public bool LearnsFromTrades { get; set; } = true;
 
         /// <summary>
         /// What the observer knows about a player's resource cards; its own hand is known exactly
@@ -206,7 +213,7 @@ namespace Common
             }
 
             // Offering, accepting or countering is only legal with the cards it trades away: the player holds at least them
-            switch (action)
+            switch (LearnsFromTrades ? action : null)
             {
                 case OfferTradeAction offer:
                     Holds(offer.PlayerIndex, offer.Give);

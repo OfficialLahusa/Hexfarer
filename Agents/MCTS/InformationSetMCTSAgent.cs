@@ -56,6 +56,21 @@ namespace Agents.MCTS
         public bool NormalizeValues { get; init; }
 
         /// <summary>
+        /// Whether its beliefs take in the cards offers, accepts and counteroffers show (see BeliefTracker.LearnsFromTrades)
+        /// </summary>
+        public bool LearnsFromTrades
+        {
+            get => _learnsFromTrades;
+            init
+            {
+                _learnsFromTrades = value;
+                _beliefs.LearnsFromTrades = value;
+            }
+        }
+
+        private readonly bool _learnsFromTrades = true;
+
+        /// <summary>
         /// Whether the next decision goes on with the subtree of the moves played since the last search (the MCTS agent's
         /// ReuseTree, as for the open-hand search) instead of a new tree
         /// </summary>
@@ -149,7 +164,7 @@ namespace Agents.MCTS
         {
             if (beliefs.Observer != PlayerIndex) throw new ArgumentException($"The beliefs are seat {beliefs.Observer}'s, not seat {PlayerIndex}'s.", nameof(beliefs));
             _mirror = new GameState(state);
-            _beliefs = new BeliefTracker(beliefs);
+            _beliefs = new BeliefTracker(beliefs) { LearnsFromTrades = _learnsFromTrades };
             _reusable = null;
         }
 
@@ -157,7 +172,7 @@ namespace Agents.MCTS
         {
             // Without the history the agent knows the hands of the given position (see BeliefTracker's constructor)
             _mirror = new GameState(state);
-            _beliefs = new BeliefTracker(PlayerIndex, state);
+            _beliefs = new BeliefTracker(PlayerIndex, state) { LearnsFromTrades = _learnsFromTrades };
             _reusable = null;
         }
     }
