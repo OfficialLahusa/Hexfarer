@@ -205,6 +205,20 @@ namespace Common
                 }
             }
 
+            // Offering, accepting or countering is only legal with the cards it trades away: the player holds at least them
+            switch (action)
+            {
+                case OfferTradeAction offer:
+                    Holds(offer.PlayerIndex, offer.Give);
+                    break;
+                case RespondToTradeAction { Accept: true } accept when before.Turn.PendingTrade is TradeOffer pending:
+                    Holds(accept.PlayerIndex, pending.Get);
+                    break;
+                case CounterTradeAction counter:
+                    Holds(counter.PlayerIndex, counter.Get);
+                    break;
+            }
+
             if (action == null)
             {
                 // An edit is public: the totals and the development cards are taken from it

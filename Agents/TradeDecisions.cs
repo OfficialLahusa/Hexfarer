@@ -5,18 +5,18 @@ using Action = Common.Actions.Action;
 namespace Agents
 {
     /// <summary>
-    /// How agents take part in trades between players: they answer offers addressed to them and, as the player on turn (a
-    /// stand-in for a human), pick a partner or let an offer go. They don't make offers or counteroffers themselves. A trade is
+    /// How agents take part in trades between players: they answer offers addressed to them and, as the player on turn, pick a
+    /// partner or let an offer go (their own offers come from TradeOffers; they make no counteroffers). A trade is
     /// judged by comparing the position after it with the position without it, by a value function if the agent has one
     /// (the value net's utility) or else by how close the hand comes to the next buildings.
     /// </summary>
     public static class TradeDecisions
     {
         // A trade has to be better than this to be worth it, so agents don't trade for noise in the value
-        private const float ValueMargin = 0.002f, HandMargin = 0.15f;
+        internal const float ValueMargin = 0.002f, HandMargin = 0.15f;
 
         // Victory points short of the win from which agents stop helping a player
-        private const int LeaderDistance = 2;
+        internal const int LeaderDistance = 2;
 
         /// <summary>
         /// The agent's move in an open trade, or null if there is no open trade it has to act in
@@ -61,7 +61,7 @@ namespace Agents
         /// <summary>
         /// The position after the offerer gives one set of cards to the partner and gets the other, with the offer closed
         /// </summary>
-        private static GameState AfterTrade(GameState state, int offerer, int partner, CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)
+        internal static GameState AfterTrade(GameState state, int offerer, int partner, CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)
         {
             GameState after = new GameState(state);
             after.Turn.PendingTrade = null;

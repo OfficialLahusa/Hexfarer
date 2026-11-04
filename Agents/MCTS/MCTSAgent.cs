@@ -63,6 +63,18 @@ namespace Agents.MCTS
         public Action? DecideTrade(GameState state) => TradeDecisions.Decide(state, PlayerIndex, TradeUtility);
 
         /// <summary>
+        /// The agent's trade offers on turn (see TradeOffers), made before the search
+        /// </summary>
+        public TradeOffers Offers { get; } = new();
+
+        /// <summary>
+        /// The agent's offer now, judged by the value net over worlds it can't tell from the true position (the true position
+        /// for the open-hand search), or null
+        /// </summary>
+        public OfferTradeAction? DecideOffer(GameState state, Func<int, IReadOnlyList<GameState>> worlds) =>
+            Offers.Decide(state, PlayerIndex, worlds, Utilities);
+
+        /// <summary>
         /// Statistics of the last search (RunForTime or RunBatchedIterations)
         /// </summary>
         public SearchStatistics? LastSearch => _search.LastSearch;
@@ -192,6 +204,7 @@ namespace Agents.MCTS
         {
             // Trades between players are decided outside the tree: the value of the position with and without the trade
             if (TradeDecisions.Decide(state, PlayerIndex, TradeUtility) is Action trade) return trade;
+            if (DecideOffer(state, _ => [state]) is OfferTradeAction offer) return offer;
 
             if (PlayForcedMovesAtOnce)
             {
@@ -445,6 +458,39 @@ namespace Agents.MCTS
             Span<double> utilities = stackalloc double[MCTSNode.PlayerCount];
             SimulateUtilities(state, utilities);
             return (float)utilities[player];
+        }
+
+        // Features of the positions an offer is judged on, kept between decisions
+        private float[] _offerFeatures = [];
+
+        /// <summary>
+        /// Every player's utility of each position by the value net, as the search scores its leaves, in one batch:
+        /// PlayerCount values per position
+        /// </summary>
+        public double[] Utilities(IReadOnlyList<GameState> states)
+        {
+            int dim = _stateVectorizer.FeatureDim, players = MCTSNode.PlayerCount;
+            if (_offerFeatures.Length < states.Count * dim) _offerFeatures = new float[states.Count * dim];
+            Span<float> features = _offerFeatures.AsSpan(0, states.Count * dim);
+            features.Clear();
+            for (int i = 0; i < states.Count; i++)
+                _stateVectorizer.VectorizeInto(states[i], features.Slice(i * dim, dim));
+            var input = new DenseTensor<float>(_offerFeatures.AsMemory(0, states.Count * dim), [states.Count, dim]);
+
+            double[] utilities = new double[states.Count * players];
+            if (_placementWeight == 0)
+            {
+                float[] winProbabilities = _stateValueNet.Run(input);
+                for (int i = 0; i < states.Count; i++)
+                    LeafUtilities(winProbabilities.AsSpan(i * players, players), default, utilities.AsSpan(i * players, players));
+            }
+            else
+            {
+                (float[] winProbabilities, float[] placements) = _stateValueNet.RunWithPlacements(input);
+                for (int i = 0; i < states.Count; i++)
+                    LeafUtilities(winProbabilities.AsSpan(i * players, players), placements.AsSpan(i * players * 4, players * 4), utilities.AsSpan(i * players, players));
+            }
+            return utilities;
         }
 
         protected float ValuationToScore(ReadOnlySpan<float> valuation)

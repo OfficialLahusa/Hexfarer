@@ -57,13 +57,19 @@ namespace Agents.MCTS
 
         public override Action Act(GameState state, CancellationToken cancellation)
         {
+            // Offers are judged over worlds drawn from the beliefs (see TradeOffers), not in each world on its own
+            if (_search.DecideOffer(state, count => Enumerable.Range(0, count).Select(_ => _beliefs.Determinize(_beliefs.View(state), _random)).ToList()) is OfferTradeAction offer)
+                return offer;
+
             IReadOnlyList<GameState> worlds = Determinize(state);
 
             // Each world gets its share of the iterations; without an iteration limit, of the time
             long iterations = _search.IterationLimit, perWorldIterations = iterations > 0 ? Math.Max(1, iterations / worlds.Count) : 0;
             double seconds = _search.TimeLimitSeconds;
+            bool offers = _search.Offers.Enabled;
             _search.IterationLimit = perWorldIterations;
             _search.TimeLimitSeconds = seconds / worlds.Count;
+            _search.Offers.Enabled = false;
 
             List<(Action move, double weight)> votes = [];
             try
@@ -92,6 +98,7 @@ namespace Agents.MCTS
             {
                 _search.IterationLimit = iterations;
                 _search.TimeLimitSeconds = seconds;
+                _search.Offers.Enabled = offers;
                 _search.ResetToState(state);
             }
 

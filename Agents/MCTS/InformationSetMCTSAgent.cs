@@ -8,7 +8,8 @@ namespace Agents.MCTS
     /// Plays under hidden information with information set MCTS (ISMCTSTree): it follows the game as its seat sees it
     /// (BeliefTracker) and searches one tree over its information sets, a world drawn for every iteration, with the net, the
     /// time or iteration budget and the settings of the MCTS agent of its seat. Trades between players are decided outside
-    /// the tree, on a world drawn from the view. The true state it is given is only used for its public parts.
+    /// the tree: answers on a world drawn from the view, offers over several (see TradeOffers). The true state it is given is
+    /// only used for its public parts.
     /// </summary>
     public sealed class InformationSetMCTSAgent : Agent, IShowsSearch
     {
@@ -88,6 +89,7 @@ namespace Agents.MCTS
         {
             _searched = null;
             if (_search.DecideTrade(FullKnowledge ? state : _beliefs.Determinize(_beliefs.View(state), _random)) is Action trade) return trade;
+            if (_search.DecideOffer(state, count => FullKnowledge ? [state] : Worlds(state, count)) is OfferTradeAction offer) return offer;
 
             List<Action> legal = MCTSTree.GetValidActions(state);
             if (legal.Count == 1) return legal[0].Clone();
@@ -105,6 +107,13 @@ namespace Agents.MCTS
             _search.RunSearch(tree, cancellation);
             _reusable = ReuseTree ? tree.RootNode : null;
             return tree.GetMostPromisingMove(legal);
+        }
+
+        // Worlds drawn from what the seat knows
+        private List<GameState> Worlds(GameState state, int count)
+        {
+            GameState view = _beliefs.View(state);
+            return Enumerable.Range(0, count).Select(_ => _beliefs.Determinize(view, _random)).ToList();
         }
 
         // The position of the last tree, for showing its search

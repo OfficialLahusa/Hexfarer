@@ -31,10 +31,16 @@ namespace Agents
             _randomAgent = new RandomAgent(playerIndex);
         }
 
+        /// <summary>
+        /// The agent's trade offers on turn (see TradeOffers)
+        /// </summary>
+        public TradeOffers Offers { get; } = new();
+
         public override Action Act(GameState state)
         {
-            // Trades between players: answers to offers and, on turn, the pick of a partner
+            // Trades between players: answers to offers and, on turn, the pick of a partner or an offer by the hand heuristic
             if (TradeDecisions.Decide(state, PlayerIndex) is Action trade) return trade;
+            if (Offers.Decide(state, PlayerIndex, null, null) is OfferTradeAction offer) return offer;
 
             sbyte p = PlayerIndex;
 

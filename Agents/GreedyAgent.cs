@@ -27,10 +27,16 @@ namespace Agents
             _stateVectorizer = StateVectorizer.For(_stateValueNet);
         }
 
+        /// <summary>
+        /// The agent's trade offers on turn (see TradeOffers)
+        /// </summary>
+        public TradeOffers Offers { get; } = new();
+
         public override Action Act(GameState state)
         {
-            // Trades between players: answers to offers and, on turn, the pick of a partner
+            // Trades between players: answers to offers and, on turn, the pick of a partner or an offer by the hand heuristic
             if (TradeDecisions.Decide(state, PlayerIndex) is Action trade) return trade;
+            if (Offers.Decide(state, PlayerIndex, null, null) is OfferTradeAction offer) return offer;
 
             List<Action> firstInitialSettlementActions = FirstInitialSettlementAction.GetActionsForState(state, PlayerIndex);
             if (firstInitialSettlementActions.Count > 0)

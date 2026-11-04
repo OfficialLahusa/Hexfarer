@@ -16,20 +16,20 @@ namespace Tests
         private const ResourceCardType Lumber = ResourceCardType.Lumber, Brick = ResourceCardType.Brick, Wool = ResourceCardType.Wool,
             Grain = ResourceCardType.Grain, Ore = ResourceCardType.Ore;
 
-        private static CardSet<ResourceCardType> Cards(params (ResourceCardType type, uint amount)[] cards)
+        internal static CardSet<ResourceCardType> Cards(params (ResourceCardType type, uint amount)[] cards)
         {
             CardSet<ResourceCardType> set = new CardSet<ResourceCardType>();
             foreach ((ResourceCardType type, uint amount) in cards) set.Add(type, amount);
             return set;
         }
 
-        private static byte To(params int[] players) => (byte)players.Aggregate(0, (mask, p) => mask | 1 << p);
+        internal static byte To(params int[] players) => (byte)players.Aggregate(0, (mask, p) => mask | 1 << p);
 
         /// <summary>
         /// A game in the main phase right after a roll, with free trade on and known hands: every player holds two of each
         /// resource. Returns the state and the player on turn.
         /// </summary>
-        private static (GameState state, sbyte active) MainPhase(int seed = 1, bool freeTrade = true)
+        internal static (GameState state, sbyte active) MainPhase(int seed = 1, bool freeTrade = true)
         {
             Utils.Random.SeedCurrentThread(seed);
             GameState state = new GameState(MapGenerator.GenerateRandomClassic(), 4);
@@ -51,9 +51,9 @@ namespace Tests
             return (state, (sbyte)state.Turn.PlayerIndex);
         }
 
-        private static sbyte Seat(sbyte active, int offset) => (sbyte)((active + offset) % 4);
+        internal static sbyte Seat(sbyte active, int offset) => (sbyte)((active + offset) % 4);
 
-        private static void Play(GameState state, Action action)
+        internal static void Play(GameState state, Action action)
         {
             Assert.True(action.IsValidFor(state), $"{action} should be valid");
             action.Apply(state);

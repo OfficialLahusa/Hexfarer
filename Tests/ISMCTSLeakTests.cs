@@ -50,7 +50,7 @@ namespace Tests
         /// <summary>
         /// Positions of random games where the seat decides between several moves and is missing something, with its beliefs
         /// </summary>
-        private static List<(GameState truth, BeliefTracker beliefs)> Decisions(int seat, int count, int firstSeed, bool freeTrade = false)
+        private static List<(GameState truth, BeliefTracker beliefs)> Decisions(int seat, int count, int firstSeed, bool freeTrade = false, Func<GameState, bool>? where = null)
         {
             List<(GameState, BeliefTracker)> found = [];
             for (int seed = firstSeed; found.Count < count && seed < firstSeed + 60; seed++)
@@ -62,7 +62,8 @@ namespace Tests
                 {
                     sbyte acting = TestUtil.ActingPlayer(game.Truth);
                     sinceLast++;
-                    if (acting == seat && sinceLast > 17 && game.Trackers[seat].HasHiddenInformation && MCTSTree.GetValidActions(game.Truth).Count > 1)
+                    if (acting == seat && sinceLast > 17 && game.Trackers[seat].HasHiddenInformation && MCTSTree.GetValidActions(game.Truth).Count > 1
+                        && (where?.Invoke(game.Truth) ?? true))
                     {
                         sinceLast = 0;
                         found.Add((new GameState(game.Truth), new BeliefTracker(game.Trackers[seat])));
@@ -263,6 +264,59 @@ namespace Tests
                 }
             }
             Assert.True(open >= 60, $"only {open} trade decisions with a choice had a different world ({compared} compared)");
+        }
+
+        [Theory]
+        [InlineData("plain_tiny.onnx")]
+        [InlineData("view_tiny.onnx")]
+        public void OffersAreTheSameInEveryWorldTheSeatCantTellApart(string net)
+        {
+            // An offer is judged over worlds drawn from the beliefs; of the true position it reads only the seat's own hand,
+            // the turn and the public points. With every gain counted (margin 0) the agents offer often. (The values of
+            // sensitive_tiny are all but 0 or 1, so no trade gains both sides and it never offers.)
+            int compared = 0, offers = 0, differingWithFullKnowledge = 0;
+            for (int seat = 0; seat < 4; seat++)
+            {
+                List<(GameState, BeliefTracker)> positions = Decisions(seat, 8, firstSeed: 1200 + seat * 60, freeTrade: true,
+                    where: state => OfferTradeAction.IsTurnValid(state, seat) && state.Players[seat].ResourceCards.Count() >= 2);
+                foreach ((GameState truth, BeliefTracker beliefs) in positions)
+                {
+                    var decision = DecideOffering(truth, beliefs, net);
+                    if (decision.move is OfferTradeAction) offers++;
+                    var full = DecideOffering(truth, beliefs, net, fullKnowledge: true);
+                    foreach (GameState alternative in Alternatives(truth, beliefs, 3, seed: 110))
+                    {
+                        AssertSameDecision(decision, DecideOffering(alternative, beliefs, net), $"offer, seat {seat}");
+                        if (full.move.ToString() != DecideOffering(alternative, beliefs, net, fullKnowledge: true).move.ToString()) differingWithFullKnowledge++;
+
+                        // PIMC judges its offers over worlds from the same beliefs
+                        Action pimc = DecidePimcOffer(truth, beliefs, net), pimcAlternative = DecidePimcOffer(alternative, beliefs, net);
+                        Assert.Equal(pimc is OfferTradeAction ? pimc.ToString() : "no offer", pimcAlternative is OfferTradeAction ? pimcAlternative.ToString() : "no offer");
+                        compared++;
+                    }
+                }
+            }
+            Assert.True(compared >= 60, $"only {compared} positions had a different world");
+            Assert.True(offers >= 8, $"only {offers} offers");
+            Assert.True(differingWithFullKnowledge > 0, "the comparison can't see an agent that knows the true position");
+        }
+
+        private static (Action move, List<string>? tree) DecideOffering(GameState truth, BeliefTracker beliefs, string net, bool fullKnowledge = false)
+        {
+            InformationSetMCTSAgent agent = NewAgent(truth, beliefs.Observer, net, fullKnowledge, iterations: 32);
+            agent.Search.Offers.Margin = 0;
+            agent.ResetTo(truth, beliefs);
+            Action move = agent.Act(new GameState(truth));
+            return (move, agent.LastTree is ISMCTSTree tree ? Shape(tree) : null);
+        }
+
+        private static Action DecidePimcOffer(GameState truth, BeliefTracker beliefs, string net)
+        {
+            MCTSAgent search = new MCTSAgent((sbyte)beliefs.Observer, truth, valueNet: Nets.Value[net], iterationLimit: 8, leavesPerBatch: 8, parallelSelection: false);
+            search.Offers.Margin = 0;
+            DeterminizedMCTSAgent agent = new DeterminizedMCTSAgent(search, truth, determinizations: 2, seed: 6);
+            agent.ResetTo(truth, beliefs);
+            return agent.Act(new GameState(truth));
         }
 
         [Fact]
