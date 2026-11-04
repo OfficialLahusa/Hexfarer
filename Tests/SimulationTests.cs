@@ -268,6 +268,48 @@ namespace Tests
         }
 
         [Fact]
+        public void BotsTradeWithEachOtherAndWaitForAHumansAnswer()
+        {
+            // Four bots with free trade make offers to each other and trade
+            Utils.Random.SeedCurrentThread(11);
+            GameState state = new GameState(MapGenerator.GenerateRandomClassic(), 4);
+            state.Settings.FreeTrade = true;
+            using (Match bots = new Match(state, [SeatKind.Builder, SeatKind.Builder, SeatKind.Builder, SeatKind.Builder], valueNetAvailable: false))
+            {
+                bots.Handle(Admin, new SetPlayback(new PlaybackState(false, false, 0)));
+                bots.Start();
+                Assert.True(WaitFor(() => bots.Record.State.HasEnded, 60000));
+                Assert.Contains(bots.Record.History, entry => entry.Action is OfferTradeAction);
+                Assert.Contains(bots.Record.History, entry => entry.Action is ConfirmTradeAction);
+            }
+
+            // An offer to a human seat waits for its answer
+            Utils.Random.SeedCurrentThread(12);
+            GameState withHuman = new GameState(MapGenerator.GenerateRandomClassic(), 4);
+            withHuman.Settings.FreeTrade = true;
+            using Match match = new Match(withHuman, [SeatKind.Builder, SeatKind.Builder, SeatKind.Builder, SeatKind.Human], valueNetAvailable: false);
+            match.Handle(Admin, new SetPlayback(new PlaybackState(false, false, 0)));
+            match.Start();
+            bool OfferForHuman() => match.Record.State.Turn.PendingTrade is TradeOffer { NextResponder: 3 } && !match.IsAgentThinking;
+            for (int turns = 0; turns < 200 && !OfferForHuman(); turns++)
+            {
+                Assert.True(WaitFor(() => OfferForHuman() || match.ActingPlayer == 3 && !match.IsAgentThinking || match.Record.State.HasEnded, 20000));
+                if (OfferForHuman() || match.Record.State.HasEnded) break;
+                // The human's own turn: roll if needed, then end it
+                GameState now = match.Record.State;
+                Action move = LegalActionProvider.GetActionsForState(now, 3).FirstOrDefault(a => a is RollAction or EndTurnAction or DiscardAction or RobberAction)
+                    ?? LegalActionProvider.GetActionsForState(now, 3)[0];
+                match.Handle(PlayerAt(3), new PlayMove(move));
+            }
+            Assert.True(OfferForHuman(), "no bot offered a trade to the human seat");
+            int moves = match.Record.History.Count;
+            Thread.Sleep(300);
+            Assert.Equal(moves, match.Record.History.Count);
+            match.Handle(PlayerAt(3), new PlayMove(new RespondToTradeAction(3, false)));
+            Assert.True(WaitFor(() => match.Record.History.Count > moves + 1));
+        }
+
+        [Fact]
         public void AgentGamesRunToTheEnd()
         {
             using Match match = NewMatch([SeatKind.Random, SeatKind.Random, SeatKind.Random, SeatKind.Random], 10);
