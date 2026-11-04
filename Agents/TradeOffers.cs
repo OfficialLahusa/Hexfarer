@@ -39,6 +39,11 @@ namespace Agents
         public bool TwoForTwo { get; set; }
 
         /// <summary>
+        /// Whether three cards for one and one for three are among the offers too
+        /// </summary>
+        public bool ThreeForOne { get; set; }
+
+        /// <summary>
         /// Whether the agent answers an offer it turns down with a counteroffer (only with a value function): the terms best
         /// for it among those the offerer would take, judged like its own offers but with the offerer as the only partner
         /// </summary>
@@ -68,7 +73,7 @@ namespace Agents
             if (recipients == 0) return null;
 
             CardSet<ResourceCardType> hand = state.Players[player].ResourceCards;
-            List<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> candidates = Candidates(hand, TwoForTwo, utilities == null)
+            List<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> candidates = Candidates(hand, TwoForTwo, utilities == null, ThreeForOne)
                 .Where(terms => !_offered.Any(o => o.give.Equals(terms.give) && o.get.Equals(terms.get))).ToList();
             if (candidates.Count == 0) return null;
 
@@ -97,7 +102,7 @@ namespace Agents
             if (IsAboutToWin(state, offer.Offerer)) return null;
 
             // In the offerer's terms: it gives what the agent asks for and gets cards of the agent's hand
-            List<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> candidates = Candidates(state.Players[player].ResourceCards, TwoForTwo, false)
+            List<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> candidates = Candidates(state.Players[player].ResourceCards, TwoForTwo, false, ThreeForOne)
                 .Select(c => (give: c.get, get: c.give))
                 .Where(c => !(c.give.Equals(offer.Give) && c.get.Equals(offer.Get))).ToList();
             if (candidates.Count == 0) return null;
@@ -197,17 +202,20 @@ namespace Agents
 
         /// <summary>
         /// The offers to look at: one or two cards of the hand (one type twice or two types) for one or two cards of other
-        /// types; two for two only if asked, and with askNoMore only offers asking for no more cards than they give
+        /// types; two for two only if asked, three for one and one for three only if asked, and with askNoMore only offers
+        /// asking for no more cards than they give
         /// </summary>
-        internal static IEnumerable<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> Candidates(CardSet<ResourceCardType> hand, bool twoForTwo, bool askNoMore)
+        internal static IEnumerable<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> Candidates(CardSet<ResourceCardType> hand, bool twoForTwo, bool askNoMore,
+            bool threeForOne = false)
         {
-            List<CardSet<ResourceCardType>> gives = Sets(type => hand.Get(type)), gets = Sets(_ => 2);
+            List<CardSet<ResourceCardType>> gives = Sets(type => hand.Get(type), threeForOne), gets = Sets(_ => 3, threeForOne);
             foreach (CardSet<ResourceCardType> give in gives)
             {
                 foreach (CardSet<ResourceCardType> get in gets)
                 {
                     uint given = give.Count(), asked = get.Count();
                     if (given == 2 && asked == 2 && !twoForTwo) continue;
+                    if (given == 3 && asked != 1 || asked == 3 && given != 1) continue;
                     if (askNoMore && asked > given) continue;
                     if (!TradeOffer.AreValidTerms(give, get)) continue;
                     yield return (give, get);
@@ -215,8 +223,9 @@ namespace Agents
             }
         }
 
-        // One card of a type, two of a type, one each of two types, from what is available
-        private static List<CardSet<ResourceCardType>> Sets(Func<ResourceCardType, uint> available)
+        // One card of a type, two of a type, one each of two types, from what is available; with three also every set of
+        // three cards
+        private static List<CardSet<ResourceCardType>> Sets(Func<ResourceCardType, uint> available, bool three = false)
         {
             ResourceCardType[] types = CardTypeExtensions.ResourceTypes;
             List<CardSet<ResourceCardType>> sets = [];
@@ -227,6 +236,20 @@ namespace Agents
             for (int i = 0; i < types.Length; i++)
                 for (int j = i + 1; j < types.Length; j++)
                     if (available(types[i]) >= 1 && available(types[j]) >= 1) sets.Add(Of((types[i], 1), (types[j], 1)));
+            if (!three) return sets;
+            for (int i = 0; i < types.Length; i++)
+            {
+                for (int j = i; j < types.Length; j++)
+                {
+                    for (int k = j; k < types.Length; k++)
+                    {
+                        CardSet<ResourceCardType> set = Of((types[i], 1));
+                        set.Add(types[j], 1);
+                        set.Add(types[k], 1);
+                        if (types.All(type => set.Get(type) <= available(type))) sets.Add(set);
+                    }
+                }
+            }
             return sets;
         }
 

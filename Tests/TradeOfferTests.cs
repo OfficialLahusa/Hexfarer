@@ -23,51 +23,58 @@ namespace Tests
             string.Concat(CardTypeExtensions.ResourceTypes.Select(type => $"{type.GetAbbreviation()}{cards.Get(type)}"));
 
         #region Candidates
-        // Every set of one or two cards (of one type or two) within the limits per type, counted independently of TradeOffers
-        private static List<CardSet<ResourceCardType>> AllSets(Func<ResourceCardType, uint> available)
+        // Every set of one to three cards within the limits per type (by counting all draws of types in order), independently
+        // of TradeOffers
+        private static List<CardSet<ResourceCardType>> AllSets(Func<ResourceCardType, uint> available, int most)
         {
+            HashSet<string> seen = [];
             List<CardSet<ResourceCardType>> sets = [];
             ResourceCardType[] types = CardTypeExtensions.ResourceTypes;
-            foreach (ResourceCardType a in types)
+            IEnumerable<ResourceCardType[]> draws = types.Select(t => new[] { t });
+            for (int size = 1; size <= most; size++)
             {
-                foreach (ResourceCardType b in types.Prepend(ResourceCardType.Unknown))
+                foreach (ResourceCardType[] draw in draws)
                 {
-                    CardSet<ResourceCardType> set = Cards((a, 1));
-                    if (b != ResourceCardType.Unknown)
-                    {
-                        if (b < a) continue;
-                        set.Add(b, 1);
-                    }
-                    if (types.All(type => set.Get(type) <= available(type))) sets.Add(set);
+                    CardSet<ResourceCardType> set = new CardSet<ResourceCardType>();
+                    foreach (ResourceCardType type in draw) set.Add(type, 1);
+                    if (types.All(type => set.Get(type) <= available(type)) && seen.Add(Describe(set))) sets.Add(set);
                 }
+                draws = draws.SelectMany(draw => types.Select(t => draw.Append(t).ToArray())).ToList();
             }
             return sets;
         }
 
         [Theory]
-        [InlineData(false, false)]
-        [InlineData(true, false)]
-        [InlineData(false, true)]
-        public void TheOffersLookedAtAreAllOneOrTwoCardsOfTheHandForOneOrTwoOthers(bool twoForTwo, bool askNoMore)
+        [InlineData(false, false, false)]
+        [InlineData(true, false, false)]
+        [InlineData(false, true, false)]
+        [InlineData(false, false, true)]
+        [InlineData(true, true, true)]
+        public void TheOffersLookedAtAreAllSmallSetsOfTheHandForCardsOfOtherTypes(bool twoForTwo, bool askNoMore, bool threeForOne)
         {
-            CardSet<ResourceCardType> hand = Cards((Lumber, 2), (Brick, 1), (Ore, 1));
+            CardSet<ResourceCardType> hand = Cards((Lumber, 3), (Brick, 1), (Ore, 1));
             HashSet<string> expected = [];
-            foreach (CardSet<ResourceCardType> give in AllSets(hand.Get))
+            foreach (CardSet<ResourceCardType> give in AllSets(hand.Get, threeForOne ? 3 : 2))
             {
-                foreach (CardSet<ResourceCardType> get in AllSets(_ => 2))
+                foreach (CardSet<ResourceCardType> get in AllSets(_ => 3, threeForOne ? 3 : 2))
                 {
+                    uint given = give.Count(), asked = get.Count();
                     if (CardTypeExtensions.ResourceTypes.Any(type => give.Get(type) > 0 && get.Get(type) > 0)) continue;
-                    if (give.Count() == 2 && get.Count() == 2 && !twoForTwo) continue;
-                    if (askNoMore && get.Count() > give.Count()) continue;
+                    if (given == 2 && asked == 2 && !twoForTwo) continue;
+                    // Three cards only against one
+                    if (given == 3 && asked != 1 || asked == 3 && given != 1) continue;
+                    if (askNoMore && asked > given) continue;
                     expected.Add(Terms((give, get)));
                 }
             }
 
-            var candidates = TradeOffers.Candidates(hand, twoForTwo, askNoMore).ToList();
+            var candidates = TradeOffers.Candidates(hand, twoForTwo, askNoMore, threeForOne).ToList();
 
             Assert.Equal(expected.Order(), candidates.Select(Terms).Order());
             Assert.Equal(candidates.Count, candidates.Select(Terms).Distinct().Count());
             Assert.All(candidates, c => Assert.True(TradeOffer.AreValidTerms(c.give, c.get) && hand.Contains(c.give)));
+            Assert.Equal(threeForOne, candidates.Any(c => c.give.Count() == 3));
+            Assert.Equal(threeForOne && !askNoMore, candidates.Any(c => c.get.Count() == 3));
         }
         #endregion
 

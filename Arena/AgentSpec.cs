@@ -19,14 +19,16 @@ namespace Arena
     /// decision with a single legal move instead of playing it at once (the old search), gX scales the statistics of the
     /// subtree ISMCTS goes on with by X (above 0, at most 1; 1, full weight, if not given). Trade offers (with free trade, see
     /// TradeOffers): nooffers makes none, omX needs a mean gain above X (default 0.005), onN makes at most N per turn
-    /// (default 3), owN judges them over N worlds (default 8), o22 looks at two cards for two too. Answers: amX accepts an
+    /// (default 3), owN judges them over N worlds (default 8), o22 looks at two cards for two too, o31 at three cards for one
+    /// and one for three. Answers: amX accepts an
     /// offer from a gain above X (default 0.002), co answers an offer it turns down with a counteroffer.
     /// </summary>
     internal sealed record AgentSpec(string Name, string ModelPath, OpponentModel OpponentModel, double Exploration, int LeavesPerBatch,
         double FirstPlayReduction, double PlacementWeight, bool UniformPriors, int Determinizations = 0, bool InformationSets = false,
         bool FullKnowledge = false, bool? NormalizeValues = null, bool BranchHiddenOutcomes = false, bool ReuseTree = true,
         bool EvaluateNewLeaves = true, bool PlayForcedMovesAtOnce = true, double ReuseDecay = 1, bool MakeOffers = true,
-        double OfferMargin = 0.005, int MaxOffers = 3, int OfferWorlds = 8, bool TwoForTwo = false, double AnswerMargin = 0.002, bool Counters = false)
+        double OfferMargin = 0.005, int MaxOffers = 3, int OfferWorlds = 8, bool TwoForTwo = false, double AnswerMargin = 0.002, bool Counters = false,
+        bool ThreeForOne = false)
     {
         public static AgentSpec Parse(string spec)
         {
@@ -53,6 +55,7 @@ namespace Arena
                     "nooffers" => result with { MakeOffers = false },
                     "o22" => result with { TwoForTwo = true },
                     "co" => result with { Counters = true },
+                    "o31" => result with { ThreeForOne = true },
                     ['a', 'm', ..] => result with { AnswerMargin = double.Parse(option[2..], CultureInfo.InvariantCulture) },
                     ['o', 'm', ..] => result with { OfferMargin = double.Parse(option[2..], CultureInfo.InvariantCulture) },
                     ['o', 'n', ..] => result with { MaxOffers = int.Parse(option[2..], CultureInfo.InvariantCulture) },
@@ -95,6 +98,7 @@ namespace Arena
             if (MaxOffers != 3) options.Add($"on{MaxOffers}");
             if (OfferWorlds != 8) options.Add($"ow{OfferWorlds}");
             if (TwoForTwo) options.Add("o22");
+            if (ThreeForOne) options.Add("o31");
             if (AnswerMargin != 0.002) options.Add($"am{AnswerMargin.ToString(CultureInfo.InvariantCulture)}");
             if (Counters) options.Add("co");
             return $"{Name} {Path.GetFileName(ModelPath)} {string.Join(" ", options)}";
@@ -119,6 +123,7 @@ namespace Arena
             search.Offers.Worlds = OfferWorlds;
             search.Offers.TwoForTwo = TwoForTwo;
             search.Offers.Counters = Counters;
+            search.Offers.ThreeForOne = ThreeForOne;
             search.AnswerMargin = (float)AnswerMargin;
 
             // Under hidden information the agent sees only its seat's view: one tree over its information sets, or the
