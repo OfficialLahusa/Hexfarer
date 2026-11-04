@@ -104,8 +104,8 @@ namespace Tests
             [
                 // Seats 1 and 3 accept lumber for ore, seat 2 holds ore but gains nothing; the offerer gains most with seat 3
                 World(mine, Cards((Ore, 1)), Cards((Ore, 1)), Cards((Ore, 1), (Grain, 1))),
-                // Only seat 1 can and will
-                World(mine, Cards((Ore, 1)), Cards((Ore, 1)), Cards((Grain, 1))),
+                // Only seat 1 can and will; it holds a lumber already, so each world starts from other values
+                World(mine, Cards((Ore, 1), (Lumber, 1)), Cards((Ore, 1)), Cards((Grain, 1))),
                 // Nobody holds ore
                 World(mine, Cards((Brick, 1)), Cards((Brick, 1)), Cards((Grain, 1))),
             ];

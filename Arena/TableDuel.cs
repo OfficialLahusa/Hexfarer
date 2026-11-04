@@ -89,8 +89,8 @@ namespace Arena
         /// A game's end, whether the challenger won, and the offers and trades: by the challenger (as the offerer, and as the
         /// partner of a baseline's offer) and by the baselines together
         /// </summary>
-        private sealed record GameResult(GameState State, bool ChallengerWon, double Seconds, int ChallengerOffers, int ChallengerTrades,
-            int ChallengerPartner, int BaselineOffers, int BaselineTrades);
+        private sealed record GameResult(GameState State, int ChallengerSeat, bool ChallengerWon, double Seconds, int ChallengerOffers,
+            int ChallengerTrades, int ChallengerPartner, int BaselineOffers, int BaselineTrades);
 
         private GameResult PlayGame(int game, StateValueNet challengerNet, StateValueNet baselineNet, CancellationToken cancellation)
         {
@@ -131,7 +131,7 @@ namespace Arena
                         break;
                 }
             }
-            return new GameResult(state, state.HasEnded && state.Turn.PlayerIndex == challengerSeat, stopwatch.Elapsed.TotalSeconds,
+            return new GameResult(state, challengerSeat, state.HasEnded && state.Turn.PlayerIndex == challengerSeat, stopwatch.Elapsed.TotalSeconds,
                 challengerOffers, challengerTrades, challengerPartner, baselineOffers, baselineTrades);
         }
 
@@ -148,7 +148,7 @@ namespace Arena
                 _baselineTrades += result.BaselineTrades;
                 GameState state = result.State;
                 string winner = !state.HasEnded ? "none" : result.ChallengerWon ? "challenger" : $"baseline (seat {state.Turn.PlayerIndex + 1})";
-                Write($"game {game + 1} ({_games} done): challenger in seat {game % Seats + 1}, winner {winner}, VP {string.Join("/", state.Players.Select(p => p.VictoryPoints.Total))}, "
+                Write($"game {game + 1} ({_games} done): challenger in seat {result.ChallengerSeat + 1}, winner {winner}, VP {string.Join("/", state.Players.Select(p => p.VictoryPoints.Total))}, "
                     + $"{state.Turn.RoundCounter} rounds, {result.Seconds:F0}s; offers C {result.ChallengerOffers} ({result.ChallengerTrades} traded), "
                     + $"B {result.BaselineOffers} ({result.BaselineTrades} traded, {result.ChallengerPartner} with C)");
 
