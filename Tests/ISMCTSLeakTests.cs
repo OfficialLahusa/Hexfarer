@@ -139,9 +139,14 @@ namespace Tests
             return new InformationSetMCTSAgent(search, truth, seed: 4) { FullKnowledge = fullKnowledge };
         }
 
-        private static (Action move, List<string>? tree) Decide(GameState truth, BeliefTracker beliefs, string net, bool fullKnowledge = false)
+        private static (Action move, List<string>? tree) Decide(GameState truth, BeliefTracker beliefs, string net, bool fullKnowledge = false, bool counters = false)
         {
             InformationSetMCTSAgent agent = NewAgent(truth, beliefs.Observer, net, fullKnowledge);
+            if (counters)
+            {
+                agent.Search.Offers.Counters = true;
+                agent.Search.Offers.Margin = 0;
+            }
             agent.ResetTo(truth, beliefs);
             Action move = agent.Act(new GameState(truth));
             return (move, agent.LastTree is ISMCTSTree tree ? Shape(tree) : null);
@@ -220,14 +225,17 @@ namespace Tests
         }
 
         [Theory]
-        [InlineData("plain_tiny.onnx")]
-        [InlineData("view_tiny.onnx")]
-        [InlineData("sensitive_tiny.onnx")]
-        public void TradeAnswersAreTheSameInEveryWorldTheSeatCantTellApart(string net)
+        [InlineData("plain_tiny.onnx", false)]
+        [InlineData("view_tiny.onnx", false)]
+        [InlineData("sensitive_tiny.onnx", false)]
+        [InlineData("plain_tiny.onnx", true)]
+        [InlineData("view_tiny.onnx", true)]
+        public void TradeAnswersAreTheSameInEveryWorldTheSeatCantTellApart(string net, bool counters)
         {
             // Every answer to an offer and the offerer's pick are decided outside the tree, on a world drawn from the view
-            // (a belief-aware net sees only the view of any position, the plain net sees the whole world)
-            int compared = 0, open = 0;
+            // (a belief-aware net sees only the view of any position, the plain net sees the whole world); counteroffers
+            // over worlds drawn from the beliefs, with every gain counted (margin 0) so they come often
+            int compared = 0, open = 0, countered = 0;
             for (int seed = 700; seed < 800 && open < 60; seed++)
             {
                 Followed game = new Followed(NewGame(seed, freeTrade: true));
@@ -245,7 +253,8 @@ namespace Tests
                         {
                             sbyte deciding = TestUtil.ActingPlayer(game.Truth);
                             BeliefTracker beliefs = game.Trackers[deciding];
-                            var decision = Decide(game.Truth, beliefs, net);
+                            var decision = Decide(game.Truth, beliefs, net, counters: counters);
+                            if (decision.move is CounterTradeAction) countered++;
                             List<GameState> alternatives = Alternatives(game.Truth, beliefs, 3, seed: 90);
                             // A decision with a real choice: an answer that may accept, a pick among partners
                             bool choice = pending.NextResponder == deciding
@@ -254,7 +263,7 @@ namespace Tests
                             if (choice && alternatives.Count > 0) open++;
                             foreach (GameState alternative in alternatives)
                             {
-                                AssertSameDecision(decision, Decide(alternative, beliefs, net), $"trade, seat {deciding}");
+                                AssertSameDecision(decision, Decide(alternative, beliefs, net, counters: counters), $"trade, seat {deciding}");
                                 compared++;
                             }
                             game.Play(decision.move);
@@ -264,6 +273,7 @@ namespace Tests
                 }
             }
             Assert.True(open >= 60, $"only {open} trade decisions with a choice had a different world ({compared} compared)");
+            if (counters) Assert.True(countered >= 10, $"only {countered} counteroffers");
         }
 
         [Theory]

@@ -22,7 +22,8 @@ namespace Agents
         /// The agent's move in an open trade, or null if there is no open trade it has to act in
         /// </summary>
         /// <param name="value">The agent's utility of a position for a player, or null for the hand heuristic</param>
-        public static Action? Decide(GameState state, sbyte player, Func<GameState, int, float>? value = null)
+        /// <param name="margin">How much better a trade has to be by the value function to accept it</param>
+        public static Action? Decide(GameState state, sbyte player, Func<GameState, int, float>? value = null, float margin = ValueMargin)
         {
             if (state.Turn.PendingTrade is not TradeOffer offer) return null;
 
@@ -35,7 +36,7 @@ namespace Agents
                 if (state.Players[offer.Offerer].VictoryPoints.Total >= state.Settings.VictoryPoints - LeaderDistance) return reject;
 
                 GameState traded = AfterTrade(state, offer.Offerer, player, offer.Give, offer.Get);
-                return IsBetter(traded, state, player, value) ? accept : reject;
+                return IsBetter(traded, state, player, value, margin) ? accept : reject;
             }
 
             if (offer.Offerer == player && offer.NextResponder == null)
@@ -72,9 +73,9 @@ namespace Agents
             return after;
         }
 
-        private static bool IsBetter(GameState candidate, GameState current, int player, Func<GameState, int, float>? value)
+        private static bool IsBetter(GameState candidate, GameState current, int player, Func<GameState, int, float>? value, float margin = ValueMargin)
         {
-            if (value != null) return value(candidate, player) > value(current, player) + ValueMargin;
+            if (value != null) return value(candidate, player) > value(current, player) + margin;
             return HandValue(candidate.Players[player].ResourceCards) > HandValue(current.Players[player].ResourceCards) + HandMargin;
         }
 

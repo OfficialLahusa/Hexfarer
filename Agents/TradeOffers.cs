@@ -38,6 +38,12 @@ namespace Agents
         /// </summary>
         public bool TwoForTwo { get; set; }
 
+        /// <summary>
+        /// Whether the agent answers an offer it turns down with a counteroffer (only with a value function): the terms best
+        /// for it among those the offerer would take, judged like its own offers but with the offerer as the only partner
+        /// </summary>
+        public bool Counters { get; set; }
+
         // The terms offered this turn, forgotten when a turn starts without offers
         private readonly List<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> _offered = [];
 
@@ -78,6 +84,67 @@ namespace Agents
 
             _offered.Add(candidates[best]);
             return new OfferTradeAction(player, candidates[best].give, candidates[best].get, recipients);
+        }
+
+        /// <summary>
+        /// The agent's counteroffer to the open offer it has to answer, or null: only if it would turn the offer down (the
+        /// caller decides that), not to a player about to win, and worth more than Margin on average over the worlds
+        /// </summary>
+        public CounterTradeAction? DecideCounter(GameState state, sbyte player, Func<int, IReadOnlyList<GameState>> worlds,
+            Func<IReadOnlyList<GameState>, double[]> utilities)
+        {
+            if (!Counters || state.Turn.PendingTrade is not TradeOffer offer || offer.NextResponder != player) return null;
+            if (IsAboutToWin(state, offer.Offerer)) return null;
+
+            // In the offerer's terms: it gives what the agent asks for and gets cards of the agent's hand
+            List<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> candidates = Candidates(state.Players[player].ResourceCards, TwoForTwo, false)
+                .Select(c => (give: c.get, get: c.give))
+                .Where(c => !(c.give.Equals(offer.Give) && c.get.Equals(offer.Get))).ToList();
+            if (candidates.Count == 0) return null;
+
+            double[] worth = CounterGains(worlds(Math.Max(1, Worlds)), offer.Offerer, player, candidates, utilities);
+            int best = -1;
+            for (int c = 0; c < candidates.Count; c++)
+                if (worth[c] > Margin && (best < 0 || worth[c] > worth[best])) best = c;
+            return best < 0 ? null : new CounterTradeAction(player, candidates[best].give, candidates[best].get);
+        }
+
+        /// <summary>
+        /// The mean over the worlds of each counteroffer's gain for the agent: in a world where the offerer holds what it would
+        /// give and would take the trade by the margin of a pick, the agent's gain over no trade; else 0
+        /// </summary>
+        internal static double[] CounterGains(IReadOnlyList<GameState> worlds, int offerer, int player,
+            IReadOnlyList<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> candidates, Func<IReadOnlyList<GameState>, double[]> utilities)
+        {
+            List<GameState> states = [];
+            List<(int world, int candidate, int state)> rows = [];
+            int[] baseState = new int[worlds.Count];
+            for (int w = 0; w < worlds.Count; w++)
+            {
+                // Without a trade the offer closes
+                GameState none = new GameState(worlds[w]);
+                none.Turn.PendingTrade = null;
+                baseState[w] = states.Count;
+                states.Add(none);
+                for (int c = 0; c < candidates.Count; c++)
+                {
+                    if (!none.Players[offerer].ResourceCards.Contains(candidates[c].give)) continue;
+                    rows.Add((w, c, states.Count));
+                    states.Add(TradeDecisions.AfterTrade(none, offerer, player, candidates[c].give, candidates[c].get));
+                }
+            }
+
+            double[] gains = new double[candidates.Count];
+            if (rows.Count == 0) return gains;
+            double[] values = utilities(states);
+            int players = values.Length / states.Count;
+            foreach ((int w, int c, int s) in rows)
+            {
+                int before = baseState[w] * players, after = s * players;
+                if (values[after + offerer] > values[before + offerer] + TradeDecisions.ValueMargin)
+                    gains[c] += (values[after + player] - values[before + player]) / worlds.Count;
+            }
+            return gains;
         }
 
         /// <summary>

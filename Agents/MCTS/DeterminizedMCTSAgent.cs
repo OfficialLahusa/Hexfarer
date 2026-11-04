@@ -57,8 +57,9 @@ namespace Agents.MCTS
 
         public override Action Act(GameState state, CancellationToken cancellation)
         {
-            // Offers are judged over worlds drawn from the beliefs (see TradeOffers), not in each world on its own
-            if (_search.DecideOffer(state, count => Enumerable.Range(0, count).Select(_ => _beliefs.Determinize(_beliefs.View(state), _random)).ToList()) is OfferTradeAction offer)
+            // Offers and counteroffers are judged over worlds drawn from the beliefs (see TradeOffers), not in each world on its own
+            Func<int, IReadOnlyList<GameState>> beliefWorlds = count => Enumerable.Range(0, count).Select(_ => _beliefs.Determinize(_beliefs.View(state), _random)).ToList();
+            if (_search.DecideOffer(state, beliefWorlds) is OfferTradeAction offer)
                 return offer;
 
             IReadOnlyList<GameState> worlds = Determinize(state);
@@ -66,10 +67,11 @@ namespace Agents.MCTS
             // Each world gets its share of the iterations; without an iteration limit, of the time
             long iterations = _search.IterationLimit, perWorldIterations = iterations > 0 ? Math.Max(1, iterations / worlds.Count) : 0;
             double seconds = _search.TimeLimitSeconds;
-            bool offers = _search.Offers.Enabled;
+            bool offers = _search.Offers.Enabled, counters = _search.Offers.Counters;
             _search.IterationLimit = perWorldIterations;
             _search.TimeLimitSeconds = seconds / worlds.Count;
             _search.Offers.Enabled = false;
+            _search.Offers.Counters = false;
 
             List<(Action move, double weight)> votes = [];
             try
@@ -99,6 +101,7 @@ namespace Agents.MCTS
                 _search.IterationLimit = iterations;
                 _search.TimeLimitSeconds = seconds;
                 _search.Offers.Enabled = offers;
+                _search.Offers.Counters = counters;
                 _search.ResetToState(state);
             }
 
@@ -112,6 +115,7 @@ namespace Agents.MCTS
             }
             Action best = totals.OrderByDescending(t => t.weight).First().move.Clone();
             if (best is IReplayAction replay) replay.ClearHistory();
+            if (best is RespondToTradeAction { Accept: false } && _search.DecideCounter(state, beliefWorlds) is CounterTradeAction counter) return counter;
             return best;
         }
 

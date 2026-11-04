@@ -88,7 +88,11 @@ namespace Agents.MCTS
         public override Action Act(GameState state, CancellationToken cancellation)
         {
             _searched = null;
-            if (_search.DecideTrade(FullKnowledge ? state : _beliefs.Determinize(_beliefs.View(state), _random)) is Action trade) return trade;
+            if (_search.DecideTrade(FullKnowledge ? state : _beliefs.Determinize(_beliefs.View(state), _random)) is Action trade)
+            {
+                return trade is RespondToTradeAction { Accept: false }
+                    && _search.DecideCounter(state, count => FullKnowledge ? [state] : Worlds(state, count)) is CounterTradeAction counter ? counter : trade;
+            }
             if (_search.DecideOffer(state, count => FullKnowledge ? [state] : Worlds(state, count)) is OfferTradeAction offer) return offer;
 
             List<Action> legal = MCTSTree.GetValidActions(state);

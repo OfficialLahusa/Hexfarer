@@ -273,6 +273,112 @@ namespace Tests
         }
         #endregion
 
+        #region Counteroffers
+        [Fact]
+        public void ACounterofferIsWorthTheMeanGainOverTheWorldsWhereTheOffererWouldTakeIt()
+        {
+            List<GameState> worlds =
+            [
+                World(Cards((Lumber, 1), (Wool, 1), (Grain, 1)), Cards((Ore, 1), (Lumber, 1), (Wool, 1)), new(), new()),
+                // The offerer holds no lumber here
+                World(Cards((Wool, 1), (Grain, 1)), Cards((Ore, 1), (Lumber, 1), (Wool, 1)), new(), new()),
+            ];
+            // In the offerer's terms; seat 1 counters seat 0's offer
+            var lumberForOre = (give: Cards((Lumber, 1)), get: Cards((Ore, 1)));
+            // The offerer loses 0.001 by giving its grain: it says no
+            var grainForWool = (give: Cards((Grain, 1)), get: Cards((Wool, 1)));
+            // The offerer takes it (seat 1 holds a lumber less), but seat 1 loses
+            var woolForLumber = (give: Cards((Wool, 1)), get: Cards((Lumber, 1)));
+
+            double[] gains = TradeOffers.CounterGains(worlds, 0, 1, [lumberForOre, grainForWool, woolForLumber], Values);
+
+            Assert.Equal((0.05 + 0) / 2, gains[0], 9);
+            Assert.Equal(0, gains[1], 9);
+            Assert.Equal(-0.05, gains[2], 9);
+        }
+
+        // The offerer wants ore and dislikes the responder holding lumber; the responder wants lumber, a little brick and
+        // a little every card
+        private static Func<IReadOnlyList<GameState>, double[]> CounterValues(int offerer, int responder) => states => states.SelectMany(state =>
+        {
+            uint Of(int seat, ResourceCardType type) => state.Players[seat].ResourceCards.Get(type);
+            return Enumerable.Range(0, 4).Select(player =>
+                player == offerer ? 0.05 * Of(offerer, Ore) - 0.03 * Of(responder, Lumber)
+                : player == responder ? 0.05 * Of(responder, Lumber) + 0.002 * Of(responder, Brick) + 0.001 * state.Players[responder].ResourceCards.Count()
+                : 0);
+        }).ToArray();
+
+        [Fact]
+        public void ACounterofferIsTheBestTermsTheOffererWouldTakeAndOnlyWhenAnswering()
+        {
+            (GameState state, sbyte active) = MainPhase();
+            sbyte responder = Seat(active, 1);
+            Play(state, new OfferTradeAction(active, Cards((Wool, 1)), Cards((Grain, 1)), To(responder, Seat(active, 2))));
+            TradeOffers offers = new TradeOffers { Counters = true };
+            var values = CounterValues(active, responder);
+
+            CounterTradeAction? counter = offers.DecideCounter(state, responder, _ => [state], values);
+
+            Assert.NotNull(counter);
+            Assert.True(counter.IsValidFor(state));
+            // The offerer gives lumber and brick for one ore
+            Assert.Equal("L1B1W0G0O0>L0B0W0G0O1", Terms((counter.Give, counter.Get)));
+
+            Assert.Null(new TradeOffers().DecideCounter(state, responder, _ => [state], values));
+            Assert.Null(offers.DecideCounter(state, Seat(active, 2), _ => [state], values));
+            GameState winning = new GameState(state);
+            winning.Players[active].VictoryPoints.SettlementPoints = 8;
+            Assert.Null(offers.DecideCounter(winning, responder, _ => [state], values));
+        }
+
+        [Fact]
+        public void ValueNetAgentsCounterWithLegalTerms()
+        {
+            // Offers of one card for another in random games, answered by each kind of value-net agent with every gain counted
+            int counters = 0, answers = 0;
+            StateValueNet net = Net("plain_tiny.onnx");
+            for (int seed = 1; seed <= 40 && counters < 12; seed++)
+            {
+                HiddenInformationTests.Followed game = new HiddenInformationTests.Followed(HiddenInformationTests.NewGame(seed, freeTrade: true));
+                Agent[] random = TestUtil.RandomAgents();
+                while (!game.Truth.HasEnded && game.Played.Count < 400)
+                {
+                    sbyte acting = TestUtil.ActingPlayer(game.Truth);
+                    CardSet<ResourceCardType> hand = game.Truth.Players[acting].ResourceCards;
+                    ResourceCardType? give = CardTypeExtensions.ResourceTypes.Cast<ResourceCardType?>().FirstOrDefault(t => hand.Get(t!.Value) > 0);
+                    if (game.Played.Count < 60 || give is not ResourceCardType offered || !OfferTradeAction.IsTurnValid(game.Truth, acting))
+                    {
+                        game.Play(random[acting].Act(game.Truth));
+                        continue;
+                    }
+                    ResourceCardType wanted = CardTypeExtensions.ResourceTypes.First(t => t != offered);
+                    game.Play(new OfferTradeAction(acting, Cards((offered, 1)), Cards((wanted, 1)), OfferTradeAction.Everyone(game.Truth, acting)));
+                    while (game.Truth.Turn.PendingTrade is TradeOffer { NextResponder: sbyte responder })
+                    {
+                        MCTSAgent search = new MCTSAgent(responder, game.Truth, valueNet: net, iterationLimit: 16, leavesPerBatch: 8);
+                        search.Offers.Counters = true;
+                        search.Offers.Margin = 0;
+                        InformationSetMCTSAgent ismcts = new InformationSetMCTSAgent(search, game.Truth, seed: 3);
+                        ismcts.ResetTo(game.Truth, game.Trackers[responder]);
+                        DeterminizedMCTSAgent pimc = new DeterminizedMCTSAgent(search, game.Truth, 2, seed: 3);
+                        pimc.ResetTo(game.Truth, game.Trackers[responder]);
+                        foreach (Agent agent in new Agent[] { search, ismcts, pimc })
+                        {
+                            Action answer = agent.Act(new GameState(game.Truth));
+                            Assert.True(answer.IsValidFor(game.Truth), $"{answer} is not legal");
+                            answers++;
+                            if (answer is CounterTradeAction) counters++;
+                        }
+                        game.Play(new RespondToTradeAction(responder, false));
+                    }
+                    if (game.Truth.Turn.PendingTrade != null) game.Play(new CancelTradeAction(acting));
+                    game.Play(new EndTurnAction(acting));
+                }
+            }
+            Assert.True(counters >= 12, $"only {counters} counteroffers in {answers} answers");
+        }
+        #endregion
+
         #region What the others learn
         [Fact]
         public void OffersAcceptsAndCountersShowCardsTheOthersDidNotKnowAbout()

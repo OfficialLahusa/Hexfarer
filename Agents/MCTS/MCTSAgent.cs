@@ -60,7 +60,18 @@ namespace Agents.MCTS
         /// <summary>
         /// The agent's answer or pick in an open trade between players, decided outside the tree (see TradeDecisions), or null
         /// </summary>
-        public Action? DecideTrade(GameState state) => TradeDecisions.Decide(state, PlayerIndex, TradeUtility);
+        public Action? DecideTrade(GameState state) => TradeDecisions.Decide(state, PlayerIndex, TradeUtility, AnswerMargin);
+
+        /// <summary>
+        /// How much a trade has to raise the agent's value for it to accept an offer
+        /// </summary>
+        public float AnswerMargin { get; set; } = TradeDecisions.ValueMargin;
+
+        /// <summary>
+        /// The agent's counteroffer to an offer it turns down, judged over worlds as its offers (see TradeOffers.DecideCounter)
+        /// </summary>
+        public CounterTradeAction? DecideCounter(GameState state, Func<int, IReadOnlyList<GameState>> worlds) =>
+            Offers.DecideCounter(state, PlayerIndex, worlds, Utilities);
 
         /// <summary>
         /// The agent's trade offers on turn (see TradeOffers), made before the search
@@ -203,7 +214,8 @@ namespace Agents.MCTS
         public override Action Act(GameState state, CancellationToken cancellation)
         {
             // Trades between players are decided outside the tree: the value of the position with and without the trade
-            if (TradeDecisions.Decide(state, PlayerIndex, TradeUtility) is Action trade) return trade;
+            if (DecideTrade(state) is Action trade)
+                return trade is RespondToTradeAction { Accept: false } && DecideCounter(state, _ => [state]) is CounterTradeAction counter ? counter : trade;
             if (DecideOffer(state, _ => [state]) is OfferTradeAction offer) return offer;
 
             if (PlayForcedMovesAtOnce)

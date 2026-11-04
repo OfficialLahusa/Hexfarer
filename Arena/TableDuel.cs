@@ -25,7 +25,7 @@ namespace Arena
         private readonly Dictionary<int, bool?[]> _groups = [];
         private readonly List<double> _scores = [];
         private int _wins, _games;
-        private long _challengerOffers, _challengerTrades, _baselineOffers, _baselineTrades, _challengerPartner;
+        private long _challengerOffers, _challengerTrades, _baselineOffers, _baselineTrades, _challengerPartner, _challengerCounters, _baselineCounters;
 
         public GroupStatistics Statistics { get; private set; } = GroupStatistics.Of([], 0.25, 0.28);
 
@@ -90,7 +90,7 @@ namespace Arena
         /// partner of a baseline's offer) and by the baselines together
         /// </summary>
         private sealed record GameResult(GameState State, int ChallengerSeat, bool ChallengerWon, double Seconds, int ChallengerOffers,
-            int ChallengerTrades, int ChallengerPartner, int BaselineOffers, int BaselineTrades);
+            int ChallengerTrades, int ChallengerPartner, int BaselineOffers, int BaselineTrades, int ChallengerCounters, int BaselineCounters);
 
         private GameResult PlayGame(int game, StateValueNet challengerNet, StateValueNet baselineNet, CancellationToken cancellation)
         {
@@ -103,7 +103,7 @@ namespace Arena
                 ? settings.Challenger.Create((sbyte)seat, start, challengerNet, settings.Iterations, settings.Seconds)
                 : settings.Baseline.Create((sbyte)seat, start, baselineNet, settings.Iterations, settings.Seconds)).ToArray();
 
-            int challengerOffers = 0, challengerTrades = 0, challengerPartner = 0, baselineOffers = 0, baselineTrades = 0;
+            int challengerOffers = 0, challengerTrades = 0, challengerPartner = 0, baselineOffers = 0, baselineTrades = 0, challengerCounters = 0, baselineCounters = 0;
             var stopwatch = Stopwatch.StartNew();
             while (!state.HasEnded && state.Turn.RoundCounter < 300)
             {
@@ -121,6 +121,9 @@ namespace Arena
                     case OfferTradeAction:
                         if (acting == challengerSeat) challengerOffers++; else baselineOffers++;
                         break;
+                    case CounterTradeAction:
+                        if (acting == challengerSeat) challengerCounters++; else baselineCounters++;
+                        break;
                     case ConfirmTradeAction confirm:
                         if (confirm.PlayerIndex == challengerSeat) challengerTrades++;
                         else
@@ -132,7 +135,7 @@ namespace Arena
                 }
             }
             return new GameResult(state, challengerSeat, state.HasEnded && state.Turn.PlayerIndex == challengerSeat, stopwatch.Elapsed.TotalSeconds,
-                challengerOffers, challengerTrades, challengerPartner, baselineOffers, baselineTrades);
+                challengerOffers, challengerTrades, challengerPartner, baselineOffers, baselineTrades, challengerCounters, baselineCounters);
         }
 
         private void Record(int game, GameResult result, CancellationTokenSource stop)
@@ -146,11 +149,13 @@ namespace Arena
                 _challengerPartner += result.ChallengerPartner;
                 _baselineOffers += result.BaselineOffers;
                 _baselineTrades += result.BaselineTrades;
+                _challengerCounters += result.ChallengerCounters;
+                _baselineCounters += result.BaselineCounters;
                 GameState state = result.State;
                 string winner = !state.HasEnded ? "none" : result.ChallengerWon ? "challenger" : $"baseline (seat {state.Turn.PlayerIndex + 1})";
                 Write($"game {game + 1} ({_games} done): challenger in seat {result.ChallengerSeat + 1}, winner {winner}, VP {string.Join("/", state.Players.Select(p => p.VictoryPoints.Total))}, "
                     + $"{state.Turn.RoundCounter} rounds, {result.Seconds:F0}s; offers C {result.ChallengerOffers} ({result.ChallengerTrades} traded), "
-                    + $"B {result.BaselineOffers} ({result.BaselineTrades} traded, {result.ChallengerPartner} with C)");
+                    + $"B {result.BaselineOffers} ({result.BaselineTrades} traded, {result.ChallengerPartner} with C); counters C {result.ChallengerCounters} B {result.BaselineCounters}");
 
                 bool?[] group = _groups.TryGetValue(game / Seats, out var known) ? known : _groups[game / Seats] = new bool?[Seats];
                 group[game % Seats] = result.ChallengerWon;
@@ -171,7 +176,7 @@ namespace Arena
             GroupStatistics s = Statistics;
             double games = Math.Max(1, _games);
             string trades = FormattableString.Invariant(
-                $"offers per game C {_challengerOffers / games:F2} ({_challengerTrades / games:F2} traded), B {_baselineOffers / games:F2} ({_baselineTrades / games:F2} traded, {_challengerPartner / games:F2} with C)");
+                $"offers per game C {_challengerOffers / games:F2} ({_challengerTrades / games:F2} traded), B {_baselineOffers / games:F2} ({_baselineTrades / games:F2} traded, {_challengerPartner / games:F2} with C); counters per game C {_challengerCounters / games:F2} B {_baselineCounters / games:F2}");
             string text = $"{_games} games, challenger won {_wins} | {s.Groups} groups";
             if (s.Groups < 2) return $"{text} | {trades}";
             string verdict = s.Verdict switch { 1 => $"H1 accepted (win rate >= {S1:P1})", -1 => $"H0 accepted (win rate <= {S0:P1})", _ => "open" };
