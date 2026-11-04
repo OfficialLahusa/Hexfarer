@@ -325,7 +325,12 @@ namespace Tests
             Assert.Equal("L1B1W0G0O0>L0B0W0G0O1", Terms((counter.Give, counter.Get)));
 
             Assert.Null(new TradeOffers().DecideCounter(state, responder, _ => [state], values));
-            Assert.Null(offers.DecideCounter(state, Seat(active, 2), _ => [state], values));
+            // The second addressee counters once it is its turn to answer, not before
+            var second = CounterValues(active, Seat(active, 2));
+            Assert.Null(offers.DecideCounter(state, Seat(active, 2), _ => [state], second));
+            GameState later = new GameState(state);
+            Play(later, new RespondToTradeAction(responder, false));
+            Assert.NotNull(offers.DecideCounter(later, Seat(active, 2), _ => [later], second));
             GameState winning = new GameState(state);
             winning.Players[active].VictoryPoints.SettlementPoints = 8;
             Assert.Null(offers.DecideCounter(winning, responder, _ => [state], values));
@@ -355,19 +360,34 @@ namespace Tests
                     game.Play(new OfferTradeAction(acting, Cards((offered, 1)), Cards((wanted, 1)), OfferTradeAction.Everyone(game.Truth, acting)));
                     while (game.Truth.Turn.PendingTrade is TradeOffer { NextResponder: sbyte responder })
                     {
-                        MCTSAgent search = new MCTSAgent(responder, game.Truth, valueNet: net, iterationLimit: 16, leavesPerBatch: 8);
-                        search.Offers.Counters = true;
-                        search.Offers.Margin = 0;
-                        InformationSetMCTSAgent ismcts = new InformationSetMCTSAgent(search, game.Truth, seed: 3);
-                        ismcts.ResetTo(game.Truth, game.Trackers[responder]);
-                        DeterminizedMCTSAgent pimc = new DeterminizedMCTSAgent(search, game.Truth, 2, seed: 3);
-                        pimc.ResetTo(game.Truth, game.Trackers[responder]);
-                        foreach (Agent agent in new Agent[] { search, ismcts, pimc })
+                        Agent[] Agents(bool withCounters, float answerMargin)
                         {
-                            Action answer = agent.Act(new GameState(game.Truth));
+                            MCTSAgent search = new MCTSAgent(responder, game.Truth, valueNet: net, iterationLimit: 16, leavesPerBatch: 8) { AnswerMargin = answerMargin };
+                            search.Offers.Counters = withCounters;
+                            search.Offers.Margin = 0;
+                            InformationSetMCTSAgent ismcts = new InformationSetMCTSAgent(search, game.Truth, seed: 3);
+                            ismcts.ResetTo(game.Truth, game.Trackers[responder]);
+                            DeterminizedMCTSAgent pimc = new DeterminizedMCTSAgent(new MCTSAgent(responder, game.Truth, valueNet: net, iterationLimit: 16, leavesPerBatch: 8)
+                                { AnswerMargin = answerMargin, Offers = { Counters = withCounters, Margin = 0 } }, game.Truth, 2, seed: 3);
+                            pimc.ResetTo(game.Truth, game.Trackers[responder]);
+                            return [search, ismcts, pimc];
+                        }
+                        Agent[] with = Agents(true, TradeDecisions.ValueMargin), without = Agents(false, TradeDecisions.ValueMargin);
+                        bool canAccept = new RespondToTradeAction(responder, true).IsValidFor(game.Truth);
+                        for (int kind = 0; kind < 3; kind++)
+                        {
+                            Action answer = with[kind].Act(new GameState(game.Truth));
                             Assert.True(answer.IsValidFor(game.Truth), $"{answer} is not legal");
                             answers++;
                             if (answer is CounterTradeAction) counters++;
+                            // A counteroffer only instead of turning the offer down
+                            Action plain = without[kind].Act(new GameState(game.Truth));
+                            if (plain is RespondToTradeAction { Accept: true }) Assert.True(answer is RespondToTradeAction { Accept: true }, $"{answer} instead of accepting");
+                            else Assert.False(answer is RespondToTradeAction { Accept: true }, $"{answer} instead of turning down");
+
+                            // The answer margin decides: any gain or none is enough
+                            Assert.Equal(canAccept, Agents(false, -1)[kind].Act(new GameState(game.Truth)) is RespondToTradeAction { Accept: true });
+                            Assert.True(Agents(false, 1)[kind].Act(new GameState(game.Truth)) is RespondToTradeAction { Accept: false });
                         }
                         game.Play(new RespondToTradeAction(responder, false));
                     }
