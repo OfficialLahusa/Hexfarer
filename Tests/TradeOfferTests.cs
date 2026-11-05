@@ -255,6 +255,15 @@ namespace Tests
             }
             Assert.NotEqual(first[active], second[active], 6);
             Assert.Equal(1, both.Take(4).Sum(), 5);
+
+            // More positions than one run of the net takes: b only at a few places, among them both ends of each run
+            int count = MCTSAgent.UtilityBatch + 44;
+            int[] atB = [0, MCTSAgent.UtilityBatch - 1, MCTSAgent.UtilityBatch, count - 1, 77];
+            double[] many = agent.Utilities(Enumerable.Range(0, count).Select(i => atB.Contains(i) ? b : a).ToList());
+            Assert.Equal(count * 4, many.Length);
+            for (int s = 0; s < count; s++)
+                for (int i = 0; i < 4; i++)
+                    Assert.Equal((atB.Contains(s) ? second : first)[i], many[s * 4 + i], 6);
         }
 
         [Fact]

@@ -481,31 +481,41 @@ namespace Agents.MCTS
         private float[] _offerFeatures = [];
 
         /// <summary>
-        /// Every player's utility of each position by the value net, as the search scores its leaves, in one batch:
-        /// PlayerCount values per position
+        /// Positions per run of the net when judging trades: every run has this shape (the last one padded with empty rows),
+        /// since CUDA's memory pool grows with every new batch shape until the GPU runs out of memory
+        /// </summary>
+        public const int UtilityBatch = 256;
+
+        /// <summary>
+        /// Every player's utility of each position by the value net, as the search scores its leaves, in batches of
+        /// UtilityBatch: PlayerCount values per position
         /// </summary>
         public double[] Utilities(IReadOnlyList<GameState> states)
         {
             int dim = _stateVectorizer.FeatureDim, players = MCTSNode.PlayerCount;
-            if (_offerFeatures.Length < states.Count * dim) _offerFeatures = new float[states.Count * dim];
-            Span<float> features = _offerFeatures.AsSpan(0, states.Count * dim);
-            features.Clear();
-            for (int i = 0; i < states.Count; i++)
-                _stateVectorizer.VectorizeInto(states[i], features.Slice(i * dim, dim));
-            var input = new DenseTensor<float>(_offerFeatures.AsMemory(0, states.Count * dim), [states.Count, dim]);
-
+            if (_offerFeatures.Length < UtilityBatch * dim) _offerFeatures = new float[UtilityBatch * dim];
             double[] utilities = new double[states.Count * players];
-            if (_placementWeight == 0)
+            for (int start = 0; start < states.Count; start += UtilityBatch)
             {
-                float[] winProbabilities = _stateValueNet.Run(input);
-                for (int i = 0; i < states.Count; i++)
-                    LeafUtilities(winProbabilities.AsSpan(i * players, players), default, utilities.AsSpan(i * players, players));
-            }
-            else
-            {
-                (float[] winProbabilities, float[] placements) = _stateValueNet.RunWithPlacements(input);
-                for (int i = 0; i < states.Count; i++)
-                    LeafUtilities(winProbabilities.AsSpan(i * players, players), placements.AsSpan(i * players * 4, players * 4), utilities.AsSpan(i * players, players));
+                int rows = Math.Min(UtilityBatch, states.Count - start);
+                Span<float> features = _offerFeatures.AsSpan(0, UtilityBatch * dim);
+                features.Clear();
+                for (int i = 0; i < rows; i++)
+                    _stateVectorizer.VectorizeInto(states[start + i], features.Slice(i * dim, dim));
+                var input = new DenseTensor<float>(_offerFeatures.AsMemory(0, UtilityBatch * dim), [UtilityBatch, dim]);
+
+                if (_placementWeight == 0)
+                {
+                    float[] winProbabilities = _stateValueNet.Run(input);
+                    for (int i = 0; i < rows; i++)
+                        LeafUtilities(winProbabilities.AsSpan(i * players, players), default, utilities.AsSpan((start + i) * players, players));
+                }
+                else
+                {
+                    (float[] winProbabilities, float[] placements) = _stateValueNet.RunWithPlacements(input);
+                    for (int i = 0; i < rows; i++)
+                        LeafUtilities(winProbabilities.AsSpan(i * players, players), placements.AsSpan(i * players * 4, players * 4), utilities.AsSpan((start + i) * players, players));
+                }
             }
             return utilities;
         }
