@@ -120,7 +120,8 @@ the ruleset allows trading between players.
 ## State view (in `before` and `decide`)
 
 ```
-{"prompt":"main",             // setup_settlement, setup_road, roll, main, discard, move_robber, answer_offer, pick_partner
+{"prompt":"main",             // setup_settlement, setup_road, roll, main, road_building (placing the free roads of the
+                              // card), discard, move_robber, answer_offer, pick_partner
  "current":1, "turn":37, "dice":[3,4],
  "robber":[q,r],
  "buildings":{"settlements":[[seat,intersection],...],"cities":[[seat,intersection],...],"roads":[[seat,path],...]},

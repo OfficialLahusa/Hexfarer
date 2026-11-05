@@ -19,6 +19,8 @@ Contents:
 - `osp/classic-board.json`: the protocol's reference shape of the classic board (hexes, intersections, paths, harbors
   in protocol keys). Hexfarer's test `TheClassicBoardHasTheOpenSeatProtocolsReferenceShape` writes it
   (`HEXFARER_UPDATE_FIXTURES=1`) and checks against it; every adapter is tested against it too.
-- `catanatron/`: Catanatron's board in protocol keys (`osp_board.py`). Setup and tests:
-  `python -m venv .venv`, `.venv/Scripts/python -m pip install -r requirements.txt`,
-  `.venv/Scripts/python -m unittest test_osp_board`.
+- `catanatron/`: Catanatron in protocol terms: its board (`osp_board.py`), its moves, results, legal moves and states
+  (`osp_game.py`), and a recorder that plays Catanatron games and writes them as the referee's protocol messages
+  (`record.py --bots AB:2,R,W,R --games 100 --out games.jsonl.gz`), the input of Hexfarer's replay harness. Setup and
+  tests: `python -m venv .venv`, `.venv/Scripts/python -m pip install -r requirements.txt`,
+  `.venv/Scripts/python -m unittest test_osp_board test_osp_game`.
