@@ -59,8 +59,39 @@ namespace Agents.MCTS
         /// </summary>
         public void RunSearch(ISearchTree tree, CancellationToken cancellation = default)
         {
-            if (_iterationLimit > 0) _search.Run(tree, double.PositiveInfinity, _iterationLimit, cancellation);
-            else _search.Run(tree, _timeLimitSeconds, 0, cancellation);
+            // The budget of the root's decision (more for the initial placements, see SetupBudgetFactor)
+            (double seconds, long iterations) = BudgetFor(tree.RootState);
+            if (iterations > 0) _search.Run(tree, double.PositiveInfinity, iterations, cancellation);
+            else _search.Run(tree, seconds, 0, cancellation);
+        }
+
+        /// <summary>
+        /// Factor on the search budget (iterations or time) of the initial placements, where the search barely reaches past
+        /// the player's own move (1: the same budget as every other decision). Applies to every search of this agent, so also
+        /// to the information set and PIMC agents built on it (PIMC splits the larger budget between its worlds).
+        /// </summary>
+        public double SetupBudgetFactor
+        {
+            get => _setupBudgetFactor;
+            set => _setupBudgetFactor = value > 0 ? value : throw new ArgumentOutOfRangeException(nameof(value), value, "The setup budget factor must be above 0.");
+        }
+
+        private double _setupBudgetFactor = 1;
+
+        /// <summary>
+        /// Whether the position is in the initial placements (both rounds of settlements and their roads)
+        /// </summary>
+        public static bool IsSetup(GameState state) =>
+            state.Turn.TypeOfRound is TurnState.RoundType.FirstInitial or TurnState.RoundType.SecondInitial;
+
+        /// <summary>
+        /// The search budget of a decision in the position: the time and the iteration limit, both times SetupBudgetFactor in
+        /// the initial placements (iterations rounded up; 0 iterations stays 0, a search for time)
+        /// </summary>
+        public (double seconds, long iterations) BudgetFor(GameState state)
+        {
+            double factor = IsSetup(state) ? _setupBudgetFactor : 1;
+            return (_timeLimitSeconds * factor, (long)Math.Ceiling(_iterationLimit * factor));
         }
 
         /// <summary>
@@ -250,8 +281,10 @@ namespace Agents.MCTS
             _tree.FirstPlayReduction = FirstPlayReduction;
             _tree.EvaluateNewLeaves = EvaluateNewLeaves;
 
-            if (_iterationLimit > 0) RunBatchedIterations(_iterationLimit, cancellation);
-            else RunForTime(_timeLimitSeconds, cancellation);
+            // The budget of this decision (more for the initial placements, see SetupBudgetFactor)
+            (double seconds, long iterations) = BudgetFor(state);
+            if (iterations > 0) RunBatchedIterations(iterations, cancellation);
+            else RunForTime(seconds, cancellation);
 
             return _tree.GetMostPromisingMove();
         }

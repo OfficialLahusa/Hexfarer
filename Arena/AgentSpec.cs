@@ -17,7 +17,8 @@ namespace Arena
     /// noreuse starts MCTS and ISMCTS on a new tree every decision, noleaf lets MCTS evaluate one of a new leaf's
     /// moves instead of the leaf itself (the old search; leaf is the default), searchforced lets MCTS and PIMC search a
     /// decision with a single legal move instead of playing it at once (the old search), gX scales the statistics of the
-    /// subtree ISMCTS goes on with by X (above 0, at most 1; 1, full weight, if not given). Trade offers (with free trade, see
+    /// subtree ISMCTS goes on with by X (above 0, at most 1; 1, full weight, if not given), suX gives the initial placements
+    /// X times the search budget of the other decisions (default 1, see MCTSAgent.SetupBudgetFactor). Trade offers (with free trade, see
     /// TradeOffers): nooffers makes neither offers nor counteroffers, omX needs a mean gain above X (default 0.005), onN makes
     /// at most N per turn (default 3), owN judges them over N worlds (default 8), oc2 keeps to one or two cards a side (oc3,
     /// any trade up to three for three, is the default), with oc2 o22 looks at two cards for two too and o31 at three for
@@ -32,7 +33,8 @@ namespace Arena
         bool FullKnowledge = false, bool? NormalizeValues = null, bool BranchHiddenOutcomes = false, bool ReuseTree = true,
         bool EvaluateNewLeaves = true, bool PlayForcedMovesAtOnce = true, double ReuseDecay = 1, bool MakeOffers = true,
         double OfferMargin = 0.005, int MaxOffers = 3, int OfferWorlds = 8, bool TwoForTwo = false, double AnswerMargin = 0.002, bool Counters = true,
-        bool ThreeForOne = false, double AnswerFairness = 1, bool LearnsFromTrades = true, int MaxCards = 3, int Prune = 16, double PartnerFairness = 0)
+        bool ThreeForOne = false, double AnswerFairness = 1, bool LearnsFromTrades = true, int MaxCards = 3, int Prune = 16, double PartnerFairness = 0,
+        double SetupBudget = 1)
     {
         public static AgentSpec Parse(string spec)
         {
@@ -74,6 +76,8 @@ namespace Arena
                     ['o', 'n', ..] => result with { MaxOffers = int.Parse(option[2..], CultureInfo.InvariantCulture) },
                     ['o', 'w', ..] => int.Parse(option[2..], CultureInfo.InvariantCulture) is int worlds and > 0 ? result with { OfferWorlds = worlds }
                         : throw new ArgumentException($"Option \"{option}\" in agent \"{spec}\" needs at least one world."),
+                    ['s', 'u', ..] => double.Parse(option[2..], CultureInfo.InvariantCulture) is double factor and > 0 ? result with { SetupBudget = factor }
+                        : throw new ArgumentException($"The setup budget factor \"{option}\" in agent \"{spec}\" is not above 0."),
                     _ when Enum.TryParse(option, out OpponentModel model) => result with { OpponentModel = model },
                     ['c', ..] => result with { Exploration = Number() },
                     ['b', ..] => result with { LeavesPerBatch = int.Parse(option[1..], CultureInfo.InvariantCulture) },
@@ -106,6 +110,7 @@ namespace Arena
             if (!EvaluateNewLeaves) options.Add("noleaf");
             if (!PlayForcedMovesAtOnce) options.Add("searchforced");
             if (ReuseDecay != 1) options.Add($"g{ReuseDecay.ToString(CultureInfo.InvariantCulture)}");
+            if (SetupBudget != 1) options.Add($"su{SetupBudget.ToString(CultureInfo.InvariantCulture)}");
             // Trade options only where they differ from the defaults
             if (!MakeOffers) options.Add("nooffers");
             if (OfferMargin != 0.005) options.Add($"om{OfferMargin.ToString(CultureInfo.InvariantCulture)}");
@@ -134,7 +139,7 @@ namespace Arena
                 iterationLimit: iterations, leavesPerBatch: LeavesPerBatch)
             {
                 UniformPriors = UniformPriors, FirstPlayReduction = FirstPlayReduction, NormalizeValues = NormalizeValues ?? true, ReuseTree = ReuseTree,
-                EvaluateNewLeaves = EvaluateNewLeaves, PlayForcedMovesAtOnce = PlayForcedMovesAtOnce
+                EvaluateNewLeaves = EvaluateNewLeaves, PlayForcedMovesAtOnce = PlayForcedMovesAtOnce, SetupBudgetFactor = SetupBudget
             };
             // Offers and counteroffers (TradeOffers), then the answers (MCTSAgent)
             search.Offers.Enabled = MakeOffers;
