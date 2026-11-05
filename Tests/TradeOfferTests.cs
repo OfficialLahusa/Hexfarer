@@ -492,6 +492,57 @@ namespace Tests
         }
         #endregion
 
+        #region Whole games
+        [Fact]
+        public void BotsWithTheDefaultsTradeInWholeGamesOnlyByTheRules()
+        {
+            // Every kind of value-net bot with the default trades (any trade up to 3:3, counteroffers), every gain counted so
+            // they trade often; each move is checked against the rules before it is played
+            StateValueNet net = Net("plain_tiny.onnx");
+            int counters = 0, takenCounters = 0, offers = 0, trades = 0;
+            for (int seed = 1; seed <= 2; seed++)
+            {
+                GameState state = HiddenInformationTests.NewGame(seed, freeTrade: true);
+                MCTSAgent Search(int seat)
+                {
+                    MCTSAgent search = new MCTSAgent((sbyte)seat, state, valueNet: net, iterationLimit: 32, leavesPerBatch: 8);
+                    search.Offers.Margin = 0;
+                    return search;
+                }
+                Agent[] agents = [new InformationSetMCTSAgent(Search(0), state, seed: 1), new InformationSetMCTSAgent(Search(1), state, seed: 2),
+                    new DeterminizedMCTSAgent(Search(2), state, 2, seed: 3), Search(3)];
+                while (!state.HasEnded && state.Turn.RoundCounter < 60)
+                {
+                    sbyte acting = TestUtil.ActingPlayer(state);
+                    Action action = agents[acting].Act(new GameState(state));
+                    Assert.True(action.IsValidFor(state), $"seat {acting} played an illegal {action}");
+                    switch (action)
+                    {
+                        case CounterTradeAction counter:
+                            // The counteroffer rules: only the addressed player whose answer is due, cards on both sides and no
+                            // type on both, and only cards the player holds
+                            TradeOffer pending = state.Turn.PendingTrade!;
+                            Assert.Equal(pending.NextResponder, counter.PlayerIndex);
+                            Assert.True(TradeOffer.AreValidTerms(counter.Give, counter.Get));
+                            Assert.True(state.Players[counter.PlayerIndex].ResourceCards.Contains(counter.Get));
+                            counters++;
+                            break;
+                        case ConfirmTradeAction confirm:
+                            trades++;
+                            if (state.Turn.PendingTrade!.Responses[confirm.Partner] == TradeResponse.Countered) takenCounters++;
+                            break;
+                        case OfferTradeAction:
+                            offers++;
+                            break;
+                    }
+                    action.Apply(state);
+                    foreach (Agent agent in agents) agent.HandleAction(action);
+                }
+            }
+            Assert.True(offers >= 10 && trades >= 5 && counters >= 5 && takenCounters >= 1, $"offers {offers}, trades {trades}, counteroffers {counters}, taken {takenCounters}");
+        }
+        #endregion
+
         #region Answers
         [Fact]
         public void AFairAnswerNeedsAShareOfTheOfferersGain()

@@ -113,6 +113,8 @@ namespace Arena
                     if (state.CanPlayerAct(player)) { acting = player; break; }
                 Action action = agents[acting].Act(state, cancellation);
                 cancellation.ThrowIfCancellationRequested();
+                // Offers and counteroffers are made outside the legal move lists, so every move is checked before it is played
+                if (!action.IsValidFor(state)) throw new InvalidOperationException($"seat {acting + 1} made an illegal move: {action}");
                 action.Apply(state);
                 foreach (Agent agent in agents) agent.HandleAction(action);
 
