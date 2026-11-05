@@ -64,10 +64,11 @@ namespace Agents
         public bool Counters { get; set; } = true;
 
         /// <summary>
-        /// The share of the agent's gain it expects a partner to need to accept an offer (the fairness the bots answer with
-        /// by default, see TradeDecisions.Decide)
+        /// The share of the agent's gain it expects a partner to need to accept an offer (0: any gain above the margin). Not
+        /// the fairness the bots answer with by default: a bot expecting fair partners offered half as often and lost among
+        /// bots that take any gain
         /// </summary>
-        public float PartnerFairness { get; set; } = TradeDecisions.DefaultFairness;
+        public float PartnerFairness { get; set; }
 
         // The terms offered this turn, forgotten when a turn starts without offers
         private readonly List<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> _offered = [];

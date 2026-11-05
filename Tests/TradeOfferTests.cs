@@ -93,9 +93,9 @@ namespace Tests
                 p == active ? 0.05 * s.Players[p].ResourceCards.Get(Ore) : 0.01 * s.Players[p].ResourceCards.Get(Lumber))).ToArray();
             Func<int, IReadOnlyList<GameState>> worlds = n => Enumerable.Repeat(state, n).ToList();
 
-            OfferTradeAction? unfair = new TradeOffers { PartnerFairness = 0 }.Decide(state, active, worlds, Lopsided);
+            OfferTradeAction? unfair = new TradeOffers().Decide(state, active, worlds, Lopsided);
             Assert.Equal("L1B0W0G0O0>L0B0W0G0O1", unfair is null ? "none" : Terms((unfair.Give, unfair.Get)));
-            Assert.Null(new TradeOffers().Decide(state, active, worlds, Lopsided));
+            Assert.Null(new TradeOffers { PartnerFairness = 1 }.Decide(state, active, worlds, Lopsided));
         }
 
         [Fact]

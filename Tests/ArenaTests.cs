@@ -148,7 +148,7 @@ namespace Tests
             Assert.EndsWith("nooffers noco", silent.ToString());
             Assert.Throws<ArgumentException>(() => AgentSpec.Parse("T=a.onnx=ow0"));
             Assert.Equal(0.5, AgentSpec.Parse("T=a.onnx=af0.5").AnswerFairness);
-            Assert.Equal((1.0, 1.0), (plain.AnswerFairness, plain.PartnerFairness));
+            Assert.Equal((1.0, 0.0), (plain.AnswerFairness, plain.PartnerFairness));
             Assert.Equal((0.0, 0.5), (AgentSpec.Parse("T=a.onnx=af0").AnswerFairness, AgentSpec.Parse("T=a.onnx=pf0.5").PartnerFairness));
             Assert.EndsWith("af0 pf0.5", AgentSpec.Parse("T=a.onnx=af0=pf0.5").ToString());
             AgentSpec answers = AgentSpec.Parse("T=a.onnx=am0.01=noco");

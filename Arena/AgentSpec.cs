@@ -22,7 +22,7 @@ namespace Arena
     /// at most N per turn (default 3), owN judges them over N worlds (default 8), oc2 keeps to one or two cards a side (oc3,
     /// any trade up to three for three, is the default), with oc2 o22 looks at two cards for two too and o31 at three for
     /// one and one for three, opN judges all in one world and only the N best there in all (default 16, op0 judges all in
-    /// all); pfX expects partners to need X times its gain (default 1); nolearn (ISMCTS) ignores the cards others' offers
+    /// all); pfX expects partners to need X times its gain (default 0, any gain); nolearn (ISMCTS) ignores the cards others' offers
     /// and answers show. Answers: afX accepts an offer only if it gains at least X times what the offerer gains (default 1,
     /// af0 any gain above the margin), amX accepts an offer from a gain above X (default 0.002), noco answers
     /// an offer it turns down without a counteroffer (co with one, the default).
@@ -32,7 +32,7 @@ namespace Arena
         bool FullKnowledge = false, bool? NormalizeValues = null, bool BranchHiddenOutcomes = false, bool ReuseTree = true,
         bool EvaluateNewLeaves = true, bool PlayForcedMovesAtOnce = true, double ReuseDecay = 1, bool MakeOffers = true,
         double OfferMargin = 0.005, int MaxOffers = 3, int OfferWorlds = 8, bool TwoForTwo = false, double AnswerMargin = 0.002, bool Counters = true,
-        bool ThreeForOne = false, double AnswerFairness = 1, bool LearnsFromTrades = true, int MaxCards = 3, int Prune = 16, double PartnerFairness = 1)
+        bool ThreeForOne = false, double AnswerFairness = 1, bool LearnsFromTrades = true, int MaxCards = 3, int Prune = 16, double PartnerFairness = 0)
     {
         public static AgentSpec Parse(string spec)
         {
@@ -113,7 +113,7 @@ namespace Arena
             if (AnswerMargin != 0.002) options.Add($"am{AnswerMargin.ToString(CultureInfo.InvariantCulture)}");
             if (!Counters) options.Add("noco");
             if (AnswerFairness != 1) options.Add($"af{AnswerFairness.ToString(CultureInfo.InvariantCulture)}");
-            if (PartnerFairness != 1) options.Add($"pf{PartnerFairness.ToString(CultureInfo.InvariantCulture)}");
+            if (PartnerFairness != 0) options.Add($"pf{PartnerFairness.ToString(CultureInfo.InvariantCulture)}");
             if (!LearnsFromTrades) options.Add("nolearn");
             if (MaxCards != 3) options.Add($"oc{MaxCards}");
             if (Prune != 16) options.Add($"op{Prune}");
