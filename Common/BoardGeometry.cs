@@ -150,6 +150,68 @@ namespace Common
             [property: JsonPropertyName("ports")] PortEntry[] Ports);
 
         /// <summary>
+        /// A hex in the Open Seat Protocol's axial coordinates [q, r] (see Bridges/PROTOCOL.md): the cube without S
+        /// </summary>
+        public static int[] Axial(Cube cube) => [cube.Q, cube.R];
+
+        /// <summary>
+        /// The shape of a board in the Open Seat Protocol's keys, every list sorted: land and sea hexes, intersections (their
+        /// three hexes, sorted), paths (their two intersections, sorted) and the paths of the harbors. The same for every
+        /// classic board; Bridges/osp/classic-board.json holds it, and every engine's adapter is tested against that file.
+        /// </summary>
+        public sealed record OspShape(int[][] Land, int[][] Sea, int[][][] Intersections, int[][][][] Paths, int[][][][] Harbors);
+
+        /// <summary>
+        /// The board's shape in the Open Seat Protocol's keys (see OspShape)
+        /// </summary>
+        public static OspShape ShapeOf(Board board)
+        {
+            Export export = Of(board);
+            // The axial hex of a cube [q, r, s]
+            static int[] Hex(int[] cube) => [cube[0], cube[1]];
+            int[][] land = export.Tiles.Where(t => t.Land).Select(t => Hex(t.Cube)).ToArray();
+            int[][] sea = export.Tiles.Where(t => !t.Land).Select(t => Hex(t.Cube)).ToArray();
+            // An intersection by its three hexes, already sorted by (q, r) since the cubes are sorted by (q, r, s)
+            int[][][] intersections = export.Intersections.Select(key => key.Select(Hex).ToArray()).ToArray();
+            int[][][] Path(int a, int b) => new[] { intersections[a], intersections[b] }.Order(Lexical<int[]>(Lexical<int>())).ToArray();
+            int[][][][] paths = export.Edges.Select(edge => Path(edge[0], edge[1])).ToArray();
+            int[][][][] harbors = export.Ports.Select(port => Path(port.Intersections[0], port.Intersections[1])).ToArray();
+
+            IComparer<int[]> hex = Lexical<int>();
+            IComparer<int[][]> intersection = Lexical(hex);
+            IComparer<int[][][]> path = Lexical(intersection);
+            return new OspShape(land.Order(hex).ToArray(), sea.Order(hex).ToArray(), intersections.Order(intersection).ToArray(),
+                paths.Order(path).ToArray(), harbors.Order(path).ToArray());
+        }
+
+        /// <summary>
+        /// The shape as the reference file holds it: one hex, intersection or path per line, so that a difference shows
+        /// where it is
+        /// </summary>
+        public static string ToJson(OspShape shape)
+        {
+            static string Lines<T>(string name, T[] items) =>
+                $"  \"{name}\": [\n" + string.Join(",\n", items.Select(item => "    " + System.Text.Json.JsonSerializer.Serialize(item))) + "\n  ]";
+            return "{\n" + string.Join(",\n", Lines("land", shape.Land), Lines("sea", shape.Sea), Lines("intersections", shape.Intersections),
+                Lines("paths", shape.Paths), Lines("harbors", shape.Harbors)) + "\n}\n";
+        }
+
+        // Orders arrays element by element, a shorter one first if it is a prefix of the other
+        private static IComparer<T[]> Lexical<T>(IComparer<T>? element = null)
+        {
+            IComparer<T> inner = element ?? Comparer<T>.Default;
+            return Comparer<T[]>.Create((a, b) =>
+            {
+                for (int i = 0; i < Math.Min(a.Length, b.Length); i++)
+                {
+                    int order = inner.Compare(a[i], b[i]);
+                    if (order != 0) return order;
+                }
+                return a.Length.CompareTo(b.Length);
+            });
+        }
+
+        /// <summary>
         /// The board's geometry as described by Export
         /// </summary>
         public static Export Of(Board board)

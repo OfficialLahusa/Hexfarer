@@ -192,5 +192,35 @@ namespace Tests
         }
 
         private static string Json<T>(T value) => JsonSerializer.Serialize(value, new JsonSerializerOptions { IncludeFields = true });
+
+        // The Open Seat Protocol's reference shape of the classic board, shared with the adapters in Bridges
+        private static string ReferencePath => Path.Combine(Directory.GetParent(TestUtil.SourceFixtureDirectory())!.Parent!.FullName, "Bridges", "osp", "classic-board.json");
+
+        [Fact]
+        public void TheClassicBoardHasTheOpenSeatProtocolsReferenceShape()
+        {
+            string[] shapes = Boards().Select(board => ToJson(ShapeOf(board))).Distinct().ToArray();
+            Assert.Single(shapes);
+
+            // HEXFARER_UPDATE_FIXTURES=1 writes the reference after an intended change
+            if (Environment.GetEnvironmentVariable("HEXFARER_UPDATE_FIXTURES") == "1")
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(ReferencePath)!);
+                File.WriteAllText(ReferencePath, shapes[0]);
+            }
+            Assert.Equal(File.ReadAllText(ReferencePath).ReplaceLineEndings("\n"), shapes[0]);
+
+            // Its counts and keys as the protocol describes them: axial hexes, three hexes per intersection, two per path
+            OspShape shape = ShapeOf(Boards().First());
+            Assert.Equal((19, 18, 54, 72, 9), (shape.Land.Length, shape.Sea.Length, shape.Intersections.Length, shape.Paths.Length, shape.Harbors.Length));
+            Assert.All(shape.Intersections, key => Assert.Equal(3, key.Length));
+            Assert.All(shape.Paths, path => Assert.Equal(2, path.Length));
+            Assert.Equal([0, 0], shape.Land[9]);
+            // Every harbor is a path, and every path joins two intersections
+            HashSet<string> paths = shape.Paths.Select(p => JsonSerializer.Serialize(p)).ToHashSet();
+            HashSet<string> intersections = shape.Intersections.Select(i => JsonSerializer.Serialize(i)).ToHashSet();
+            Assert.All(shape.Harbors, harbor => Assert.Contains(JsonSerializer.Serialize(harbor), paths));
+            Assert.All(shape.Paths, path => Assert.All(path, end => Assert.Contains(JsonSerializer.Serialize(end), intersections)));
+        }
     }
 }

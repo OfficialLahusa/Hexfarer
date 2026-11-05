@@ -1,0 +1,2 @@
+# Catanatron pinned to the commit the adapter is tested with (its protocol for outside bots, 2026-09-08)
+catanatron @ git+https://github.com/bcollazo/catanatron@ecf9311

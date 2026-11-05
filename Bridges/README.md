@@ -13,3 +13,12 @@ build on those GPL-licensed engines; the rest of the repository is not (see `../
 
 Pinned versions:
 - Catanatron: commit `ecf9311` (2026-09-08), the first with its protocol for bots in other languages.
+
+Contents:
+- `PROTOCOL.md`: the Open Seat Protocol.
+- `osp/classic-board.json`: the protocol's reference shape of the classic board (hexes, intersections, paths, harbors
+  in protocol keys). Hexfarer's test `TheClassicBoardHasTheOpenSeatProtocolsReferenceShape` writes it
+  (`HEXFARER_UPDATE_FIXTURES=1`) and checks against it; every adapter is tested against it too.
+- `catanatron/`: Catanatron's board in protocol keys (`osp_board.py`). Setup and tests:
+  `python -m venv .venv`, `.venv/Scripts/python -m pip install -r requirements.txt`,
+  `.venv/Scripts/python -m unittest test_osp_board`.
