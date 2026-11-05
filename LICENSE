@@ -1,0 +1,9 @@
+Copyright (c) 2023-2026 Lasse Huber-Saffer. All rights reserved.
+
+This repository is published for reference. No permission is granted to use, copy, modify, merge, publish or
+distribute the software or any part of it, beyond what applicable law or the terms of the hosting service allow.
+
+Exceptions:
+- The folder Bridges/ (adapters to other CATAN engines) is licensed under the GNU General Public License, version 3
+  or (at your option) any later version; see Bridges/LICENSE.
+- Third-party material keeps its own license, e.g. the icons credited in README.md (CC BY 4.0).

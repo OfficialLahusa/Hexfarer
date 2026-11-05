@@ -14,6 +14,7 @@ Simulator and AI agent sandbox for the rules of the board game CATAN, featuring 
 ## Structure
 The codebase is divided into several projects:
 - **Agents:** Implementation of various game playing agents/bots and their underlying models.
+- **Bridges:** Adapters to other CATAN engines (Catanatron, later JSettlers) under the GPL, so that bots can play under either side's referee; separate from the rest of the code (see License).
 - **Arena:** Duel CLI for comparing agents: mirror duels of two MCTS agents (every map played twice with the sides swapped) with an Elo estimate and an SPRT that stops once one side is clearly stronger.
 - **Client:** Simulator GUI frontend enabling manual and automatic playouts, detailed game analysis, board editing, simulator configuration and state saving/loading.
 - **Common:** Simulator library containing game data structures, transactional action system (undo/redo), move legality validation, YAML serialization, and map generation.
@@ -51,6 +52,9 @@ Icons are provided by [Game-Icons.net](https://game-icons.net/) as [CC-BY](https
 - "bank", "brick-pile", "cactus", "castle", "check-mark", "confirmed", "dice-six-faces-one", "dice-six-faces-two", "dice-six-faces-three", "dice-six-faces-four", "dice-six-faces-five", "dice-six-faces-six", "house", "next-button", "polar-star", "robber", "rolled-cloth", "scroll-quill", "sheep", "sickle", "stone-path", "stone-pile", "thumb-down", "thumb-up", "village", "wood-pile" by Delapouite
 - "cancel" by sbed
 - "mounted-knight" by Skoll
+
+## License
+All rights reserved (see [LICENSE](LICENSE)), except the adapters to other CATAN engines in [Bridges](Bridges/), which are licensed under the GNU General Public License v3.0 or later because they build on GPL-licensed engines; they talk to Hexfarer only across a process boundary.
 
 ## Disclaimer
 CATAN is a trademark of CATAN GmbH. This project is an independent, non-commercial simulator of the game's rules for research on game-playing agents. It is not affiliated with, endorsed or sponsored by CATAN GmbH or CATAN Studio. It contains no official CATAN artwork, logos or rule texts: the graphics are the project's own or the icons credited above.
