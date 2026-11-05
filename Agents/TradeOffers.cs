@@ -5,7 +5,9 @@ namespace Agents
 {
     /// <summary>
     /// How an agent on turn makes trade offers to the other players, and counteroffers to offers it turns down
-    /// (TradeDecisions answers offers and picks the partner). Before its move it looks at every trade of up to three of its
+    /// (TradeDecisions answers offers and picks the partner). Trades between players are not part of the search tree: offers
+    /// and counteroffers are decided here, before and outside any search, by the value net alone (see MCTSTree). Before its
+    /// move it looks at every trade of up to three of its
     /// cards for up to three cards of other types (MaxCards), addressed to every other player not about to win. With a
     /// value function it judges each offer over worlds of what the others may hold: in each, who holds the asked cards
     /// accepts if the trade raises their own value by the margin the agents answer with, and the agent takes the accepting

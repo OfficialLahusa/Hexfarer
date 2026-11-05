@@ -515,6 +515,67 @@ namespace Tests
         }
         #endregion
 
+        #region Outside the search tree
+        private static bool IsTradeBetweenPlayers(Action? move) =>
+            move is OfferTradeAction or RespondToTradeAction or CounterTradeAction or ConfirmTradeAction or CancelTradeAction;
+
+        [Fact]
+        public void TreesRefuseToStartWhileAnOfferIsOpenAndAgentsDecideTradesWithoutOne()
+        {
+            (GameState state, sbyte active) = MainPhase();
+            sbyte responder = Seat(active, 1);
+            Play(state, new OfferTradeAction(active, Cards((Lumber, 1)), Cards((Ore, 1)), To(responder)));
+
+            Assert.Throws<ArgumentException>(() => new MCTSTree(new GameState(state), responder, 1.414));
+            Assert.Throws<ArgumentException>(() => new ISMCTSTree(new GameState(state), new BeliefTracker(responder, state)));
+
+            // The agents answer before and outside any search: no tree for this decision
+            StateValueNet net = Net("plain_tiny.onnx");
+            MCTSAgent search = new MCTSAgent(responder, state, valueNet: net, iterationLimit: 64, leavesPerBatch: 8);
+            Assert.True(IsTradeBetweenPlayers(search.Act(new GameState(state))));
+            Assert.Empty(search.GetRootMoves().moves);
+            InformationSetMCTSAgent ismcts = new InformationSetMCTSAgent(new MCTSAgent(responder, state, valueNet: net, iterationLimit: 64, leavesPerBatch: 8), state, seed: 1);
+            Assert.True(IsTradeBetweenPlayers(ismcts.Act(new GameState(state))));
+            Assert.Null(ismcts.LastTree);
+            DeterminizedMCTSAgent pimc = new DeterminizedMCTSAgent(new MCTSAgent(responder, state, valueNet: net, iterationLimit: 64, leavesPerBatch: 8), state, 2, seed: 1);
+            Assert.True(IsTradeBetweenPlayers(pimc.Act(new GameState(state))));
+        }
+
+        [Fact]
+        public void NoTradeBetweenPlayersEverEntersASearchTree()
+        {
+            // Positions where trading would be possible all along (free trade, everyone with two of each resource)
+            StateValueNet net = Net("plain_tiny.onnx");
+            int nodes = 0;
+            for (int seed = 1; seed <= 3; seed++)
+            {
+                (GameState state, sbyte active) = MainPhase(seed);
+                MCTSAgent search = new MCTSAgent(active, state, valueNet: net, iterationLimit: 400, leavesPerBatch: 8);
+
+                MCTSTree tree = new MCTSTree(new GameState(state), active, 1.414, model: OpponentModel.MaxN);
+                search.RunSearch(tree);
+                Stack<MCTSNode> open = new([tree.RootNode]);
+                while (open.TryPop(out MCTSNode? node))
+                {
+                    nodes++;
+                    Assert.False(IsTradeBetweenPlayers(node.LastAction), $"{node.LastAction} in the open-hand tree");
+                    foreach (MCTSNode child in node.Children) open.Push(child);
+                }
+
+                ISMCTSTree informed = new ISMCTSTree(new GameState(state), new BeliefTracker(active, state), seed: seed);
+                search.RunSearch(informed);
+                Stack<ISNode> openSets = new([informed.RootNode]);
+                while (openSets.TryPop(out ISNode? node))
+                {
+                    nodes++;
+                    Assert.False(IsTradeBetweenPlayers(node.Move), $"{node.Move} in the information set tree");
+                    foreach (ISNode child in node.Children) openSets.Push(child);
+                }
+            }
+            Assert.True(nodes > 500, $"only {nodes} nodes searched");
+        }
+        #endregion
+
         #region Whole games
         [Fact]
         public void BotsWithTheDefaultsTradeInWholeGamesOnlyByTheRules()

@@ -6,9 +6,10 @@ namespace Agents
 {
     /// <summary>
     /// How agents take part in trades between players: they answer offers addressed to them and, as the player on turn, pick a
-    /// partner or let an offer go (their own offers come from TradeOffers; they make no counteroffers). A trade is
-    /// judged by comparing the position after it with the position without it, by a value function if the agent has one
-    /// (the value net's utility) or else by how close the hand comes to the next buildings.
+    /// partner or let an offer go (their own offers and counteroffers come from TradeOffers). Trades between players are not
+    /// part of the search tree: agents decide them here, before and outside any search (see MCTSTree). A trade is judged by
+    /// comparing the position after it with the position without it, by a value function if the agent has one (the value
+    /// net's utility) or else by how close the hand comes to the next buildings.
     /// </summary>
     public static class TradeDecisions
     {

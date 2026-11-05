@@ -14,6 +14,12 @@ using Action = Common.Actions.Action;
 
 namespace Agents.MCTS
 {
+    /// <summary>
+    /// Plays by MCTS over the true position (open-hand), the leaves valued by the net. Trades between players are not part of
+    /// its search tree: before any search, Act decides them by the value net alone (an answer or partner pick in
+    /// TradeDecisions, a counteroffer or offer in TradeOffers), and only a move that is no trade is searched (see MCTSTree).
+    /// The information set and PIMC agents use this agent's search and its trade decisions the same way.
+    /// </summary>
     public class MCTSAgent : Agent, IShowsSearch
     {
         public const double TIME_LIMIT_SECONDS = 5;
@@ -219,7 +225,8 @@ namespace Agents.MCTS
         /// </summary>
         public override Action Act(GameState state, CancellationToken cancellation)
         {
-            // Trades between players are decided outside the tree: the value of the position with and without the trade
+            // Trades between players are not part of the search tree: they are decided here, before and outside the search, by
+            // the value net alone (the position with and without the trade). The tree below never contains a trade.
             if (DecideTrade(state) is Action trade)
                 return trade is RespondToTradeAction { Accept: false } && DecideCounter(state, _ => [state]) is CounterTradeAction counter ? counter : trade;
             if (DecideOffer(state, _ => [state]) is OfferTradeAction offer) return offer;

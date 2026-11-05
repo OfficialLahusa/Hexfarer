@@ -221,7 +221,8 @@ namespace Agents.MCTS
     /// with the moves legal in its world, counts every legal child as available (the selection's exploration uses that count
     /// instead of the parent's visits), lets the world roll the outcomes of random moves and follows the outcome as the seat
     /// sees it. A game that ends in the world ends the iteration there. The other seats choose by their own values (max^n).
-    /// The search depends only on the seat's view and the seed.
+    /// The search depends only on the seat's view and the seed. Trades between players are not part of the search tree, as in
+    /// MCTSTree: the tree refuses to start while an offer is open, and the agent decides them outside the search.
     /// </summary>
     public sealed class ISMCTSTree : ISearchTree
     {
@@ -272,6 +273,7 @@ namespace Agents.MCTS
         /// from the current ones</param>
         public ISMCTSTree(GameState truth, BeliefTracker beliefs, double exploration = 1.414, int seed = 0, bool fullKnowledge = false, ISNode? root = null)
         {
+            MCTSTree.RefuseOpenTrade(truth);
             RootNode = root ?? new ISNode(null, null, false);
             RootNode.Detach();
             _beliefs = new BeliefTracker(beliefs);

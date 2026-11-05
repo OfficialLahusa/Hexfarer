@@ -22,6 +22,14 @@ namespace Agents.MCTS
     /// </summary>
     public enum OpponentModel { Random, MaxN, Paranoid }
 
+    /// <summary>
+    /// The search tree of the open-hand MCTS: its nodes are positions, its edges the legal moves of GetValidActions.
+    /// Trades between players are not part of the search tree (here or in ISMCTSTree): agents decide every answer, partner
+    /// pick, counteroffer and offer before and outside the search, by the value net alone (TradeDecisions, TradeOffers). A
+    /// tree refuses to start while an offer is open (RefuseOpenTrade), and offers and counteroffers are no legal moves, so no
+    /// offer can open inside it either: the search looks ahead as if nobody traded with another player (trades with the
+    /// bank and ports are ordinary moves of the tree).
+    /// </summary>
     public class MCTSTree : ISearchTree
     {
         public GameState RootState;
@@ -59,6 +67,7 @@ namespace Agents.MCTS
 
         public MCTSTree(GameState rootState, sbyte ownerIdx, double explorationParameter, bool normalizeValues = true, OpponentModel model = OpponentModel.Random)
         {
+            RefuseOpenTrade(rootState);
             RootState = rootState;
             RootNode = new MCTSNode((sbyte)rootState.Turn.PlayerIndex, null, null, false);
             _ownerIdx = ownerIdx;
@@ -672,11 +681,29 @@ namespace Agents.MCTS
             return null;
         }
 
+        /// <summary>
+        /// Throws if a search would start while a trade between players is open: those are decided outside every search tree
+        /// (see MCTSTree), so the agent answers or picks before it searches
+        /// </summary>
+        public static void RefuseOpenTrade(GameState root)
+        {
+            if (root.Turn.PendingTrade != null)
+                throw new ArgumentException("Trades between players are not part of the search tree: agents decide them outside the search "
+                    + "(TradeDecisions, TradeOffers), so a search can't start while an offer is open.", nameof(root));
+        }
+
+        /// <summary>
+        /// The legal moves of the player to act, the edges of the search trees. Offers and counteroffers between players are
+        /// never among them (they can be any combination of cards; agents make them outside the search, see TradeOffers), so
+        /// no trade between players ever opens inside a tree.
+        /// </summary>
         public static List<Action> GetValidActions(GameState state)
         {
             sbyte activePlayerIdx = (sbyte)state.Turn.PlayerIndex;
 
-            // An open trade between players (only with free trade; agents decide those outside the tree): its answers or picks
+            // An open trade between players (only with free trade): the answers or partner picks of the player to act, for
+            // whoever asks for the legal moves outside a search. No tree reaches this: a tree refuses to start at an open offer
+            // and offers are never listed, so agents decide these in TradeDecisions instead
             if (state.Turn.PendingTrade is TradeOffer offer)
                 return LegalActionProvider.GetActionsForState(state, offer.NextResponder ?? offer.Offerer);
 

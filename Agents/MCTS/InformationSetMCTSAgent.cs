@@ -103,6 +103,9 @@ namespace Agents.MCTS
         public override Action Act(GameState state, CancellationToken cancellation)
         {
             _searched = null;
+
+            // Trades between players are not part of the search tree: answers, partner picks, counteroffers and offers are
+            // decided here, before and outside the search (see MCTSAgent.Act)
             if (_search.DecideTrade(FullKnowledge ? state : _beliefs.Determinize(_beliefs.View(state), _random)) is Action trade)
             {
                 return trade is RespondToTradeAction { Accept: false }

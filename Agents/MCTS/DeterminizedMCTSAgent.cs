@@ -57,7 +57,9 @@ namespace Agents.MCTS
 
         public override Action Act(GameState state, CancellationToken cancellation)
         {
-            // Offers and counteroffers are judged over worlds drawn from the beliefs (see TradeOffers), not in each world on its own
+            // Trades between players are not part of any world's search tree (see MCTSAgent.Act): offers and counteroffers are
+            // judged here, outside the searches, over worlds drawn from the beliefs; answers and picks come from the searches'
+            // own trade decisions in each world, which return before searching
             Func<int, IReadOnlyList<GameState>> beliefWorlds = count => Enumerable.Range(0, count).Select(_ => _beliefs.Determinize(_beliefs.View(state), _random)).ToList();
             if (_search.DecideOffer(state, beliefWorlds) is OfferTradeAction offer)
                 return offer;
