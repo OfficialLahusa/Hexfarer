@@ -94,7 +94,7 @@ namespace Tests
             }
             Func<int, IReadOnlyList<GameState>> worlds = n => Enumerable.Repeat(state, n).ToList();
 
-            new TradeOffers().Decide(state, active, worlds, Counted);
+            new TradeOffers { Prune = 0 }.Decide(state, active, worlds, Counted);
             int full = positions;
             positions = 0;
             new TradeOffers { Prune = 4 }.Decide(state, active, worlds, Counted);
@@ -233,6 +233,25 @@ namespace Tests
             GameState nextTurn = new GameState(state);
             nextTurn.Turn.TradeOffersThisTurn = 0;
             Assert.True(agent.Act(nextTurn) is OfferTradeAction { } again && Terms((again.Give, again.Get)) == offered[0]);
+        }
+
+        [Fact]
+        public void HeuristicAgentsKeepToOneOrTwoCardsASide()
+        {
+            // They can't tell who would accept, so they don't look at the larger trades value-net agents do
+            (GameState state, sbyte active) = MainPhase();
+            state.Players[active].ResourceCards = Cards((Ore, 4), (Wool, 3), (Brick, 1));
+            BuilderAgent agent = new BuilderAgent(active);
+            agent.Offers.MaxPerTurn = 10;
+            int offers = 0;
+            while (agent.Act(new GameState(state)) is OfferTradeAction offer)
+            {
+                Assert.True(offer.Give.Count() <= 2 && offer.Get.Count() <= 2, $"{offer} has more than two cards a side");
+                offers++;
+                Play(state, offer);
+                RejectAll(state);
+            }
+            Assert.True(offers >= 5, $"only {offers} offers");
         }
 
         [Fact]
@@ -382,7 +401,7 @@ namespace Tests
             (GameState state, sbyte active) = MainPhase();
             sbyte responder = Seat(active, 1);
             Play(state, new OfferTradeAction(active, Cards((Wool, 1)), Cards((Grain, 1)), To(responder, Seat(active, 2))));
-            TradeOffers offers = new TradeOffers { Counters = true };
+            TradeOffers offers = new TradeOffers { Counters = true, MaxCards = 2, Prune = 0 };
             var values = CounterValues(active, responder);
 
             CounterTradeAction? counter = offers.DecideCounter(state, responder, _ => [state], values);
@@ -392,7 +411,9 @@ namespace Tests
             // The offerer gives lumber and brick for one ore
             Assert.Equal("L1B1W0G0O0>L0B0W0G0O1", Terms((counter.Give, counter.Get)));
 
-            Assert.Null(new TradeOffers().DecideCounter(state, responder, _ => [state], values));
+            Assert.Null(new TradeOffers { Counters = false }.DecideCounter(state, responder, _ => [state], values));
+            // With up to three cards a side the offerer gives a third card the responder values a little
+            Assert.Equal(3u, new TradeOffers().DecideCounter(state, responder, _ => [state], values)!.Give.Count());
             // The second addressee counters once it is its turn to answer, not before
             var second = CounterValues(active, Seat(active, 2));
             Assert.Null(offers.DecideCounter(state, Seat(active, 2), _ => [state], second));

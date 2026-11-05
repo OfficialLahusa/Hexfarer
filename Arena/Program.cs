@@ -69,12 +69,12 @@ namespace Arena
             a new tree every decision), noleaf (MCTS evaluates one of a new leaf's moves instead of the leaf itself, the old
             search), searchforced (MCTS and PIMC search a decision with a single legal move instead of playing it at once,
             the old search) and gX (ISMCTS scales the statistics of the subtree it goes on with by X, above 0 and at most 1;
-            default 1). Trade offers, with free trade: nooffers (none), omX (mean gain needed, default 0.005), onN (at most N
-            per turn, default 3), owN (judged over N worlds, default 8), o22 (two cards for two too), o31 (three for one and
-            one for three too), oc3 (any trade up to three cards for three), opN (all judged in one world, the N best there
-            in all), nolearn (ISMCTS ignores the cards offers and answers show); answers: afX (accept only a gain
-            of at least X times the offerer's), amX (accept from a gain above X, default 0.002), co (counteroffers to offers
-            turned down).
+            default 1). Trade offers, with free trade: nooffers (neither offers nor counteroffers), omX (mean gain needed,
+            default 0.005), onN (at most N per turn, default 3), owN (judged over N worlds, default 8), oc2 (one or two cards a
+            side instead of any trade up to three for three), o22 and o31 (with oc2: two for two, three for one and one for
+            three too), opN (all judged in one world, the N best there in all; default 16, op0 all in all), nolearn (ISMCTS
+            ignores the cards offers and answers show); answers: afX (accept only a gain of at least X times the offerer's),
+            amX (accept from a gain above X, default 0.002), noco (no counteroffers to offers turned down; co, the default).
 
               --challenger AGENT     The agent tested
               --baseline AGENT       The agent it is compared with

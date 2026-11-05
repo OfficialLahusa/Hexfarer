@@ -4,15 +4,17 @@ using Common.Actions;
 namespace Agents
 {
     /// <summary>
-    /// How an agent on turn makes trade offers to the other players (TradeDecisions answers offers and picks the partner).
-    /// Before its move it looks at every offer of one or two of its cards for one or two cards of other types (two for two
-    /// only with TwoForTwo), addressed to every other player not about to win. With a value function it judges each offer
-    /// over worlds of what the others may hold: in each, who holds the asked cards accepts if the trade raises their own
-    /// value by the margin the agents answer with, and the agent takes the accepting partner best for itself if that beats
-    /// the same margin; the offer is worth its mean gain over the worlds, and the agent makes the best one worth more than
-    /// Margin. Without a value function (the heuristic agents, which follow no beliefs) it judges only its own hand and asks
-    /// for no more cards than it gives. At most MaxPerTurn offers per turn, never the same terms twice in a turn. It reads
-    /// from the true position only what its seat sees: its own hand, the turn and the public victory points.
+    /// How an agent on turn makes trade offers to the other players, and counteroffers to offers it turns down
+    /// (TradeDecisions answers offers and picks the partner). Before its move it looks at every trade of up to three of its
+    /// cards for up to three cards of other types (MaxCards), addressed to every other player not about to win. With a
+    /// value function it judges each offer over worlds of what the others may hold: in each, who holds the asked cards
+    /// accepts if the trade raises their own value by the margin the agents answer with, and the agent takes the accepting
+    /// partner best for itself if that beats the same margin; the offer is worth its mean gain over the worlds (all
+    /// candidates in the first world, the Prune best of them in all), and the agent makes the best one worth more than
+    /// Margin. Without a value function (the heuristic agents, which follow no beliefs) it judges only its own hand, looks
+    /// at one or two cards a side and asks for no more cards than it gives. At most MaxPerTurn offers per turn, never the
+    /// same terms twice in a turn. It reads from the true position only what its seat sees: its own hand, the turn and the
+    /// public victory points. The defaults are those that played best at a table with free trade (see TODO.md).
     /// </summary>
     public sealed class TradeOffers
     {
@@ -44,21 +46,22 @@ namespace Agents
         public bool ThreeForOne { get; set; }
 
         /// <summary>
-        /// Most cards on each side: 2 (the shapes above) or 3 (any trade up to three cards for three)
+        /// Most cards on each side with a value function: 2 (the shapes above) or 3 (any trade up to three cards for three);
+        /// the hand heuristic, which can't tell who would accept, keeps to the shapes of 2
         /// </summary>
-        public int MaxCards { get; set; } = 2;
+        public int MaxCards { get; set; } = 3;
 
         /// <summary>
         /// If above 0 and there are more candidates: every candidate is judged in the first world only, and only this many of
         /// the best there in all worlds (the others count as worthless), which saves most of the net's work for many candidates
         /// </summary>
-        public int Prune { get; set; }
+        public int Prune { get; set; } = 16;
 
         /// <summary>
         /// Whether the agent answers an offer it turns down with a counteroffer (only with a value function): the terms best
         /// for it among those the offerer would take, judged like its own offers but with the offerer as the only partner
         /// </summary>
-        public bool Counters { get; set; }
+        public bool Counters { get; set; } = true;
 
         // The terms offered this turn, forgotten when a turn starts without offers
         private readonly List<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> _offered = [];
@@ -84,7 +87,7 @@ namespace Agents
             if (recipients == 0) return null;
 
             CardSet<ResourceCardType> hand = state.Players[player].ResourceCards;
-            List<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> candidates = Candidates(hand, TwoForTwo, utilities == null, ThreeForOne, MaxCards)
+            List<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> candidates = Candidates(hand, TwoForTwo, utilities == null, ThreeForOne, utilities == null ? 2 : MaxCards)
                 .Where(terms => !_offered.Any(o => o.give.Equals(terms.give) && o.get.Equals(terms.get))).ToList();
             if (candidates.Count == 0) return null;
 

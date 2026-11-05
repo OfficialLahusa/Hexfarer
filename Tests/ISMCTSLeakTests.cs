@@ -142,11 +142,8 @@ namespace Tests
         private static (Action move, List<string>? tree) Decide(GameState truth, BeliefTracker beliefs, string net, bool fullKnowledge = false, bool counters = false)
         {
             InformationSetMCTSAgent agent = NewAgent(truth, beliefs.Observer, net, fullKnowledge);
-            if (counters)
-            {
-                agent.Search.Offers.Counters = true;
-                agent.Search.Offers.Margin = 0;
-            }
+            agent.Search.Offers.Counters = counters;
+            if (counters) agent.Search.Offers.Margin = 0;
             agent.ResetTo(truth, beliefs);
             Action move = agent.Act(new GameState(truth));
             return (move, agent.LastTree is ISMCTSTree tree ? Shape(tree) : null);
