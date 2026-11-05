@@ -6,7 +6,9 @@ Adapters between Hexfarer and other CATAN engines, so that bots of either side c
 This folder is licensed under the GNU General Public License, version 3 or later (see `LICENSE`), since the adapters
 build on those GPL-licensed engines; the rest of the repository is not (see `../LICENSE`). To keep the two apart:
 - the adapters contain no Hexfarer code and Hexfarer contains no adapter code;
-- they talk only across a process boundary, over JSON lines on standard input and output (the seat protocol);
+- they talk only across a process boundary, over the Open Seat Protocol (OSP, see `PROTOCOL.md`): JSON lines on
+  standard input and output, the same for every engine, with the rules as an option of each game. Programs that play
+  seats over it are Open Seat Agents;
 - foreign code is only a dependency, never copied in.
 
 Pinned versions:
