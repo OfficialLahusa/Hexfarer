@@ -20,7 +20,8 @@ namespace Arena
     /// subtree ISMCTS goes on with by X (above 0, at most 1; 1, full weight, if not given). Trade offers (with free trade, see
     /// TradeOffers): nooffers makes none, omX needs a mean gain above X (default 0.005), onN makes at most N per turn
     /// (default 3), owN judges them over N worlds (default 8), o22 looks at two cards for two too, o31 at three cards for one
-    /// and one for three; nolearn (ISMCTS) ignores the cards others' offers and answers show. Answers: afX accepts an offer
+    /// and one for three, oc3 at any trade up to three cards for three, opN judges all in one world and only the N best there
+    /// in all; nolearn (ISMCTS) ignores the cards others' offers and answers show. Answers: afX accepts an offer
     /// only if it gains at least X times what the offerer gains, amX accepts an
     /// offer from a gain above X (default 0.002), co answers an offer it turns down with a counteroffer.
     /// </summary>
@@ -29,7 +30,7 @@ namespace Arena
         bool FullKnowledge = false, bool? NormalizeValues = null, bool BranchHiddenOutcomes = false, bool ReuseTree = true,
         bool EvaluateNewLeaves = true, bool PlayForcedMovesAtOnce = true, double ReuseDecay = 1, bool MakeOffers = true,
         double OfferMargin = 0.005, int MaxOffers = 3, int OfferWorlds = 8, bool TwoForTwo = false, double AnswerMargin = 0.002, bool Counters = false,
-        bool ThreeForOne = false, double AnswerFairness = 0, bool LearnsFromTrades = true)
+        bool ThreeForOne = false, double AnswerFairness = 0, bool LearnsFromTrades = true, int MaxCards = 2, int Prune = 0)
     {
         public static AgentSpec Parse(string spec)
         {
@@ -58,6 +59,9 @@ namespace Arena
                     "co" => result with { Counters = true },
                     "o31" => result with { ThreeForOne = true },
                     "nolearn" => result with { LearnsFromTrades = false },
+                    ['o', 'c', ..] => int.Parse(option[2..], CultureInfo.InvariantCulture) is int most and (2 or 3) ? result with { MaxCards = most }
+                        : throw new ArgumentException($"Option \"{option}\" in agent \"{spec}\" allows 2 or 3 cards a side."),
+                    ['o', 'p', ..] => result with { Prune = int.Parse(option[2..], CultureInfo.InvariantCulture) },
                     ['a', 'f', ..] => result with { AnswerFairness = double.Parse(option[2..], CultureInfo.InvariantCulture) },
                     ['a', 'm', ..] => result with { AnswerMargin = double.Parse(option[2..], CultureInfo.InvariantCulture) },
                     ['o', 'm', ..] => result with { OfferMargin = double.Parse(option[2..], CultureInfo.InvariantCulture) },
@@ -106,6 +110,8 @@ namespace Arena
             if (Counters) options.Add("co");
             if (AnswerFairness != 0) options.Add($"af{AnswerFairness.ToString(CultureInfo.InvariantCulture)}");
             if (!LearnsFromTrades) options.Add("nolearn");
+            if (MaxCards != 2) options.Add($"oc{MaxCards}");
+            if (Prune != 0) options.Add($"op{Prune}");
             return $"{Name} {Path.GetFileName(ModelPath)} {string.Join(" ", options)}";
         }
 
@@ -129,6 +135,8 @@ namespace Arena
             search.Offers.TwoForTwo = TwoForTwo;
             search.Offers.Counters = Counters;
             search.Offers.ThreeForOne = ThreeForOne;
+            search.Offers.MaxCards = MaxCards;
+            search.Offers.Prune = Prune;
             search.AnswerMargin = (float)AnswerMargin;
             search.AnswerFairness = (float)AnswerFairness;
 

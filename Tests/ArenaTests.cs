@@ -133,6 +133,10 @@ namespace Tests
             AgentSpec plain = AgentSpec.Parse("T=a.onnx=is");
             Assert.Equal((true, 0.005, 3, 8, false), (plain.MakeOffers, plain.OfferMargin, plain.MaxOffers, plain.OfferWorlds, plain.TwoForTwo));
             Assert.True(AgentSpec.Parse("T=a.onnx=o31").ThreeForOne);
+            Assert.Equal((3, 16), (AgentSpec.Parse("T=a.onnx=oc3=op16").MaxCards, AgentSpec.Parse("T=a.onnx=oc3=op16").Prune));
+            Assert.Equal((2, 0), (plain.MaxCards, plain.Prune));
+            Assert.Throws<ArgumentException>(() => AgentSpec.Parse("T=a.onnx=oc4"));
+            Assert.EndsWith("oc3 op16", AgentSpec.Parse("T=a.onnx=oc3=op16").ToString());
             Assert.False(plain.ThreeForOne);
             AgentSpec spec = AgentSpec.Parse("T=a.onnx=is=om0.01=on1=ow4=o22=ob");
             Assert.Equal((true, 0.01, 1, 4, true, true), (spec.MakeOffers, spec.OfferMargin, spec.MaxOffers, spec.OfferWorlds, spec.TwoForTwo, spec.BranchHiddenOutcomes));
@@ -152,10 +156,11 @@ namespace Tests
             var net = new StateValueNet(PlainModelPath, provider: InferenceProvider.Cpu);
             foreach (string kind in new[] { "is", "d2", "c1.414" })
             {
-                Agent agent = AgentSpec.Parse($"T={PlainModelPath}={kind}=om0.01=on1=ow4=o22=am0.02=co=o31=af0.5").Create(1, start, net, 16, 0);
+                Agent agent = AgentSpec.Parse($"T={PlainModelPath}={kind}=om0.01=on1=ow4=o22=am0.02=co=o31=af0.5=oc3=op16").Create(1, start, net, 16, 0);
                 MCTSAgent search = agent switch { InformationSetMCTSAgent i => i.Search, DeterminizedMCTSAgent d => d.Search, _ => (MCTSAgent)agent };
                 Assert.Equal((true, 0.01f, 1, 4, true), (search.Offers.Enabled, search.Offers.Margin, search.Offers.MaxPerTurn, search.Offers.Worlds, search.Offers.TwoForTwo));
                 Assert.Equal((0.02f, true, true, 0.5f), (search.AnswerMargin, search.Offers.Counters, search.Offers.ThreeForOne, search.AnswerFairness));
+                Assert.Equal((3, 16), (search.Offers.MaxCards, search.Offers.Prune));
             }
             Assert.False(((InformationSetMCTSAgent)AgentSpec.Parse($"T={PlainModelPath}=is=nooffers").Create(1, start, net, 16, 0)).Search.Offers.Enabled);
 

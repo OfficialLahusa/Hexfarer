@@ -44,6 +44,17 @@ namespace Agents
         public bool ThreeForOne { get; set; }
 
         /// <summary>
+        /// Most cards on each side: 2 (the shapes above) or 3 (any trade up to three cards for three)
+        /// </summary>
+        public int MaxCards { get; set; } = 2;
+
+        /// <summary>
+        /// If above 0 and there are more candidates: every candidate is judged in the first world only, and only this many of
+        /// the best there in all worlds (the others count as worthless), which saves most of the net's work for many candidates
+        /// </summary>
+        public int Prune { get; set; }
+
+        /// <summary>
         /// Whether the agent answers an offer it turns down with a counteroffer (only with a value function): the terms best
         /// for it among those the offerer would take, judged like its own offers but with the offerer as the only partner
         /// </summary>
@@ -73,13 +84,13 @@ namespace Agents
             if (recipients == 0) return null;
 
             CardSet<ResourceCardType> hand = state.Players[player].ResourceCards;
-            List<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> candidates = Candidates(hand, TwoForTwo, utilities == null, ThreeForOne)
+            List<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> candidates = Candidates(hand, TwoForTwo, utilities == null, ThreeForOne, MaxCards)
                 .Where(terms => !_offered.Any(o => o.give.Equals(terms.give) && o.get.Equals(terms.get))).ToList();
             if (candidates.Count == 0) return null;
 
             double[] worth = utilities == null || worlds == null
                 ? candidates.Select(c => (double)(TradeDecisions.HandValue(After(hand, c.give, c.get)) - TradeDecisions.HandValue(hand))).ToArray()
-                : ExpectedGains(worlds(Math.Max(1, Worlds)), player, recipients, candidates, utilities);
+                : Pruned(worlds(Math.Max(1, Worlds)), candidates, Prune, (w, c) => ExpectedGains(w, player, recipients, c, utilities));
             double margin = utilities == null || worlds == null ? TradeDecisions.HandMargin : Margin;
 
             int best = -1;
@@ -102,16 +113,33 @@ namespace Agents
             if (IsAboutToWin(state, offer.Offerer)) return null;
 
             // In the offerer's terms: it gives what the agent asks for and gets cards of the agent's hand
-            List<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> candidates = Candidates(state.Players[player].ResourceCards, TwoForTwo, false, ThreeForOne)
+            List<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> candidates = Candidates(state.Players[player].ResourceCards, TwoForTwo, false, ThreeForOne, MaxCards)
                 .Select(c => (give: c.get, get: c.give))
                 .Where(c => !(c.give.Equals(offer.Give) && c.get.Equals(offer.Get))).ToList();
             if (candidates.Count == 0) return null;
 
-            double[] worth = CounterGains(worlds(Math.Max(1, Worlds)), offer.Offerer, player, candidates, utilities);
+            double[] worth = Pruned(worlds(Math.Max(1, Worlds)), candidates, Prune, (w, c) => CounterGains(w, offer.Offerer, player, c, utilities));
             int best = -1;
             for (int c = 0; c < candidates.Count; c++)
                 if (worth[c] > Margin && (best < 0 || worth[c] > worth[best])) best = c;
             return best < 0 ? null : new CounterTradeAction(player, candidates[best].give, candidates[best].get);
+        }
+
+        /// <summary>
+        /// Each candidate's worth by gains(worlds, candidates); with prune above 0 and more candidates, only the prune best in
+        /// the first world are judged in all worlds, the others are worth -infinity
+        /// </summary>
+        internal static double[] Pruned(IReadOnlyList<GameState> worlds, List<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> candidates, int prune,
+            Func<IReadOnlyList<GameState>, IReadOnlyList<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)>, double[]> gains)
+        {
+            if (prune <= 0 || worlds.Count < 2 || candidates.Count <= prune) return gains(worlds, candidates);
+
+            double[] first = gains([worlds[0]], candidates);
+            int[] kept = Enumerable.Range(0, candidates.Count).OrderByDescending(c => first[c]).ThenBy(c => c).Take(prune).ToArray();
+            double[] keptWorth = gains(worlds, kept.Select(c => candidates[c]).ToList());
+            double[] worth = Enumerable.Repeat(double.NegativeInfinity, candidates.Count).ToArray();
+            for (int k = 0; k < kept.Length; k++) worth[kept[k]] = keptWorth[k];
+            return worth;
         }
 
         /// <summary>
@@ -202,20 +230,24 @@ namespace Agents
 
         /// <summary>
         /// The offers to look at: one or two cards of the hand (one type twice or two types) for one or two cards of other
-        /// types; two for two only if asked, three for one and one for three only if asked, and with askNoMore only offers
-        /// asking for no more cards than they give
+        /// types; two for two only if asked, three for one and one for three only if asked, any trade up to three cards for
+        /// three with maxCards 3, and with askNoMore only offers asking for no more cards than they give
         /// </summary>
         internal static IEnumerable<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> Candidates(CardSet<ResourceCardType> hand, bool twoForTwo, bool askNoMore,
-            bool threeForOne = false)
+            bool threeForOne = false, int maxCards = 2)
         {
-            List<CardSet<ResourceCardType>> gives = Sets(type => hand.Get(type), threeForOne), gets = Sets(_ => 3, threeForOne);
+            bool three = threeForOne || maxCards >= 3;
+            List<CardSet<ResourceCardType>> gives = Sets(type => hand.Get(type), three), gets = Sets(_ => 3, three);
             foreach (CardSet<ResourceCardType> give in gives)
             {
                 foreach (CardSet<ResourceCardType> get in gets)
                 {
                     uint given = give.Count(), asked = get.Count();
-                    if (given == 2 && asked == 2 && !twoForTwo) continue;
-                    if (given == 3 && asked != 1 || asked == 3 && given != 1) continue;
+                    if (maxCards < 3)
+                    {
+                        if (given == 2 && asked == 2 && !twoForTwo) continue;
+                        if (given == 3 && asked != 1 || asked == 3 && given != 1) continue;
+                    }
                     if (askNoMore && asked > given) continue;
                     if (!TradeOffer.AreValidTerms(give, get)) continue;
                     yield return (give, get);

@@ -45,36 +45,88 @@ namespace Tests
         }
 
         [Theory]
-        [InlineData(false, false, false)]
-        [InlineData(true, false, false)]
-        [InlineData(false, true, false)]
-        [InlineData(false, false, true)]
-        [InlineData(true, true, true)]
-        public void TheOffersLookedAtAreAllSmallSetsOfTheHandForCardsOfOtherTypes(bool twoForTwo, bool askNoMore, bool threeForOne)
+        [InlineData(false, false, false, 2)]
+        [InlineData(true, false, false, 2)]
+        [InlineData(false, true, false, 2)]
+        [InlineData(false, false, true, 2)]
+        [InlineData(true, true, true, 2)]
+        [InlineData(false, false, false, 3)]
+        [InlineData(false, true, false, 3)]
+        public void TheOffersLookedAtAreAllSmallSetsOfTheHandForCardsOfOtherTypes(bool twoForTwo, bool askNoMore, bool threeForOne, int maxCards)
         {
             CardSet<ResourceCardType> hand = Cards((Lumber, 3), (Brick, 1), (Ore, 1));
+            bool three = threeForOne || maxCards == 3;
             HashSet<string> expected = [];
-            foreach (CardSet<ResourceCardType> give in AllSets(hand.Get, threeForOne ? 3 : 2))
+            foreach (CardSet<ResourceCardType> give in AllSets(hand.Get, three ? 3 : 2))
             {
-                foreach (CardSet<ResourceCardType> get in AllSets(_ => 3, threeForOne ? 3 : 2))
+                foreach (CardSet<ResourceCardType> get in AllSets(_ => 3, three ? 3 : 2))
                 {
                     uint given = give.Count(), asked = get.Count();
                     if (CardTypeExtensions.ResourceTypes.Any(type => give.Get(type) > 0 && get.Get(type) > 0)) continue;
-                    if (given == 2 && asked == 2 && !twoForTwo) continue;
-                    // Three cards only against one
-                    if (given == 3 && asked != 1 || asked == 3 && given != 1) continue;
+                    // Up to three cards a side: any trade; else two for two only if asked, and three cards only against one
+                    if (maxCards < 3 && given == 2 && asked == 2 && !twoForTwo) continue;
+                    if (maxCards < 3 && (given == 3 && asked != 1 || asked == 3 && given != 1)) continue;
                     if (askNoMore && asked > given) continue;
                     expected.Add(Terms((give, get)));
                 }
             }
 
-            var candidates = TradeOffers.Candidates(hand, twoForTwo, askNoMore, threeForOne).ToList();
+            var candidates = TradeOffers.Candidates(hand, twoForTwo, askNoMore, threeForOne, maxCards).ToList();
 
             Assert.Equal(expected.Order(), candidates.Select(Terms).Order());
             Assert.Equal(candidates.Count, candidates.Select(Terms).Distinct().Count());
             Assert.All(candidates, c => Assert.True(TradeOffer.AreValidTerms(c.give, c.get) && hand.Contains(c.give)));
-            Assert.Equal(threeForOne, candidates.Any(c => c.give.Count() == 3));
-            Assert.Equal(threeForOne && !askNoMore, candidates.Any(c => c.get.Count() == 3));
+            Assert.Equal(three, candidates.Any(c => c.give.Count() == 3));
+            Assert.Equal(three && (maxCards == 3 || !askNoMore), candidates.Any(c => c.get.Count() == 3));
+            Assert.Equal(maxCards == 3 || twoForTwo, candidates.Any(c => c.give.Count() == 2 && c.get.Count() == 2));
+            Assert.Equal(maxCards == 3, candidates.Any(c => c.give.Count() == 3 && c.get.Count() == 3));
+        }
+
+        [Fact]
+        public void PruningCutsThePositionsAnOfferIsJudgedOn()
+        {
+            (GameState state, sbyte active) = MainPhase();
+            int positions = 0;
+            double[] Counted(IReadOnlyList<GameState> states)
+            {
+                positions += states.Count;
+                return new double[states.Count * 4];
+            }
+            Func<int, IReadOnlyList<GameState>> worlds = n => Enumerable.Repeat(state, n).ToList();
+
+            new TradeOffers().Decide(state, active, worlds, Counted);
+            int full = positions;
+            positions = 0;
+            new TradeOffers { Prune = 4 }.Decide(state, active, worlds, Counted);
+
+            // Every candidate once in the first world, four of them in all eight
+            Assert.True(positions * 4 < full, $"{positions} positions pruned against {full}");
+        }
+
+        [Fact]
+        public void PruningJudgesOnlyTheBestOfTheFirstWorldInAllWorlds()
+        {
+            List<GameState> worlds = [World(new(), new(), new(), new()), World(new(), new(), new(), new()), World(new(), new(), new(), new())];
+            var candidates = Enumerable.Range(1, 5).Select(n => (give: Cards((Lumber, (uint)n)), get: Cards((Ore, 1)))).ToList();
+            // Worth in the first world and over all worlds, by the lumber given
+            double[] first = [0.1, 0.5, 0.3, 0.0, 0.4], all = [0.9, 0.2, 0.8, 0.7, 0.6];
+            List<int> judgedInAll = [];
+            double[] Gains(IReadOnlyList<GameState> w, IReadOnlyList<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> c)
+            {
+                int[] index = c.Select(t => (int)t.give.Get(Lumber) - 1).ToArray();
+                if (w.Count == 3) judgedInAll.AddRange(index);
+                return index.Select(i => w.Count == 1 ? first[i] : all[i]).ToArray();
+            }
+
+            double[] pruned = TradeOffers.Pruned(worlds, candidates, 2, Gains);
+
+            // The two best in the first world (the second and the fifth), with their worth over all worlds
+            Assert.Equal([1, 4], judgedInAll.Order());
+            Assert.Equal([double.NegativeInfinity, 0.2, double.NegativeInfinity, double.NegativeInfinity, 0.6], pruned);
+            // Without pruning, or with enough room, every candidate in all worlds
+            Assert.Equal(all, TradeOffers.Pruned(worlds, candidates, 0, Gains));
+            Assert.Equal(all, TradeOffers.Pruned(worlds, candidates, 5, Gains));
+            Assert.Equal(first, TradeOffers.Pruned([worlds[0]], candidates, 2, Gains));
         }
         #endregion
 
