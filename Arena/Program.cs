@@ -73,7 +73,8 @@ namespace Arena
             default 0.005), onN (at most N per turn, default 3), owN (judged over N worlds, default 8), oc2 (one or two cards a
             side instead of any trade up to three for three), o22 and o31 (with oc2: two for two, three for one and one for
             three too), opN (all judged in one world, the N best there in all; default 16, op0 all in all), nolearn (ISMCTS
-            ignores the cards offers and answers show); answers: afX (accept only a gain of at least X times the offerer's),
+            ignores the cards offers and answers show), pfX (partners expected to need X times its gain, default 1); answers:
+            afX (accept only a gain of at least X times the offerer's, default 1, af0 any gain),
             amX (accept from a gain above X, default 0.002), noco (no counteroffers to offers turned down; co, the default).
 
               --challenger AGENT     The agent tested

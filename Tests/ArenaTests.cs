@@ -148,7 +148,9 @@ namespace Tests
             Assert.EndsWith("nooffers noco", silent.ToString());
             Assert.Throws<ArgumentException>(() => AgentSpec.Parse("T=a.onnx=ow0"));
             Assert.Equal(0.5, AgentSpec.Parse("T=a.onnx=af0.5").AnswerFairness);
-            Assert.Equal(0, plain.AnswerFairness);
+            Assert.Equal((1.0, 1.0), (plain.AnswerFairness, plain.PartnerFairness));
+            Assert.Equal((0.0, 0.5), (AgentSpec.Parse("T=a.onnx=af0").AnswerFairness, AgentSpec.Parse("T=a.onnx=pf0.5").PartnerFairness));
+            Assert.EndsWith("af0 pf0.5", AgentSpec.Parse("T=a.onnx=af0=pf0.5").ToString());
             AgentSpec answers = AgentSpec.Parse("T=a.onnx=am0.01=noco");
             Assert.Equal((0.01, false), (answers.AnswerMargin, answers.Counters));
             Assert.Equal((0.002, true), (plain.AnswerMargin, plain.Counters));
@@ -160,17 +162,18 @@ namespace Tests
             var net = new StateValueNet(PlainModelPath, provider: InferenceProvider.Cpu);
             foreach (string kind in new[] { "is", "d2", "c1.414" })
             {
-                Agent agent = AgentSpec.Parse($"T={PlainModelPath}={kind}=om0.02=on1=ow4=o22=am0.02=noco=o31=af0.5=oc2=op8").Create(1, start, net, 16, 0);
+                Agent agent = AgentSpec.Parse($"T={PlainModelPath}={kind}=om0.02=on1=ow4=o22=am0.02=noco=o31=af0.5=oc2=op8=pf0.25").Create(1, start, net, 16, 0);
                 MCTSAgent search = agent switch { InformationSetMCTSAgent i => i.Search, DeterminizedMCTSAgent d => d.Search, _ => (MCTSAgent)agent };
                 Assert.Equal((true, 0.02f, 1, 4, true), (search.Offers.Enabled, search.Offers.Margin, search.Offers.MaxPerTurn, search.Offers.Worlds, search.Offers.TwoForTwo));
                 Assert.Equal((0.02f, false, true, 0.5f), (search.AnswerMargin, search.Offers.Counters, search.Offers.ThreeForOne, search.AnswerFairness));
-                Assert.Equal((2, 8), (search.Offers.MaxCards, search.Offers.Prune));
+                Assert.Equal((2, 8, 0.25f), (search.Offers.MaxCards, search.Offers.Prune, search.Offers.PartnerFairness));
                 // An agent with the defaults gets the defaults of TradeOffers
                 Agent plainAgent = AgentSpec.Parse($"T={PlainModelPath}={kind}").Create(1, start, net, 16, 0);
                 MCTSAgent plainSearch = plainAgent switch { InformationSetMCTSAgent i => i.Search, DeterminizedMCTSAgent d => d.Search, _ => (MCTSAgent)plainAgent };
                 TradeOffers defaults = new TradeOffers();
                 Assert.Equal((defaults.Margin, defaults.MaxCards, defaults.Prune, defaults.Counters, defaults.Worlds, defaults.MaxPerTurn),
                     (plainSearch.Offers.Margin, plainSearch.Offers.MaxCards, plainSearch.Offers.Prune, plainSearch.Offers.Counters, plainSearch.Offers.Worlds, plainSearch.Offers.MaxPerTurn));
+                Assert.Equal((defaults.PartnerFairness, new MCTSAgent(1, start, valueNet: net).AnswerFairness), (plainSearch.Offers.PartnerFairness, plainSearch.AnswerFairness));
             }
             Assert.False(((InformationSetMCTSAgent)AgentSpec.Parse($"T={PlainModelPath}=is=nooffers").Create(1, start, net, 16, 0)).Search.Offers.Enabled);
 

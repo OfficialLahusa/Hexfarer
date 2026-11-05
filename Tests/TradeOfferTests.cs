@@ -83,6 +83,22 @@ namespace Tests
         }
 
         [Fact]
+        public void AnOfferExpectsFairPartners()
+        {
+            // The offerer gains 0.05 from an ore, a partner only 0.01 from a lumber: fair partners say no
+            (GameState state, sbyte active) = MainPhase();
+            foreach (PlayerState player in state.Players) player.ResourceCards = Cards((Ore, 1));
+            state.Players[active].ResourceCards = Cards((Lumber, 1));
+            double[] Lopsided(IReadOnlyList<GameState> states) => states.SelectMany(s => Enumerable.Range(0, 4).Select(p =>
+                p == active ? 0.05 * s.Players[p].ResourceCards.Get(Ore) : 0.01 * s.Players[p].ResourceCards.Get(Lumber))).ToArray();
+            Func<int, IReadOnlyList<GameState>> worlds = n => Enumerable.Repeat(state, n).ToList();
+
+            OfferTradeAction? unfair = new TradeOffers { PartnerFairness = 0 }.Decide(state, active, worlds, Lopsided);
+            Assert.Equal("L1B0W0G0O0>L0B0W0G0O1", unfair is null ? "none" : Terms((unfair.Give, unfair.Get)));
+            Assert.Null(new TradeOffers().Decide(state, active, worlds, Lopsided));
+        }
+
+        [Fact]
         public void PruningCutsThePositionsAnOfferIsJudgedOn()
         {
             (GameState state, sbyte active) = MainPhase();
@@ -182,6 +198,12 @@ namespace Tests
             // Without seat 3 among the recipients only seat 1's trades count
             double[] withoutThree = TradeOffers.ExpectedGains(worlds, 0, To(1, 2), [lumberForOre], Values);
             Assert.Equal((0.02 + 0.02 + 0) / 3, withoutThree[0], 9);
+
+            // Partners who need twice the offerer's gain: seat 3 (0.05 against 0.05) says no, seat 1 (0.05 against 0.02) yes
+            double[] fair = TradeOffers.ExpectedGains(worlds, 0, To(1, 2, 3), [lumberForOre], Values, partnerFairness: 2);
+            Assert.Equal((0.02 + 0.02 + 0) / 3, fair[0], 9);
+            // As much as the offerer gains is enough for seat 3
+            Assert.Equal(gains[0], TradeOffers.ExpectedGains(worlds, 0, To(1, 2, 3), [lumberForOre], Values, partnerFairness: 1)[0], 9);
         }
         #endregion
 
@@ -350,6 +372,7 @@ namespace Tests
                 foreach (Agent agent in agents)
                 {
                     search.Offers.Margin = 0;
+                    search.Offers.PartnerFairness = 0;
                     if (agent.Act(new GameState(state)) is not OfferTradeAction offer) continue;
                     offers++;
                     Assert.True(offer.IsValidFor(state), $"{offer} is not legal");

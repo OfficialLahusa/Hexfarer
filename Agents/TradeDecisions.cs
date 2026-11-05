@@ -15,6 +15,12 @@ namespace Agents
         // A trade has to be better than this to be worth it, so agents don't trade for noise in the value
         internal const float ValueMargin = 0.002f, HandMargin = 0.15f;
 
+        /// <summary>
+        /// The share of the offerer's gain a value-net bot needs by default to accept an offer: as much as the offerer gains
+        /// (it played best at a table with free trade and is far harder to exploit by lopsided offers)
+        /// </summary>
+        public const float DefaultFairness = 1f;
+
         // Victory points short of the win from which agents stop helping a player
         internal const int LeaderDistance = 2;
 

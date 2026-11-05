@@ -63,6 +63,12 @@ namespace Agents
         /// </summary>
         public bool Counters { get; set; } = true;
 
+        /// <summary>
+        /// The share of the agent's gain it expects a partner to need to accept an offer (the fairness the bots answer with
+        /// by default, see TradeDecisions.Decide)
+        /// </summary>
+        public float PartnerFairness { get; set; } = TradeDecisions.DefaultFairness;
+
         // The terms offered this turn, forgotten when a turn starts without offers
         private readonly List<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> _offered = [];
 
@@ -93,7 +99,7 @@ namespace Agents
 
             double[] worth = utilities == null || worlds == null
                 ? candidates.Select(c => (double)(TradeDecisions.HandValue(After(hand, c.give, c.get)) - TradeDecisions.HandValue(hand))).ToArray()
-                : Pruned(worlds(Math.Max(1, Worlds)), candidates, Prune, (w, c) => ExpectedGains(w, player, recipients, c, utilities));
+                : Pruned(worlds(Math.Max(1, Worlds)), candidates, Prune, (w, c) => ExpectedGains(w, player, recipients, c, utilities, PartnerFairness));
             double margin = utilities == null || worlds == null ? TradeDecisions.HandMargin : Margin;
 
             int best = -1;
@@ -188,7 +194,8 @@ namespace Agents
         /// the asked cards and would accept, if it beats the margin of a pick; else 0 (the offer is cancelled)
         /// </summary>
         internal static double[] ExpectedGains(IReadOnlyList<GameState> worlds, int player, byte recipients,
-            IReadOnlyList<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> candidates, Func<IReadOnlyList<GameState>, double[]> utilities)
+            IReadOnlyList<(CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)> candidates, Func<IReadOnlyList<GameState>, double[]> utilities,
+            double partnerFairness = 0)
         {
             List<GameState> states = [];
             List<(int world, int candidate, int partner, int state)> rows = [];
@@ -218,8 +225,8 @@ namespace Agents
             foreach ((int w, int c, int partner, int s) in rows)
             {
                 int before = baseState[w] * players, after = s * players;
-                bool accepts = values[after + partner] > values[before + partner] + TradeDecisions.ValueMargin;
-                double gain = values[after + player] - values[before + player];
+                double gain = values[after + player] - values[before + player], partnerGain = values[after + partner] - values[before + partner];
+                bool accepts = partnerGain > TradeDecisions.ValueMargin && partnerGain >= partnerFairness * gain;
                 if (accepts && gain > TradeDecisions.ValueMargin && gain > best[w, c]) best[w, c] = gain;
             }
             for (int c = 0; c < candidates.Count; c++)

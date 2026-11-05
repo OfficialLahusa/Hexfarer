@@ -312,6 +312,7 @@ namespace Tests
         {
             InformationSetMCTSAgent agent = NewAgent(truth, beliefs.Observer, net, fullKnowledge, iterations: 32);
             agent.Search.Offers.Margin = 0;
+            agent.Search.Offers.PartnerFairness = 0;
             agent.ResetTo(truth, beliefs);
             Action move = agent.Act(new GameState(truth));
             return (move, agent.LastTree is ISMCTSTree tree ? Shape(tree) : null);
@@ -321,6 +322,7 @@ namespace Tests
         {
             MCTSAgent search = new MCTSAgent((sbyte)beliefs.Observer, truth, valueNet: Nets.Value[net], iterationLimit: 8, leavesPerBatch: 8, parallelSelection: false);
             search.Offers.Margin = 0;
+            search.Offers.PartnerFairness = 0;
             DeterminizedMCTSAgent agent = new DeterminizedMCTSAgent(search, truth, determinizations: 2, seed: 6);
             agent.ResetTo(truth, beliefs);
             return agent.Act(new GameState(truth));
