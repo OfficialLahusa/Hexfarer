@@ -83,6 +83,8 @@ namespace Agents.MCTS
 
         bool ISearchTree.RootHasPolicyPriors => RootNode.HasPolicyPriors;
 
+        bool ISearchTree.RootExpanded => RootNode.Children.Count > 0 || RootState.HasEnded;
+
         void ISearchTree.SetRootPriors(float[] priors) => ApplyPriors(RootNode, priors);
 
         SearchLeaf ISearchTree.SelectLeaf()
@@ -117,6 +119,9 @@ namespace Agents.MCTS
 
         public Action GetMostPromisingMove()
         {
+            // Without moves (a search cancelled before the root was expanded) the first legal move
+            if (RootNode.Children.Count == 0) return HandOut(GetValidActions(RootState)[0]);
+
             // Return the child with the highest visit count
             MCTSNode bestChild = RootNode.Children.OrderByDescending(c => c.VisitCount).First();
             return HandOut(bestChild.LastAction!);

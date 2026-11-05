@@ -66,6 +66,11 @@ namespace Agents.MCTS
         public int LeavesPerBatch { get; }
 
         /// <summary>
+        /// Batches a search may run past its limit until the root has its moves (three are enough in leaf mode)
+        /// </summary>
+        public const int MaxBatchesForRoot = 16;
+
+        /// <summary>
         /// Dirichlet noise mixed into the root's priors at the start of each search (self-play exploration, needs a policy
         /// head): the noise's weight, 0 for none, and its total concentration (alpha per move = concentration / moves)
         /// </summary>
@@ -114,7 +119,7 @@ namespace Agents.MCTS
 
         /// <summary>
         /// Searches until the time or iteration limit (0 for none, rounded up to whole batches) or until the token is cancelled
-        /// (after the batch in progress)
+        /// (after the batch in progress); past the limit until the root has its moves (see MaxBatchesForRoot)
         /// </summary>
         public void Run(ISearchTree tree, double timeLimitSeconds, long iterationLimit, CancellationToken cancellation = default)
         {
@@ -140,6 +145,7 @@ namespace Agents.MCTS
             Task<BatchResults>? evaluation = null;
 
             long iterationCounter = 0;
+            int batchesForRoot = 0;
             do
             {
                 LeafBatch selectedBatch = SelectBatch(tree);
@@ -161,8 +167,11 @@ namespace Agents.MCTS
 
                 iterationCounter += LeavesPerBatch;
             }
-            while ((iterationLimit > 0 ? iterationCounter < iterationLimit : stopwatch.Elapsed.TotalSeconds < timeLimitSeconds)
-                && !cancellation.IsCancellationRequested);
+            while (!cancellation.IsCancellationRequested
+                && ((iterationLimit > 0 ? iterationCounter < iterationLimit : stopwatch.Elapsed.TotalSeconds < timeLimitSeconds)
+                    // A budget of a batch or two ends before the root is expanded (a new leaf is evaluated first, and a batch's
+                    // results arrive after the next is selected): go on until it is, so there is a move to pick
+                    || !tree.RootExpanded && batchesForRoot++ < MaxBatchesForRoot));
 
             _evaluationWaitTime.Start();
             BatchResults lastResults = await evaluation.ConfigureAwait(false);

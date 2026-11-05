@@ -39,6 +39,11 @@ namespace Agents.MCTS
         bool RootHasPolicyPriors { get; }
 
         /// <summary>
+        /// Whether the root has its moves (or the game has ended): a search doesn't end before, so it always has a move to pick
+        /// </summary>
+        bool RootExpanded { get; }
+
+        /// <summary>
         /// The root's priors, in the order of MCTSTree.GetValidActions(RootState)
         /// </summary>
         void SetRootPriors(float[] priors);

@@ -302,6 +302,8 @@ namespace Agents.MCTS
 
         public bool RootHasPolicyPriors => RootNode.HasLogits;
 
+        public bool RootExpanded => RootNode.Children.Count > 0 || RootState.HasEnded;
+
         public void SetRootPriors(float[] priors) => RootNode.SetLogits(MCTSTree.GetValidActions(RootState), priors);
 
         public SearchLeaf SelectLeaf()
@@ -483,9 +485,10 @@ namespace Agents.MCTS
         /// </summary>
         public Action GetMostPromisingMove(IReadOnlyList<Action>? legal = null)
         {
-            ISNode best = RootNode.Children.Where(child => legal == null || legal.Any(move => move.IsSameDecision(child.Move!)))
-                .MaxBy(child => child.Visits) ?? throw new InvalidOperationException("The root has no legal moves; search first.");
-            Action move = best.Move!.Clone();
+            ISNode? best = RootNode.Children.Where(child => legal == null || legal.Any(move => move.IsSameDecision(child.Move!)))
+                .MaxBy(child => child.Visits);
+            // Without moves (a search cancelled before the root was expanded) the first legal move
+            Action move = (best?.Move ?? legal?.FirstOrDefault() ?? MCTSTree.GetValidActions(RootState)[0]).Clone();
             if (move is IReplayAction replay) replay.ClearHistory();
             return move;
         }
