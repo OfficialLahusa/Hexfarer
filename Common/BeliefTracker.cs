@@ -216,12 +216,15 @@ namespace Common
             switch (LearnsFromTrades ? action : null)
             {
                 case OfferTradeAction offer:
+                    // The offerer gives Give
                     Holds(offer.PlayerIndex, offer.Give);
                     break;
                 case RespondToTradeAction { Accept: true } accept when before.Turn.PendingTrade is TradeOffer pending:
+                    // Who accepts gives what the offer asks for
                     Holds(accept.PlayerIndex, pending.Get);
                     break;
                 case CounterTradeAction counter:
+                    // A counteroffer is stated in the offerer's terms: who counters gives its Get
                     Holds(counter.PlayerIndex, counter.Get);
                     break;
             }

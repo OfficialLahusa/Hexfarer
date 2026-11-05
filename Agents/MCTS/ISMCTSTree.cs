@@ -136,8 +136,10 @@ namespace Agents.MCTS
         /// </summary>
         internal ISNode? Follow(Action played, sbyte observer, bool branchHiddenOutcomes)
         {
+            // The move's node; a move without a random outcome ends here
             ISNode? move = Find(Volatile.Read(ref _children), played);
             if (move == null || !move.IsChance) return move;
+            // The outcome as the seat saw it (in full only if the tree branches on hidden outcomes), as the search keys its children
             Action seen = branchHiddenOutcomes ? played : played.RedactedFor(observer);
             foreach (ISNode outcome in move.Children)
                 if (outcome.Move is IOutputRandomnessAction known && known.HasSameOutcome(seen)) return outcome;
@@ -160,10 +162,12 @@ namespace Agents.MCTS
             uint resolved = Scaled(_resolved, factor);
             lock (_lock)
             {
+                // Score sums by the same ratio as their rounded count, so each player's mean score stays exactly
                 double keep = _resolved == 0 ? 0 : (double)resolved / _resolved;
                 for (int player = 0; player < _scores.Length; player++) _scores[player] *= keep;
                 _resolved = resolved;
             }
+            // Visits and availability by the same factor, never fewer visits than resolved iterations
             _visits = Math.Max(Scaled(_visits, factor), resolved);
             _availability = Scaled(_availability, factor);
             foreach (ISNode child in Volatile.Read(ref _children)) child.Decay(factor);
@@ -274,6 +278,7 @@ namespace Agents.MCTS
         public ISMCTSTree(GameState truth, BeliefTracker beliefs, double exploration = 1.414, int seed = 0, bool fullKnowledge = false, ISNode? root = null)
         {
             MCTSTree.RefuseOpenTrade(truth);
+            // A reused node becomes the root: without its parent, backpropagation stops there
             RootNode = root ?? new ISNode(null, null, false);
             RootNode.Detach();
             _beliefs = new BeliefTracker(beliefs);
@@ -487,6 +492,7 @@ namespace Agents.MCTS
         /// </summary>
         public Action GetMostPromisingMove(IReadOnlyList<Action>? legal = null)
         {
+            // The most visited child that is one of the legal moves (all children without them)
             ISNode? best = RootNode.Children.Where(child => legal == null || legal.Any(move => move.IsSameDecision(child.Move!)))
                 .MaxBy(child => child.Visits);
             // Without moves (a search cancelled before the root was expanded) the first legal move

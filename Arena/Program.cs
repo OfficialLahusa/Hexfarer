@@ -149,6 +149,7 @@ namespace Arena
 
             if (challenger == null || baseline == null)
                 throw new ArgumentException("A duel needs --challenger and --baseline.");
+            // A table always has free trade; without --sprt it tests a win rate of 25% against 28%
             if (table)
             {
                 settings = settings with { FreeTrade = true };

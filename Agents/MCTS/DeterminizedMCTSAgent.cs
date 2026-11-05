@@ -72,6 +72,8 @@ namespace Agents.MCTS
             bool offers = _search.Offers.Enabled, counters = _search.Offers.Counters;
             _search.IterationLimit = perWorldIterations;
             _search.TimeLimitSeconds = seconds / worlds.Count;
+            // Each world's search would judge offers and counteroffers as if that world's hands were the true ones; they are
+            // judged over the belief worlds instead (offers above, counteroffers after the vote), so they are off until the votes are in
             _search.Offers.Enabled = false;
             _search.Offers.Counters = false;
 
@@ -117,6 +119,7 @@ namespace Agents.MCTS
             }
             Action best = totals.OrderByDescending(t => t.weight).First().move.Clone();
             if (best is IReplayAction replay) replay.ClearHistory();
+            // A rejection the worlds voted for becomes a counteroffer if one is worth it over worlds drawn from the beliefs
             if (best is RespondToTradeAction { Accept: false } && _search.DecideCounter(state, beliefWorlds) is CounterTradeAction counter) return counter;
             return best;
         }

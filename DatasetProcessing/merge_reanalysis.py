@@ -67,6 +67,7 @@ def merge(parts, output_dir: str):
         raise ValueError(f"{output_dir} already exists")
     read = [read_part(part) for part in parts]
     metadata = [part[0] for part in read]
+    # The same token encoding, the same rows and the same collection, or the parts' rows wouldn't line up
     if any(layout != read[0][1] for _, layout, *_ in read):
         raise ValueError("The parts encode the moves differently (policy_layout.json)")
     rows = metadata[0]["result"]["rows"]
@@ -76,11 +77,13 @@ def merge(parts, output_dir: str):
     if len(seeds) != 1:
         raise ValueError(f"The parts come from different collections (seeds {sorted(seeds)})")
 
+    # How many parts searched each row: at most one
     owners = np.stack([searched for *_, searched in read]).sum(axis=0)
     if np.any(owners > 1):
         row = int(np.flatnonzero(owners > 1)[0])
         raise ValueError(f"Row {row} was searched in more than one part")
 
+    # A row's moves in the merge: the sum over the parts, of which only its owner has any
     counts = sum(np.diff(offsets) for _, _, offsets, _, _ in read)
     merged_offsets = np.concatenate([[0], np.cumsum(counts)]).astype(np.int64)
     moves = int(merged_offsets[-1])
@@ -94,6 +97,7 @@ def merge(parts, output_dir: str):
             raise ValueError(f"The parts store {name} with different types")
         outputs[name] = np.empty((moves,) + shape[1:], dtype=dtype)
     for part, (_, _, offsets, part_q, searched) in zip(parts, read):
+        # The root values of the rows this part searched
         root_q[searched] = part_q[searched]
         # Move j of the part belongs to row r (offsets[r] <= j < offsets[r + 1]) and goes to merged_offsets[r] + j - offsets[r]
         shift = np.repeat(merged_offsets[:-1] - offsets[:-1], np.diff(offsets))
@@ -101,6 +105,7 @@ def merge(parts, output_dir: str):
         for name in MOVE_ARRAYS:
             outputs[name][destination] = np.load(os.path.join(part, f"{name}.npy"))
 
+    # Written as .partial and renamed at the end, so an unfinished merge is never taken for a finished one
     partial = output_dir + ".partial"
     if os.path.exists(partial):
         shutil.rmtree(partial)

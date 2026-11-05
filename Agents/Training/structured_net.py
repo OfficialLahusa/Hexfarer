@@ -195,5 +195,7 @@ class StructuredValueNet(nn.Module):
 
     def policy_logits(self, query, rows, tokens, weights):
         """Logits of the moves, one after another, as in StateValueNet"""
+        # Per move the weighted sum of its token embeddings (empty tokens weigh 0)
         embedded = (self.policy_embeddings(tokens.clamp(min=0)) * (weights * (tokens >= 0))[..., None]).sum(dim=1)
+        # Dot product with its row's query for its move type
         return (query[rows, tokens[:, 0].clamp(min=0)] * embedded).sum(dim=-1)

@@ -56,12 +56,14 @@ namespace Arena
                     "leaf" => result with { EvaluateNewLeaves = true },
                     "noleaf" => result with { EvaluateNewLeaves = false },
                     "searchforced" => result with { PlayForcedMovesAtOnce = false },
+                    // Trade options (see the summary); no offers means no counteroffers either
                     "nooffers" => result with { MakeOffers = false, Counters = false },
                     "o22" => result with { TwoForTwo = true },
                     "co" => result with { Counters = true },
                     "noco" => result with { Counters = false },
                     "o31" => result with { ThreeForOne = true },
                     "nolearn" => result with { LearnsFromTrades = false },
+                    // Options with a number after a two-letter prefix, before the one-letter ones (pf would otherwise be read as p)
                     ['o', 'c', ..] => int.Parse(option[2..], CultureInfo.InvariantCulture) is int most and (2 or 3) ? result with { MaxCards = most }
                         : throw new ArgumentException($"Option \"{option}\" in agent \"{spec}\" allows 2 or 3 cards a side."),
                     ['o', 'p', ..] => result with { Prune = int.Parse(option[2..], CultureInfo.InvariantCulture) },
@@ -104,6 +106,7 @@ namespace Arena
             if (!EvaluateNewLeaves) options.Add("noleaf");
             if (!PlayForcedMovesAtOnce) options.Add("searchforced");
             if (ReuseDecay != 1) options.Add($"g{ReuseDecay.ToString(CultureInfo.InvariantCulture)}");
+            // Trade options only where they differ from the defaults
             if (!MakeOffers) options.Add("nooffers");
             if (OfferMargin != 0.005) options.Add($"om{OfferMargin.ToString(CultureInfo.InvariantCulture)}");
             if (MaxOffers != 3) options.Add($"on{MaxOffers}");
@@ -133,6 +136,7 @@ namespace Arena
                 UniformPriors = UniformPriors, FirstPlayReduction = FirstPlayReduction, NormalizeValues = NormalizeValues ?? true, ReuseTree = ReuseTree,
                 EvaluateNewLeaves = EvaluateNewLeaves, PlayForcedMovesAtOnce = PlayForcedMovesAtOnce
             };
+            // Offers and counteroffers (TradeOffers), then the answers (MCTSAgent)
             search.Offers.Enabled = MakeOffers;
             search.Offers.Margin = (float)OfferMargin;
             search.Offers.MaxPerTurn = MaxOffers;

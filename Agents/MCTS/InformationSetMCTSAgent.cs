@@ -106,16 +106,22 @@ namespace Agents.MCTS
 
             // Trades between players are not part of the search tree: answers, partner picks, counteroffers and offers are
             // decided here, before and outside the search (see MCTSAgent.Act)
+            // An answer or pick on one world drawn from the view; a counteroffer instead of a rejection if one is worth it over
+            // several worlds
             if (_search.DecideTrade(FullKnowledge ? state : _beliefs.Determinize(_beliefs.View(state), _random)) is Action trade)
             {
                 return trade is RespondToTradeAction { Accept: false }
                     && _search.DecideCounter(state, count => FullKnowledge ? [state] : Worlds(state, count)) is CounterTradeAction counter ? counter : trade;
             }
+            // On turn: an offer of its own, if one is worth it over the worlds
             if (_search.DecideOffer(state, count => FullKnowledge ? [state] : Worlds(state, count)) is OfferTradeAction offer) return offer;
 
+            // A single legal move needs no search
             List<Action> legal = MCTSTree.GetValidActions(state);
             if (legal.Count == 1) return legal[0].Clone();
 
+            // Go on with the subtree the game reached since the last search (if HandleAction could follow every move), its
+            // statistics scaled down first if a decay is set
             ISNode? reused = ReuseTree ? _reusable : null;
             if (reused != null && ReuseDecay < 1) reused.Decay(ReuseDecay);
             ISMCTSTree tree = new ISMCTSTree(state, _beliefs, _search.ExplorationParameter, _random.Next(), FullKnowledge, reused)
@@ -127,7 +133,9 @@ namespace Agents.MCTS
             LastTree = tree;
             _searched = new GameState(state);
             _search.RunSearch(tree, cancellation);
+            // Kept for the next decision; HandleAction walks it down with every move played
             _reusable = ReuseTree ? tree.RootNode : null;
+            // Only among the moves legal now: a reused root keeps every child it ever had
             return tree.GetMostPromisingMove(legal);
         }
 

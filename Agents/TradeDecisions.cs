@@ -36,25 +36,32 @@ namespace Agents
         {
             if (state.Turn.PendingTrade is not TradeOffer offer) return null;
 
+            // The agent's answer is due
             if (offer.NextResponder == player)
             {
                 RespondToTradeAction reject = new RespondToTradeAction(player, false), accept = new RespondToTradeAction(player, true);
+                // Without the asked cards it can only turn the offer down
                 if (!accept.IsValidFor(state)) return reject;
 
                 // No help for a player who is about to win
                 if (state.Players[offer.Offerer].VictoryPoints.Total >= state.Settings.VictoryPoints - LeaderDistance) return reject;
 
+                // The position if it accepts and the offerer picks it
                 GameState traded = AfterTrade(state, offer.Offerer, player, offer.Give, offer.Get);
                 if (!IsBetter(traded, state, player, value, margin)) return reject;
+                // Fair answers: its own gain has to be at least that share of the offerer's, by the same value function
                 if (value != null && fairness > 0
                     && value(traded, player) - value(state, player) < fairness * (value(traded, offer.Offerer) - value(state, offer.Offerer))) return reject;
                 return accept;
             }
 
+            // The agent's own offer and every answer is in: pick a partner or let the offer go
             if (offer.Offerer == player && offer.NextResponder == null)
             {
+                // Letting it go keeps the position; a partner has to beat that, and the best one wins
                 Action best = new CancelTradeAction(player);
                 GameState bestState = state;
+                // One confirm per player who accepted
                 foreach (Action confirm in ConfirmTradeAction.GetActionsForState(state, player))
                 {
                     GameState after = new GameState(state);
@@ -76,6 +83,7 @@ namespace Agents
         /// </summary>
         internal static GameState AfterTrade(GameState state, int offerer, int partner, CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)
         {
+            // Moves the cards directly as ConfirmTradeAction.Transfer does, without needing an open offer with an accepted partner
             GameState after = new GameState(state);
             after.Turn.PendingTrade = null;
             after.Players[offerer].ResourceCards.Remove(give);

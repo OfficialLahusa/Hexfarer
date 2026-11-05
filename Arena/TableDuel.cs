@@ -37,9 +37,11 @@ namespace Arena
         /// </summary>
         public GroupStatistics Run(CancellationToken cancellation = default)
         {
+            // One net for both sides if they use the same file
             var challengerNet = new StateValueNet(settings.Challenger.ModelPath, provider: settings.Provider);
             var baselineNet = settings.Baseline.ModelPath == settings.Challenger.ModelPath
                 ? challengerNet : new StateValueNet(settings.Baseline.ModelPath, provider: settings.Provider);
+            // Parallel games only with an iteration budget; with a time budget they would take each other's compute
             bool iterationBudget = settings.Iterations > 0;
             int parallel = iterationBudget ? Math.Max(1, settings.Parallel) : 1;
             Statistics = GroupStatistics.Of([], S0, S1, settings.Alpha, settings.Beta);
@@ -48,13 +50,16 @@ namespace Arena
                 + (iterationBudget ? $"{settings.Iterations} iterations per decision, {parallel} games at once" : $"{settings.Seconds.ToString(CultureInfo.InvariantCulture)}s per decision")
                 + FormattableString.Invariant($"; SPRT win rate [{S0:P1}, {S1:P1}], at most {settings.MaxGames} games and {settings.MaxDuration.TotalMinutes:F0} min"));
 
+            // The agents' own console output is silenced while the games run
             TextWriter console = Console.Out;
             Console.SetOut(TextWriter.Null);
+            // Stops on cancellation, at the time limit, or when the SPRT decides (Record cancels it)
             using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             stop.CancelAfter(settings.MaxDuration);
             string reason = "all games played";
             try
             {
+                // Game numbers: four per map (game / Seats), the challenger in seat game % Seats
                 var queue = new ConcurrentQueue<int>(Enumerable.Range(0, settings.MaxGames));
                 var threads = Enumerable.Range(0, parallel).Select(_ => new Thread(() =>
                 {
@@ -63,6 +68,7 @@ namespace Arena
                         try
                         {
                             GameResult result = PlayGame(game, challengerNet, baselineNet, stop.Token);
+                            // A game cut short by the stop doesn't count, unless it had ended anyway
                             if (!stop.IsCancellationRequested || result.State.HasEnded)
                                 Record(game, result, stop);
                         }
@@ -94,6 +100,7 @@ namespace Arena
 
         private GameResult PlayGame(int game, StateValueNet challengerNet, StateValueNet baselineNet, CancellationToken cancellation)
         {
+            // The four games of a map share its seed, so they play the same map with the challenger in each seat once
             int challengerSeat = game % Seats;
             Utils.Random.SeedCurrentThread(settings.SeedBase + game / Seats);
             GameState state = new GameState(MapGenerator.GenerateRandomClassic(), Seats);
@@ -108,6 +115,8 @@ namespace Arena
             while (!state.HasEnded && state.Turn.RoundCounter < 300)
             {
                 cancellation.ThrowIfCancellationRequested();
+                // The first seat that can act: the one whose answer or pick is due in an open offer, else the player on turn
+                // or the first who has to discard
                 sbyte acting = 0;
                 for (sbyte player = 0; player < Seats; player++)
                     if (state.CanPlayerAct(player)) { acting = player; break; }
@@ -118,6 +127,7 @@ namespace Arena
                 action.Apply(state);
                 foreach (Agent agent in agents) agent.HandleAction(action);
 
+                // Offers, counteroffers and trades by side, for the game line
                 switch (action)
                 {
                     case OfferTradeAction:
@@ -127,6 +137,7 @@ namespace Arena
                         if (acting == challengerSeat) challengerCounters++; else baselineCounters++;
                         break;
                     case ConfirmTradeAction confirm:
+                        // The offerer confirms; a baseline's trade with the challenger also counts as the challenger's partner trade
                         if (confirm.PlayerIndex == challengerSeat) challengerTrades++;
                         else
                         {
@@ -136,6 +147,7 @@ namespace Arena
                         break;
                 }
             }
+            // A game ends on the winner's turn; a game stopped at 300 rounds has no winner
             return new GameResult(state, challengerSeat, state.HasEnded && state.Turn.PlayerIndex == challengerSeat, stopwatch.Elapsed.TotalSeconds,
                 challengerOffers, challengerTrades, challengerPartner, baselineOffers, baselineTrades, challengerCounters, baselineCounters);
         }
@@ -159,13 +171,16 @@ namespace Arena
                     + $"{state.Turn.RoundCounter} rounds, {result.Seconds:F0}s; offers C {result.ChallengerOffers} ({result.ChallengerTrades} traded), "
                     + $"B {result.BaselineOffers} ({result.BaselineTrades} traded, {result.ChallengerPartner} with C); counters C {result.ChallengerCounters} B {result.BaselineCounters}");
 
+                // The game's slot in its map's group; a group counts once all four games are in
                 bool?[] group = _groups.TryGetValue(game / Seats, out var known) ? known : _groups[game / Seats] = new bool?[Seats];
                 group[game % Seats] = result.ChallengerWon;
                 if (group.Any(won => won == null)) return;
 
+                // The group's score: the share of its four games the challenger won
                 _scores.Add(group.Count(won => won == true) / (double)Seats);
                 Statistics = GroupStatistics.Of(_scores, S0, S1, settings.Alpha, settings.Beta);
                 Write($"group {game / Seats + 1}: {Summary()}");
+                // Decided: the other games stop
                 if (Statistics.Verdict != 0) stop.Cancel();
             }
         }
@@ -210,12 +225,16 @@ namespace Arena
         public static GroupStatistics Of(IReadOnlyList<double> scores, double s0, double s1, double alpha = 0.05, double beta = 0.05)
         {
             int n = scores.Count;
+            // Wald's bounds on the log-likelihood ratio for the error rates alpha and beta
             double lower = Math.Log(beta / (1 - alpha)), upper = Math.Log((1 - beta) / alpha);
             if (n < 2) return new GroupStatistics(n, n == 1 ? scores[0] : 0, 0, 1, 0, lower, upper);
 
+            // Sample variance of the group scores and the 95% interval of their mean
             double mean = scores.Average();
             double variance = scores.Sum(s => (s - mean) * (s - mean)) / (n - 1);
             double half = 1.96 * Math.Sqrt(variance / n);
+            // Log-likelihood ratio of a normal mean s1 against s0, with the variance floored so a run of equal groups can't
+            // decide on its own
             double llr = n * (s1 - s0) * (2 * mean - s0 - s1) / (2 * Math.Max(variance, MinVariance));
             return new GroupStatistics(n, mean, mean - half, mean + half, llr, lower, upper);
         }

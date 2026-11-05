@@ -227,10 +227,14 @@ namespace Agents.MCTS
         {
             // Trades between players are not part of the search tree: they are decided here, before and outside the search, by
             // the value net alone (the position with and without the trade). The tree below never contains a trade.
+            // An open offer it has to act in: its answer or pick, and a counteroffer instead of a rejection if one is worth it.
+            // The open-hand agent sees every hand, so its only world is the true position
             if (DecideTrade(state) is Action trade)
                 return trade is RespondToTradeAction { Accept: false } && DecideCounter(state, _ => [state]) is CounterTradeAction counter ? counter : trade;
+            // On turn: an offer of its own, if one is worth it
             if (DecideOffer(state, _ => [state]) is OfferTradeAction offer) return offer;
 
+            // A single legal move needs no search
             if (PlayForcedMovesAtOnce)
             {
                 List<Action> legal = MCTSTree.GetValidActions(state);
@@ -501,17 +505,21 @@ namespace Agents.MCTS
         public double[] Utilities(IReadOnlyList<GameState> states)
         {
             int dim = _stateVectorizer.FeatureDim, players = MCTSNode.PlayerCount;
+            // One feature buffer for a full batch, reused across decisions (no per-call allocation on the large object heap)
             if (_offerFeatures.Length < UtilityBatch * dim) _offerFeatures = new float[UtilityBatch * dim];
             double[] utilities = new double[states.Count * players];
             for (int start = 0; start < states.Count; start += UtilityBatch)
             {
+                // Positions in this chunk; the rest of the batch stays zero and its outputs are ignored
                 int rows = Math.Min(UtilityBatch, states.Count - start);
                 Span<float> features = _offerFeatures.AsSpan(0, UtilityBatch * dim);
                 features.Clear();
                 for (int i = 0; i < rows; i++)
                     _stateVectorizer.VectorizeInto(states[start + i], features.Slice(i * dim, dim));
+                // Always the full shape [UtilityBatch, dim], whatever the number of positions
                 var input = new DenseTensor<float>(_offerFeatures.AsMemory(0, UtilityBatch * dim), [UtilityBatch, dim]);
 
+                // Utilities as at the search's leaves: win probabilities alone, or mixed with the placements
                 if (_placementWeight == 0)
                 {
                     float[] winProbabilities = _stateValueNet.Run(input);
@@ -520,6 +528,7 @@ namespace Agents.MCTS
                 }
                 else
                 {
+                    // Placements come as four probabilities (1st to 4th) per player
                     (float[] winProbabilities, float[] placements) = _stateValueNet.RunWithPlacements(input);
                     for (int i = 0; i < rows; i++)
                         LeafUtilities(winProbabilities.AsSpan(i * players, players), placements.AsSpan(i * players * 4, players * 4), utilities.AsSpan((start + i) * players, players));

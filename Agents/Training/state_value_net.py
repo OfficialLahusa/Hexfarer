@@ -84,7 +84,9 @@ class StateValueNet(nn.Module):
     def policy_logits(self, query, rows, tokens, weights):
         """Logits der Züge [Züge] aus den Queries [batch, Typen, dim] und den Zügen hintereinander: ihre Zeile im Batch
         [Züge] und ihre Tokens [Züge, Tokens] (-1 = leer) mit ihren Gewichten; der erste Token ist der Zugtyp"""
+        # Pro Zug die gewichtete Summe seiner Token-Embeddings (leere Tokens mit Gewicht 0)
         embedded = (self.policy_embeddings(tokens.clamp(min=0)) * (weights * (tokens >= 0))[..., None]).sum(dim=1)
+        # Skalarprodukt mit der Query seiner Zeile für seinen Zugtyp
         return (query[rows, tokens[:, 0].clamp(min=0)] * embedded).sum(dim=-1)
 
 
@@ -198,6 +200,7 @@ def policy_cross_entropy(model, query, batch):
     mask, targets = batch["policy_mask"], batch["policy_targets"].float()
     rows, slots = batch["policy_rows"], batch["policy_slots"]
     moves = model.policy_logits(query.float(), rows, batch["policy_tokens"], batch["policy_weights"].float())
+    # Jedes Logit an seine Stelle der aufgefüllten Matrix, leere Stellen -inf
     logits = torch.full(mask.shape, float("-inf"), device=moves.device, dtype=moves.dtype).index_put((rows, slots), moves)
     logits = logits.masked_fill(~mask, float("-inf"))
     has_moves = mask.any(dim=1)

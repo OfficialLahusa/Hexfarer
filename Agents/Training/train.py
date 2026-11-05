@@ -196,21 +196,26 @@ class StateDataset(Dataset):
         einem Abwurf von 2486 Zügen im Batch rund 375-mal. Zeilen ohne Policy-Targets haben keine Züge.
         """
         n = len(indices)
+        # Daten ohne Policy-Targets: keine Züge, Targets und Maske mit Breite 0
         if not self.policy:
             return {"policy_tokens": torch.full((0, self.max_tokens), -1, dtype=torch.int64),
                     "policy_weights": torch.zeros((0, self.max_tokens)),
                     "policy_rows": torch.zeros(0, dtype=torch.int64), "policy_slots": torch.zeros(0, dtype=torch.int64),
                     "policy_targets": torch.zeros((n, 0)), "policy_mask": torch.zeros((n, 0), dtype=torch.bool)}
+        # Die Züge einer Zeile liegen in den Arrays am Stück: Anfang und Anzahl pro Zeile
         offsets = self.policy["policy_offsets"]
         starts, counts = offsets[indices], offsets[indices + 1] - offsets[indices]
+        # Zeilen über dem Limit zählen als Zeilen ohne Züge
         if self.policy_max_moves is not None:
             counts = np.where(counts > self.policy_max_moves, 0, counts)
         width = max(int(counts.max()), 1)
         total = int(counts.sum())
+        # Pro Zug seine Zeile im Batch und seine Stelle in ihr (0, 1, ... ab dem ersten Zug der Zeile)
         row_of = np.repeat(np.arange(n, dtype=np.int64), counts)
         slot = np.arange(total, dtype=np.int64) - np.repeat(np.cumsum(counts) - counts, counts)
+        # Und sein Index in den Arrays
         source = np.repeat(starts, counts) + slot
-        # Sortiert aus den MemMaps lesen
+        # Sortiert aus den MemMaps lesen, restore stellt danach die Reihenfolge der Züge wieder her
         order = np.argsort(source, kind="stable")
         restore = np.empty_like(order)
         restore[order] = np.arange(total)
@@ -228,10 +233,12 @@ class StateDataset(Dataset):
         weights = take("policy_weights", np.float32)
         shares = take("policy_targets", np.float32)
         if self.policy_temperature != 1.0:
+            # Hoch 1/T, dann pro Zeile wieder auf 1 normiert (Summe über die Züge jeder Zeile)
             shares = shares ** (1.0 / self.policy_temperature)
             sums = np.zeros(n, dtype=np.float32)
             np.add.at(sums, row_of, shares)
             shares = shares / np.maximum(sums[row_of], 1e-12)
+        # Nur Targets und Maske kommen in die aufgefüllte Matrix, an die Stelle jedes Zugs
         targets[row_of, slot] = shares
         mask[row_of, slot] = True
         return {"policy_tokens": torch.from_numpy(tokens), "policy_weights": torch.from_numpy(weights),
@@ -253,6 +260,7 @@ class MixedDataset(Dataset):
 
     def __getitems__(self, indices):
         indices = np.asarray(indices, dtype=np.int64)
+        # Die Quelle jedes Index; jede Quelle liest ihre Indizes als einen Batch
         source = np.searchsorted(self.offsets, indices, side="right") - 1
         parts = [self.datasets[s].__getitems__(indices[source == s] - self.offsets[s]) for s in np.unique(source)]
         # Die Teile kommen nach Quelle hintereinander; die Zeilen der Züge zählen ab dem Anfang ihres Teils
@@ -269,6 +277,7 @@ class MixedDataset(Dataset):
                 tokens = max(t.shape[1] for t in tensors)
                 tensors = [F.pad(t, [0, tokens - t.shape[1]], value=-1 if key == "policy_tokens" else 0) for t in tensors]
             elif key == "policy_rows":
+                # Um die Zeilen der Teile davor verschoben; policy_slots bleiben, die Stelle zählt innerhalb der Zeile
                 tensors = [t + int(before) for t, before in zip(tensors, rows_before)]
             elif key in ("policy_targets", "policy_mask"):
                 # Die Quellen füllen auf verschieden viele Züge auf (Daten ohne Policy auf keinen)
