@@ -59,6 +59,9 @@ version, its adapter disappears.
     or `truth` (every hand, for open-hand agents).
   - A referee that can't serve a game the agent supports, or won't hand out what it needs, doesn't start the game. It
     labels every game with what each seat received.
+  - Under `world` and `truth`, every `step` also carries `state`: the state before the move, as the seat may see it.
+    An agent that keeps its own copy of the game can then check it before following each move, and take over the
+    referee's state where the two engines' rules differ (the referee decides the game).
 - **`n`:** counts the moves of the game, so answers and steps can't be mixed up.
 - **`decide` answer:** a copy of one entry of `legal`. The referee matches it against its own list, as Catanatron's does,
   so an encoding that only looks right can't slip through.

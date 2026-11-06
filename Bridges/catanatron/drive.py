@@ -84,10 +84,11 @@ def play(game, osas, write, game_id, codes):
     state = game.state
     times = {seat: [0.0, 0] for seat in range(4)}
 
-    def tell(message):
+    def tell(message, before=None):
+        # The log has the state before each move in its decide; the agents (which need the full state) get it with the step
         write(message)
         for osa in osas.values():
-            osa.send(message)
+            osa.send(message if before is None else {**message, "state": before})
 
     board = osp_board.board(state.board.map, state.board.robber_coordinate)
     full = encoder.state()
@@ -123,14 +124,14 @@ def play(game, osas, write, game_id, codes):
                 discarded = card_set(cards)
             times[seat][0] += time.perf_counter() - start
             times[seat][1] += 1
-            tell({"type": "step", "game_id": game_id, "n": n, "seat": seat, "action": ["discard", discarded], "result": None})
+            tell({"type": "step", "game_id": game_id, "n": n, "seat": seat, "action": ["discard", discarded], "result": None}, decide["state"])
         else:
             action = encoder.decode(move, game.playable_actions) if move is not None else state.current_player().decide(game, game.playable_actions)
             times[seat][0] += time.perf_counter() - start
             times[seat][1] += 1
             taken = encoder.monopoly_taken(action) if action.action_type == ActionType.PLAY_MONOPOLY else None
             record = game.execute(action)
-            tell({"type": "step", "game_id": game_id, "n": n, "seat": seat, "action": encoder.move(record.action), "result": encoder.result(record, taken)})
+            tell({"type": "step", "game_id": game_id, "n": n, "seat": seat, "action": encoder.move(record.action), "result": encoder.result(record, taken)}, decide["state"])
         n += 1
 
     winner = game.winning_color()

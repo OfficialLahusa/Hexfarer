@@ -3,7 +3,7 @@ Prepares a stopped match run (drive.py) to go on: keeps the results of the maps 
 moves the results of maps left unfinished to partial.jsonl (a map counts only as a whole), and prints the unfinished
 maps of the run's range split over PARALLEL drivers, one --maps value per line.
 
-Usage: python resume.py RUN_DIR FIRST END PARALLEL [--boards boards.jsonl]
+Usage: python resume.py RUN_DIR FIRST END PARALLEL [--boards boards.jsonl] [--redo-lost]
 """
 
 import argparse
@@ -36,6 +36,7 @@ def main(argv=None):
     parser.add_argument("end", type=int)
     parser.add_argument("parallel", type=int)
     parser.add_argument("--boards", default=None)
+    parser.add_argument("--redo-lost", action="store_true", help="also play again the maps where an agent's copy lost a game")
     args = parser.parse_args(argv)
     boards = args.boards or os.path.join(os.path.dirname(os.path.abspath(args.run_dir)), "boards-70000.jsonl")
     with open(boards, encoding="utf-8") as file:
@@ -48,6 +49,13 @@ def main(argv=None):
         for r in results:
             rotations[r["map_seed"]].add(r["rotation"])
     complete = {seed for seed, done in rotations.items() if done == {0, 1, 2, 3}}
+    if args.redo_lost:
+        # A map where an agent's copy lost the game (it then played the first legal move) is played again
+        for path in glob.glob(os.path.join(args.run_dir, "agent-*.log")):
+            with open(path, encoding="utf-8", errors="replace") as file:
+                for line in file:
+                    if line.startswith('{"type":"stats"') and json.loads(line)["lost"]:
+                        complete.discard(int(json.loads(line)["game_id"].split("-")[0][3:]))
 
     # Unfinished maps leave the results (into partial.jsonl), so every map counts with all four rotations or not at all
     with open(os.path.join(args.run_dir, "partial.jsonl"), "a", encoding="utf-8") as partial:

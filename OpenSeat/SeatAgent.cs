@@ -90,6 +90,20 @@ namespace OpenSeat
         private void Step(JsonNode step)
         {
             if (_replica == null || _lost) return;
+            // With the full state the step carries the referee's state before the move: the copy takes over where the
+            // rules differ, so it can follow moves that depend on it (a discard of cards Hexfarer's bank wouldn't have
+            // given, any move after Hexfarer's rules ended the game)
+            if (step["state"] is JsonNode before && _replica.FirstDifference(before, $"move {step["n"]}") is (string differs, string why))
+            {
+                _patches++;
+                if (!_replica.Patch(before))
+                {
+                    _lost = true;
+                    log.WriteLine($"{_gameId}: lost the game: can't take over {differs}: {why}");
+                    return;
+                }
+                _agent!.ResetToState(_replica.State);
+            }
             if (_replica.Follow(step) is (string kind, string detail))
             {
                 // The copy can't follow (a rule difference that changes the board): it's no longer the referee's game

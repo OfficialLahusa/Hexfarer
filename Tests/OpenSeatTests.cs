@@ -93,6 +93,73 @@ namespace Tests
             Assert.Equal((1, 1), (illegal.Diverged, illegal.Counts.GetValueOrDefault("step: Hexfarer doesn't allow end_turn")));
         }
 
+        /// <summary>
+        /// A recorded game's messages for one seat as the driver sends them to an agent with the full state: its before,
+        /// every step with the state before the move (from that move's decide), its own decisions, the after
+        /// </summary>
+        private static IEnumerable<JsonNode> AsSentTo(string game, int seat)
+        {
+            Dictionary<int, JsonNode> states = [];
+            foreach (JsonNode recorded in Replay.Read(Fixture).Where(m => m["game_id"]!.GetValue<string>() == game))
+            {
+                JsonNode message = recorded.DeepClone();
+                switch (message["type"]!.GetValue<string>())
+                {
+                    case "before": message["seat"] = seat; yield return message; break;
+                    case "decide":
+                        states[Int(message["n"])] = message["state"]!.DeepClone();
+                        if (Int(message["seat"]) == seat) yield return message;
+                        break;
+                    case "step": message["state"] = states[Int(message["n"])].DeepClone(); yield return message; break;
+                    default: yield return message; break;
+                }
+            }
+        }
+
+        [Fact]
+        public void TheAgentTakesOverTheRefereesStateBeforeFollowingAMove()
+        {
+            // Another seat's move whose state before it holds a hand Hexfarer's copy doesn't (as after Catanatron's bank
+            // shortage): the copy takes it over at that step, before its own next decision, and follows on
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.Cpu);
+            StringWriter log = new();
+            SeatAgent agent = new(net, 16, 0, log);
+            bool changed = false;
+            foreach (JsonNode message in AsSentTo("catanatron-100", 0))
+            {
+                if (!changed && message["type"]!.GetValue<string>() == "step" && Int(message["n"]) > 60 && Int(message["seat"]) != 0
+                    && Int(message["state"]!["bank"]!["ore"]) > 0)
+                {
+                    JsonNode hand = message["state"]!["players"]![2]!["hand"]!, bank = message["state"]!["bank"]!;
+                    hand["ore"] = Int(hand["ore"]) + 1;
+                    bank["ore"] = Int(bank["ore"]) - 1;
+                    agent.Handle(message);
+                    changed = true;
+                    break;
+                }
+                agent.Handle(message);
+            }
+            Assert.True(changed);
+            agent.Handle(JsonNode.Parse("""{"type":"after"}""")!);
+            JsonNode stats = JsonNode.Parse(log.ToString().Trim().Split('\n').Last())!;
+            Assert.Equal((1, false), (Int(stats["patches"]), stats["lost"]!.GetValue<bool>()));
+
+            // A whole game sent so (catanatron-101 reaches the Longest Road difference): never lost, taken over where it differs
+            foreach ((string game, bool differs) in new[] { ("catanatron-100", false), ("catanatron-101", true) })
+            {
+                StringWriter whole = new();
+                SeatAgent second = new(net, 16, 0, whole);
+                foreach (JsonNode message in AsSentTo(game, 0))
+                {
+                    JsonNode? answer = second.Handle(message);
+                    if (message["type"]!.GetValue<string>() == "decide")
+                        Assert.Contains(OspCodec.Canonical(answer!["action"]), message["legal"]!.AsArray().Select(OspCodec.Canonical).ToHashSet());
+                }
+                JsonNode end = JsonNode.Parse(whole.ToString().Trim().Split('\n').Last())!;
+                Assert.Equal((false, differs), (end["lost"]!.GetValue<bool>(), Int(end["patches"]) > 0));
+            }
+        }
+
         [Theory]
         [InlineData("catanatron-100", false)]
         [InlineData("catanatron-101", true)]

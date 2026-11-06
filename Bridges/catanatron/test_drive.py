@@ -47,6 +47,17 @@ class ResumeTests(unittest.TestCase):
                 moved = [json.loads(line)["map_seed"] for line in file]
             self.assertEqual(({501, 502}, [503, 503]), (kept, moved))
 
+            # An agent lost its copy in a game of map 502: with --redo-lost the map is played again
+            with open(os.path.join(directory, "agent-0.log"), "w", encoding="utf-8") as file:
+                file.write(json.dumps({"type": "stats", "game_id": "map502-r1", "lost": True}, separators=(",", ":")) + "\n")
+                file.write(json.dumps({"type": "stats", "game_id": "map501-r1", "lost": False}, separators=(",", ":")) + "\n")
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed):
+                resume.main([directory, "1", "10", "1", "--boards", boards, "--redo-lost"])
+            self.assertEqual(["2:10"], printed.getvalue().split())
+            with open(os.path.join(directory, "results-0.jsonl"), encoding="utf-8") as file:
+                self.assertEqual({501}, {json.loads(line)["map_seed"] for line in file})
+
 
 def as_sets(board):
     """A board's tiles and harbors as sets (their order in the lists means nothing)"""
@@ -128,8 +139,10 @@ class DriveTests(unittest.TestCase):
                 self.assertEqual("before", mine[0]["type"])
                 self.assertEqual("after", mine[-1]["type"])
                 self.assertTrue(all(m["seat"] == seat for m in mine if m["type"] == "decide"))
+                # Every step, with the state before its move (the agent needs the full state): the logged decide's
                 steps = [m for m in logged if m.get("game_id") == game_id and m["type"] == "step"]
-                self.assertEqual(steps, [m for m in mine if m["type"] == "step"])
+                before = {m["n"]: m["state"] for m in logged if m.get("game_id") == game_id and m["type"] == "decide"}
+                self.assertEqual([{**s, "state": before[s["n"]]} for s in steps], [m for m in mine if m["type"] == "step"])
                 self.assertEqual(sum(1 for m in logged if m.get("game_id") == game_id and m["type"] == "decide" and m["seat"] == seat),
                                  sum(1 for m in mine if m["type"] == "decide"))
 
