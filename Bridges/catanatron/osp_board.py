@@ -70,6 +70,51 @@ def shape(catan_map):
     }
 
 
+def cube(hex_):
+    """Catanatron's cube coordinate (x, y, z) of the protocol's hex [q, r]"""
+    q, r = hex_
+    return (q, -q - r, r)
+
+
+def catan_map(osp_board):
+    """
+    A Catanatron map of the protocol's board (a classic board: Catanatron's base topology, whose harbors sit where the
+    protocol's do). Catanatron lays its tiles out in the order of the base template, drawing each tile's resource, number
+    and harbor from the end of lists, so the lists are given in that order, reversed.
+    """
+    from catanatron.models.map import BASE_MAP_TEMPLATE, CatanMap, initialize_tiles
+
+    tiles = {cube(t["tile"]): t for t in osp_board["tiles"]}
+    resources_by_code = {code: resource for resource, code in TILE_CODES.items()}
+    harbors_by_code = {code: resource for resource, code in HARBOR_CODES.items()}
+    # The harbor paths of the base template's harbor tiles, the same on every base map
+    template = CatanMap.from_template(BASE_MAP_TEMPLATE)
+    template_keys = node_keys(template)
+    harbor_at = {}
+    for coordinate, tile in template.tiles.items():
+        if isinstance(tile, Port):
+            a, b = PORT_DIRECTION_TO_NODEREFS[tile.direction]
+            harbor_at[path_key(template_keys, (tile.nodes[a], tile.nodes[b]))] = coordinate
+    codes_at = {}
+    for harbor in osp_board["harbors"]:
+        path = tuple(sorted(tuple(tuple(h) for h in end) for end in harbor["path"]))
+        if path not in harbor_at:
+            raise ValueError(f"No harbor of Catanatron's base map at {harbor['path']}")
+        codes_at[harbor_at[path]] = harbor["hCode"]
+
+    resources, numbers, ports = [], [], []
+    for coordinate, kind in BASE_MAP_TEMPLATE.topology.items():
+        if isinstance(kind, tuple):
+            ports.append(harbors_by_code[codes_at[coordinate]])
+        elif kind == LandTile:
+            tile = tiles[coordinate]
+            resources.append(resources_by_code[tile["tCode"]])
+            if tile["rNumber"] is not None:
+                numbers.append(tile["rNumber"])
+    built = initialize_tiles(BASE_MAP_TEMPLATE, numbers[::-1], ports[::-1], resources[::-1], number_placement="random")
+    return CatanMap.from_tiles(built)
+
+
 def board(catan_map, robber_coordinate):
     """The protocol's board: every hex with its SGN tile code and number, the harbors, the robber"""
     keys = node_keys(catan_map)
