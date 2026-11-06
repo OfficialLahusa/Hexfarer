@@ -241,12 +241,13 @@
 	- 1. Bridge-Host (C#): Replik pro Sitz, nach jeder Aktion öffentlichen Zustand und legale Züge gegen den Schiedsrichter prüfen, Koordinaten-Mapping aus der Geometrie mit Tests (~1-2 Tage)
 		- Umgesetzt: Lizenz-Layout (Bridges unter GPL), OSP-Entwurf, Brett-Schlüssel (BoardGeometry, osp/classic-board.json; Catanatrons Brett passt exakt, Häfen eingeschlossen), Catanatron-Recorder (record.py), Replay-Harness (OpenSeat replay)
 		- Catanatron weicht ab (für PR und Paper; aus Quellcode und Replay, Commit ecf9311):
-			- Längste Straße: das Stück bis an eine fremde Siedlung zählt nicht (longest_acyclic_path betritt fremde Knoten nicht), Regel: zählt bis dorthin; entscheidend in 46 von 300 Zufallspartien und 2 von 50 AlphaBeta-Partien
-			- Längste Straße nach einer Siedlung, die eine Straße zerschneidet: Board.build_settlement vergibt sie an den Längsten aller (max über road_lengths), bei Gleichstand nach eigener Reihenfolge statt an den Inhaber und auch unter 5, Regel: Inhaber behält sie bei Gleichstand, unter 5 niemand; 4 von 300 Zufallspartien
-			- Straße durch eine fremde Siedlung weitergebaut, die vor der eigenen Straße dort stand (trotz Fix #377 d3f4ad0), Regel: dort endet die Straße; 1 von 300 Zufallspartien, Ursache noch nicht verfolgt
+			- Längste Straße: das Stück bis an eine fremde Siedlung zählt nicht (longest_acyclic_path betritt fremde Knoten nicht), Regel: zählt bis dorthin; entscheidend in 46 von 300 Zufallspartien und 216 von 1868 Partien Hexfarer gegen AlphaBeta
+			- Längste Straße nach einer Siedlung, die eine Straße zerschneidet: Board.build_settlement vergibt sie an den Längsten aller (max über road_lengths), bei Gleichstand nach eigener Reihenfolge statt an den Inhaber und auch unter 5, Regel: Inhaber behält sie bei Gleichstand, unter 5 niemand; 4 von 300 Zufallspartien, 24 von 1868 gegen AlphaBeta
+			- Straße durch eine fremde Siedlung weitergebaut, die vor der eigenen Straße dort stand (trotz Fix #377 d3f4ad0), Regel: dort endet die Straße; 1 von 300 Zufallspartien und 1 von 1868 gegen AlphaBeta (dort 18-mal angeboten), Ursache noch nicht verfolgt
 			- Bankmangel: niemand bekommt die Ressource, auch wenn nur ein Spieler sie bekäme (yield_resources), Regel: der Einzige bekommt den Rest
 			- Sieg in jedem Zug und mit verdeckten Siegpunkten (winning_color nach jeder Aktion), Regel: nur im eigenen Zug
 			- Legale Züge enger als die Regel, im Spiel meist ohne Wirkung: Räuber nur gegen Opfer mit Karten, Seehandel nur zum besten Kurs, Straßenbaukarte nur mit baubarer Kante und Straßen sofort
+			- Year of Plenty mit nur einer Karte, sobald kein Paar derselben Ressource in der Bank ist, obwohl zwei verschiedene gingen (year_of_plenty_possibilities), Regel: zwei Karten; schwächerer Zug, in 1868 Partien 39-mal angeboten
 			- Spielerhandel im Modell (OFFER_TRADE), aber nie unter den legalen Zügen
 			- Sicht für Bots (client_view): das Opfer sieht die gestohlene Karte nicht
 			- Bot-Protokoll: 1 s Timeout, dann Zufallszug, nach 3 Fehlern aufgegeben => für Messungen ungeeignet
