@@ -108,6 +108,7 @@
 		- Schleife 4 ab kt5fwcz5: 3200 Iterationen pro voller Suche, 4000 Spiele pro Generation, lr 1e-4, Fenster 8, Schleife-3-Daten (g6-g11) und v2 beigemischt: g6 gegen g3 +89 [+43, +138], aber gegen kt5fwcz5 −36 [−72, −2] (SPRT H0) => nach 6 Generationen gestoppt, mehr Iterationen allein bringen nichts
 		- Server-GPU RTX 5060 Ti 16 GB eingebaut (nvidia-driver-580-open, CUDA 13.0): VRAM-Test (memtest_vulkan) und 1 h gpu-burn ohne Fehler, konstant ~16,9 TFLOP/s FP32 bei max. 74 °C; Server für SPRT-Duelle, Desktop sammelt und trainiert
 			- Offen: cuDNN, Arena mit --provider cuda messen (CPU- oder GPU-begrenzt?)
+			- CUDA-Sitzung ohne feste Batch-Form (nur DirectML hat eine): der Speicherpool wächst mit jeder neuen Form, ein OpenSeat-Agent hielt nach 2 h ~5,5 GB, die Arena ~7 GB, mehrere zusammen liefen in einen CUBLAS-Allokationsfehler => FixedBatchSize auch für CUDA (oder arena_extend_strategy kSameAsRequested), Tempo vorher und nachher messen
 			- Im Self-Play regelmäßig Stichproben GPU gegen CPU vergleichen (stille Speicherfehler verfälschen sonst die Daten), Luftfeuchte am Server unter 60%
 		- Risiken: Bootstrapping (q vom eigenen Net), Kollaps in einen ausnutzbaren Stil
 	- 7. Netzarchitektur v2 (siehe Graph Transformer)
