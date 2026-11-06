@@ -76,6 +76,7 @@
 		- FP16 für v2.1 (structured-ft): Ausgaben gleich (Präzisions-Set identisch, Gewinnchancen max. 0,0013 auseinander, Policy-Queries Kosinus 1,0); Server bei 0,1 s +11% Iterationen (21,5k => 23,9k), kt5fwcz5 nur +2% => FP16 lohnt fürs größere Net; Duell FP16 gegen FP32 nach 58 Paaren abgebrochen (SPRT [−40, +40] entscheidet zu früh), nicht aussagekräftig
 		- Self-Play-Engpass war der GC (52% Pause): Ergebnis-Buffer pro Suche wiederverwendet, DATAS aus => Desktop 205k => 445k Iterationen/s (3 Nets), 6 Nets 497k (+11%); Server 212k => 382k, 6 Nets dort nur +3%
 	- 4. Setup-Phase spezialisieren: eigene Zeit, Best-Response-Gegner, Sibling-Gruppen an Setup-Entscheidungen
+		- Setup-Budget (MCTSAgent.SetupBudgetFactor, Arena suX) gegen 1x: bei 800 It. 2x +15 [−5, +34], 4x +19 [−1, +39], 8x +30 [+9, +51], 16x +31 [+8, +54]; bei 5k 4x +4, 8x +7, bei 25k 4x −2 (alle H0) => lohnt nur bei kleinem Budget; Medium/Hard nicht gemessen
 	- 5. Policy Head + PUCT: erledigt (siehe PolicyNet), P1 mhn8ihqb ist Default (auf HF), gegen E2 im 5k-Duell +122 Elo [+78, +169] (104 Paare), Wiederholung +73 [+33, +115] (125 Paare); PUCT mit uniformen Priors ±0 [−47, +47] => der Gewinn kommt von der gelernten Policy
 		- Tempo: Queries als float16, Priors in der Backpropagation => P1 223k statt 170k Iterationen/s (E2 ~310k); Query-Dim 32 gibt 257k bei gleichem Loss, spielte aber nur +13 [−34, +61] gegen E2 => bei 64 bleiben, Streuung zwischen Trainingsläufen desselben Rezepts prüfen
 		- Gleiche Denkzeit (0,25 s pro Zug) gegen E2: +132 Elo [+44, +242] (33 Paare, 16:4 doppelt gewonnen) => Policy lohnt sich trotz ~30% weniger Iterationen; offen: 60k-Duell
@@ -242,13 +243,13 @@
 	- 1. Bridge-Host (C#): Replik pro Sitz, nach jeder Aktion öffentlichen Zustand und legale Züge gegen den Schiedsrichter prüfen, Koordinaten-Mapping aus der Geometrie mit Tests (~1-2 Tage)
 		- Umgesetzt: Lizenz-Layout (Bridges unter GPL), OSP-Entwurf, Brett-Schlüssel (BoardGeometry, osp/classic-board.json; Catanatrons Brett passt exakt, Häfen eingeschlossen), Catanatron-Recorder (record.py), Replay-Harness (OpenSeat replay)
 		- Catanatron weicht ab (für PR und Paper; aus Quellcode und Replay, Commit ecf9311):
-			- Längste Straße: das Stück bis an eine fremde Siedlung zählt nicht (longest_acyclic_path betritt fremde Knoten nicht), Regel: zählt bis dorthin; entscheidend in 46 von 300 Zufallspartien und 216 von 1868 Partien Hexfarer gegen AlphaBeta
-			- Längste Straße nach einer Siedlung, die eine Straße zerschneidet: Board.build_settlement vergibt sie an den Längsten aller (max über road_lengths), bei Gleichstand nach eigener Reihenfolge statt an den Inhaber und auch unter 5, Regel: Inhaber behält sie bei Gleichstand, unter 5 niemand; 4 von 300 Zufallspartien, 24 von 1868 gegen AlphaBeta
-			- Straße durch eine fremde Siedlung weitergebaut, die vor der eigenen Straße dort stand (trotz Fix #377 d3f4ad0), Regel: dort endet die Straße; 1 von 300 Zufallspartien und 1 von 1868 gegen AlphaBeta (dort 18-mal angeboten), Ursache noch nicht verfolgt
-			- Bankmangel: niemand bekommt die Ressource, auch wenn nur ein Spieler sie bekäme (yield_resources), Regel: der Einzige bekommt den Rest
-			- Sieg in jedem Zug und mit verdeckten Siegpunkten (winning_color nach jeder Aktion), Regel: nur im eigenen Zug
+			- Längste Straße: das Stück bis an eine fremde Siedlung zählt nicht (longest_acyclic_path betritt fremde Knoten nicht), Regel: zählt bis dorthin; entscheidend in 46 von 300 Zufallspartien und 691 von 5932 Partien Hexfarer gegen AlphaBeta
+			- Längste Straße nach einer Siedlung, die eine Straße zerschneidet: Board.build_settlement vergibt sie an den Längsten aller (max über road_lengths), bei Gleichstand nach eigener Reihenfolge statt an den Inhaber und auch unter 5, Regel: Inhaber behält sie bei Gleichstand, unter 5 niemand; 4 von 300 Zufallspartien, 74 von 5932 gegen AlphaBeta
+			- Straße durch eine fremde Siedlung weitergebaut, die vor der eigenen Straße dort stand (trotz Fix #377 d3f4ad0), Regel: dort endet die Straße; 1 von 300 Zufallspartien und 2 von 5932 gegen AlphaBeta (dort 55-mal angeboten), Ursache noch nicht verfolgt
+			- Bankmangel: niemand bekommt die Ressource, auch wenn nur ein Spieler sie bekäme (yield_resources), Regel: der Einzige bekommt den Rest; 42 von 5932 gegen AlphaBeta
+			- Sieg in jedem Zug und mit verdeckten Siegpunkten (winning_color nach jeder Aktion), Regel: nur im eigenen Zug; 9 von 5932 gegen AlphaBeta
 			- Legale Züge enger als die Regel, im Spiel meist ohne Wirkung: Räuber nur gegen Opfer mit Karten, Seehandel nur zum besten Kurs, Straßenbaukarte nur mit baubarer Kante und Straßen sofort
-			- Year of Plenty mit nur einer Karte, sobald kein Paar derselben Ressource in der Bank ist, obwohl zwei verschiedene gingen (year_of_plenty_possibilities), Regel: zwei Karten; schwächerer Zug, in 1868 Partien 39-mal angeboten
+			- Year of Plenty mit nur einer Karte, sobald kein Paar derselben Ressource in der Bank ist, obwohl zwei verschiedene gingen (year_of_plenty_possibilities), Regel: zwei Karten; schwächerer Zug, in 5932 Partien 113-mal angeboten
 			- Spielerhandel im Modell (OFFER_TRADE), aber nie unter den legalen Zügen
 			- Sicht für Bots (client_view): das Opfer sieht die gestohlene Karte nicht
 			- Bot-Protokoll: 1 s Timeout, dann Zufallszug, nach 3 Fehlern aufgegeben => für Messungen ungeeignet
@@ -257,6 +258,11 @@
 		- JSettlers weicht ab: noch nicht untersucht (Stufe 5)
 		- Vor dem nächsten Push: OSP-Format (Bridges/PROTOCOL.md) und Beispiel-Logs selbst durchsehen, ob es so gefällt und als Standard taugt
 	- 2. Hexfarer als Gast bei Catanatron (Player.decide bekommt das ganze Spiel => selbst schwärzen; Räuber = Feld + Opfer in einer Aktion): fair und open-hand, 2v2 gespiegelt und 1v3, 5k Iterationen und gleiche Denkzeit, gegen AlphaBeta (~2 Tage)
+		- Open-hand umgesetzt (OpenSeat agent, drive.py, resume.py, analyze.py), 1v3 gegen 3x AB:2 (Gleichstand 25%): 100 It. 57,9%, 800 67,6%, 5k 78,7% [75,6, 81,5], ab 25k Plateau 82-83%; gegen AB:3 76,2%, AB:2 contender 79,8%, 2v2 91,8%, 1 AB:2 gegen 3x uns 3,0%; offen: fair (geschwärzte Sicht)
+		- Gleiche Arbeit (ab_work.py): AB:2 bewertet pro gesuchter Entscheidung im Mittel 418 Blätter (85% davon in Räuberzügen à ~4700, normaler Zug 67), AB:3 10,7k; wir bei 100 It. 243 verschiedene Netzauswertungen => mit ~0,6x der Arbeit 57,9%
+		- Gleiche Denkzeit auf je einem Kern (Server, taskset, Net auf der CPU, 1 Thread, --serial, Batches à 16): AB:2 braucht 69,5 ms pro gesuchter Entscheidung, wir 47 ms (pro Partie 2,7 s gegen 2,5 s) => 73,5% [69,0, 77,8] (400 Spiele); Python gegen C# begünstigt uns, sauber erst mit AlphaBeta-Port nach C#
+		- Dabei nur ~215 verschiedene Auswertungen pro Entscheidung, aber stärker als 100 It. mit 256er Batches (243, 57,9%) => kleine Batches lohnen vermutlich bei kleinem Budget, direkt messen
+		- Tempo (1 Thread, Zufallspartien): Hexfarer 11,6x Züge/s, 16x legale Zuglisten, 33x Kopien, 10,7x Partien/s; pro Entscheidung im Leerlauf 5k 17 ms gegen AB:2 54 ms, AB:3 1,5 s
 	- 3. Catanatron-Bots in der Hexfarer-Sim: Python-Adapter als Agent-Bridge-Client mit synchroner Catanatron-Partie, im Client als open-hand gekennzeichnet oder mit gezogener Welt fair (~2 Tage) => erste gemischte Partien im Client
 	- 4. Relay-Matches: von fremden Schiedsrichtern geleitete Partien in den Client streamen (Catanatron mit allen Händen, JSettlers nur öffentlich plus eigene Sitze) (~2 Tage)
 	- 5. Hexfarer-Roboter bei JSettlers (Vorlage Sample3PClient/Sample3PBrain, Robot-Cookie, Bot-Spiele mit fast_pause_percent ~2 min pro Partie): fair, erst ohne Handel, 2v2 und 1v3 (~3-5 Tage), dann mit Handel
