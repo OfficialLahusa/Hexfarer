@@ -130,6 +130,37 @@ namespace Tests
         }
 
         [Fact]
+        public void TheAgentTakesOverAHandAndBankTheRefereeHoldsDifferently()
+        {
+            // A referee that gave seat 2 an ore from the bank Hexfarer's rules wouldn't have (as Catanatron's bank shortage
+            // does with the rest of a short resource): the agent's copy takes both over and plays on
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.Cpu);
+            StringWriter log = new();
+            SeatAgent agent = new(net, 16, 0, log);
+            int changedAt = -1;
+            foreach (JsonNode recorded in Replay.Read(Fixture).Where(m => m["game_id"]!.GetValue<string>() == "catanatron-100"))
+            {
+                JsonNode message = recorded.DeepClone();
+                string type = message["type"]!.GetValue<string>();
+                if (type == "before") message["seat"] = 0;
+                if (type == "decide" && Int(message["seat"]) != 0) continue;
+                // From the first decision of seat 0 after move 60 on, the referee's states carry the extra ore
+                if (type is "decide" or "after" && (changedAt >= 0 || type == "decide" && Int(message["n"]) > 60 && Int(message["state"]!["bank"]!["ore"]) > 0))
+                {
+                    if (changedAt < 0) changedAt = Int(message["n"]);
+                    JsonNode hand = message["state"]!["players"]![2]!["hand"]!, bank = message["state"]!["bank"]!;
+                    hand["ore"] = Int(hand["ore"]) + 1;
+                    bank["ore"] = Int(bank["ore"]) - 1;
+                }
+                agent.Handle(message);
+                if (changedAt >= 0) break;
+            }
+            JsonNode stats = JsonNode.Parse(agent.Handle(JsonNode.Parse("""{"type":"after"}""")!) is null ? log.ToString().Trim().Split('\n').Last() : "{}")!;
+            Assert.True(changedAt > 0);
+            Assert.Equal((1, false), (Int(stats["patches"]), stats["lost"]!.GetValue<bool>()));
+        }
+
+        [Fact]
         public void BoardsWriteAndReadBack()
         {
             for (int seed = 1; seed <= 5; seed++)

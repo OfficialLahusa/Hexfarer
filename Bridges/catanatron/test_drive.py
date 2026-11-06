@@ -77,7 +77,8 @@ class DriveTests(unittest.TestCase):
             agent = f'"{sys.executable}" "{os.path.join(HERE, "fake_osa.py").replace(os.sep, "/")}" "{seen.replace(os.sep, "/")}"'
             drive.main(["--boards", boards, "--lineup", "osa,R,W,R", "--osa", agent, "--maps", "0:2", "--out", out, "--log", log])
 
-            results = [json.loads(line) for line in open(out, encoding="utf-8")]
+            with open(out, encoding="utf-8") as file:
+                results = [json.loads(line) for line in file]
             self.assertEqual(8, len(results))
             for result in results:
                 # The agent's entry sits in the rotation's seat, every seat moved, the winner (if any) has the points
@@ -87,8 +88,14 @@ class DriveTests(unittest.TestCase):
                     self.assertGreaterEqual(result["vp"][result["winner"]], 10)
 
             # The agent got its seat's before, every step and after, and decided only for its seat
-            messages = [json.loads(line) for line in open(seen, encoding="utf-8")]
-            logged = [json.loads(line) for line in gzip.open(log, "rt", encoding="utf-8")]
+            with open(seen, encoding="utf-8") as file:
+                messages = [json.loads(line) for line in file]
+            with gzip.open(log, "rt", encoding="utf-8") as file:
+                logged = [json.loads(line) for line in file]
+            # All rotations of a map play with the map's seed (the same dice and cards)
+            for map_seed in (905, 906):
+                seeds = {m["seed"] for m in logged if m["type"] == "before" and m["game_id"].startswith(f"map{map_seed}-")}
+                self.assertEqual({map_seed}, seeds)
             for game_id in {r["game_id"] for r in results if r["map_seed"] == 905}:
                 mine = [m for m in messages if m.get("game_id") == game_id]
                 seat = mine[0]["seat"]
