@@ -148,7 +148,7 @@ def main(argv=None):
     parser.add_argument("--boards", required=True, help="protocol boards, one per line ({seed, board}), e.g. from OpenSeat boards")
     parser.add_argument("--lineup", default="osa,AB:2,AB:2,AB:2", help="four seats: 'osa' for an Open Seat Agent or a Catanatron bot code")
     parser.add_argument("--osa", required=True, help="the command that starts an Open Seat Agent (one process per osa seat)")
-    parser.add_argument("--maps", default="0:10", help="the boards to play, FIRST:END (line numbers, END exclusive)")
+    parser.add_argument("--maps", default="0:10", help="the boards to play, FIRST:END (line numbers, END exclusive), several comma-separated")
     parser.add_argument("--out", required=True, help="result lines, appended")
     parser.add_argument("--log", help="every game's referee messages, gzipped (for OpenSeat replay)")
     parser.add_argument("--agent-log", help="the agents' standard error (their stats lines)")
@@ -157,8 +157,10 @@ def main(argv=None):
     lineup = args.lineup.split(",")
     if len(lineup) != 4:
         raise SystemExit("--lineup needs four seats")
-    first, end = (int(x) for x in args.maps.split(":"))
-    boards = [json.loads(line) for line in open(args.boards, encoding="utf-8")][first:end]
+    with open(args.boards, encoding="utf-8") as file:
+        all_boards = [json.loads(line) for line in file]
+    # Ranges FIRST:END, comma-separated (e.g. the maps a stopped run didn't finish, see resume.py)
+    boards = [board for part in args.maps.split(",") for board in all_boards[slice(*(int(x) for x in part.split(":")))]]
     agent_log = open(args.agent_log, "a", encoding="utf-8") if args.agent_log else subprocess.DEVNULL
     # One agent process per osa entry of the lineup, kept for all games (it follows the entry from seat to seat)
     agents = [Osa(args.osa, agent_log) if code == "osa" else None for code in lineup]

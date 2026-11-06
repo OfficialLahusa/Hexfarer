@@ -16,10 +16,36 @@ from catanatron import Color
 from catanatron.models.map import BASE_MAP_TEMPLATE, CatanMap, number_probability
 from catanatron.models.player import RandomPlayer
 
+import contextlib
+import io
+
 import drive
 import osp_board
+import resume
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+class ResumeTests(unittest.TestCase):
+    def test_a_stopped_run_keeps_whole_maps_and_names_the_rest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            boards = os.path.join(directory, "boards.jsonl")
+            with open(boards, "w", encoding="utf-8") as file:
+                file.writelines(json.dumps({"seed": 500 + i, "board": None}) + "\n" for i in range(10))
+            # Maps 501 and 502 are whole, 503 has two rotations; 504-509 are unplayed
+            done = [(501, r) for r in range(4)] + [(503, 0), (503, 1)] + [(502, r) for r in range(4)]
+            with open(os.path.join(directory, "results-0.jsonl"), "w", encoding="utf-8") as file:
+                file.writelines(json.dumps({"map_seed": s, "rotation": r}) + "\n" for s, r in done)
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed):
+                resume.main([directory, "1", "10", "2", "--boards", boards])
+            # The rest of maps 1-9: 3 and 4-9, in two parts
+            self.assertEqual(["3:7", "7:10"], printed.getvalue().split())
+            with open(os.path.join(directory, "results-0.jsonl"), encoding="utf-8") as file:
+                kept = {json.loads(line)["map_seed"] for line in file}
+            with open(os.path.join(directory, "partial.jsonl"), encoding="utf-8") as file:
+                moved = [json.loads(line)["map_seed"] for line in file]
+            self.assertEqual(({501, 502}, [503, 503]), (kept, moved))
 
 
 def as_sets(board):
