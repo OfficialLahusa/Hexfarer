@@ -222,6 +222,66 @@ namespace Tests
         }
 
         [Fact]
+        public void TheAgentReportsItsSearchWorkPerGame()
+        {
+            // Budget 40 in batches of 16: each search evaluates whole batches, at least 48 leaves (three batches) and at
+            // most a few batches more while the root waits for its moves; two games in a row, each with its own counts
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.Cpu);
+            StringWriter log = new();
+            SeatAgent agent = new(net, 40, 0, log, leavesPerBatch: 16);
+            Assert.EndsWith("-40it-b16", agent.Name);
+            foreach (string game in new[] { "catanatron-100", "catanatron-102" })
+            {
+                foreach (JsonNode recorded in Replay.Read(Fixture).Where(m => m["game_id"]!.GetValue<string>() == game))
+                {
+                    JsonNode message = recorded.DeepClone();
+                    string type = message["type"]!.GetValue<string>();
+                    if (type == "before") message["seat"] = 0;
+                    if (type == "decide" && Int(message["seat"]) != 0) continue;
+                    agent.Handle(message);
+                }
+                JsonNode stats = JsonNode.Parse(log.ToString().Trim().Split('\n').Last())!;
+                Assert.Equal(game, stats["game_id"]!.GetValue<string>());
+                int searched = Int(stats["searched"]), searches = Int(stats["searches"]);
+                long iterations = stats["iterations"]!.GetValue<long>(), distinct = stats["distinct_leaves"]!.GetValue<long>();
+                // A search per decision with a choice, whole batches of 16 within the bounds, fewer distinct positions
+                Assert.InRange(searches, searched - 2, searched);
+                Assert.True(searches > 10, $"{searches} searches");
+                Assert.Equal(0, iterations % 16);
+                Assert.InRange(iterations, 48L * searches, (48L + 16 * 4) * searches);
+                Assert.InRange(distinct, searches, iterations - 1);
+            }
+        }
+
+        [Fact]
+        public void ADecisionWithoutASearchAddsNoSearchWork()
+        {
+            // The same game twice; the second time the referee also lists a move Hexfarer's rules don't have next to every
+            // single legal move, so the agent answers those decisions with a forced move and no search: its search work
+            // stays the same, the earlier search isn't counted again
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.Cpu);
+            JsonNode Stats(bool padded)
+            {
+                StringWriter log = new();
+                SeatAgent agent = new(net, 40, 0, log, leavesPerBatch: 16);
+                foreach (JsonNode recorded in Replay.Read(Fixture).Where(m => m["game_id"]!.GetValue<string>() == "catanatron-100"))
+                {
+                    JsonNode message = recorded.DeepClone();
+                    string type = message["type"]!.GetValue<string>();
+                    if (type == "before") message["seat"] = 0;
+                    if (type == "decide" && Int(message["seat"]) != 0) continue;
+                    if (padded && type == "decide" && message["legal"]!.AsArray().Count == 1)
+                        message["legal"]!.AsArray().Add(JsonNode.Parse("""["end_turn","made up"]"""));
+                    agent.Handle(message);
+                }
+                return JsonNode.Parse(log.ToString().Trim().Split('\n').Last())!;
+            }
+            JsonNode plain = Stats(false), padded = Stats(true);
+            Assert.True(Int(padded["searched"]) > Int(plain["searched"]) + 10, "the padded decisions reach the agent's search");
+            Assert.Equal((Int(plain["searches"]), plain["iterations"]!.GetValue<long>()), (Int(padded["searches"]), padded["iterations"]!.GetValue<long>()));
+        }
+
+        [Fact]
         public void AGameHexfarersRulesEndedGoesOnWhenTheRefereeAsksForAMove()
         {
             // The copy of a recorded game up to a decision, then ended by Hexfarer's rules (as when its Longest Road gives a

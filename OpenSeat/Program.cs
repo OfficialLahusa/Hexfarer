@@ -1,5 +1,6 @@
 using Agents;
 using Agents.Inference;
+using Agents.MCTS;
 using Common;
 using Common.Actions;
 using Common.Osp;
@@ -17,7 +18,7 @@ namespace OpenSeat
     {
         public const string Usage = """
             Usage: OpenSeat replay LOG [LOG ...] [--max-games N] [--examples K]
-                   OpenSeat agent [--net MODEL.onnx] [--iterations N | --seconds S] [--provider auto|cpu|dml|cuda]
+                   OpenSeat agent [--net MODEL.onnx] [--iterations N | --seconds S] [--provider auto|cpu|dml|cuda] [--leaves-per-batch B]
                    OpenSeat boards --seed-base S --count N --out FILE
                    OpenSeat bench [--games N] [--seed S]
 
@@ -27,8 +28,9 @@ namespace OpenSeat
             no game diverged, 1 otherwise.
 
             agent: plays one seat for a referee over the protocol on standard input and output, with open-hand MCTS and the
-            value net (default: the deployed net, 5000 iterations per decision). Needs the full state ("truth"). Writes one
-            stats line per game to standard error.
+            value net (default: the deployed net, 5000 iterations per decision; budgets round up to whole batches of B leaves,
+            default 256). Needs the full state ("truth"). Writes one stats line per game to standard error, with the
+            search's leaf evaluations and the distinct positions among them.
 
             boards: writes the boards of the map seeds S to S+N-1 as the Arena generates them, one protocol board per line.
 
@@ -76,7 +78,8 @@ namespace OpenSeat
                         // The agents' console output would mix with the protocol
                         TextWriter protocol = Console.Out;
                         Console.SetOut(TextWriter.Null);
-                        new SeatAgent(net, iterations, seconds, Console.Error).Run(Console.In, protocol);
+                        int leavesPerBatch = int.Parse(Option("--leaves-per-batch", MCTSAgent.DefaultLeavesPerBatch.ToString()));
+                        new SeatAgent(net, iterations, seconds, Console.Error, leavesPerBatch).Run(Console.In, protocol);
                         return 0;
                     }
                 case "boards":
