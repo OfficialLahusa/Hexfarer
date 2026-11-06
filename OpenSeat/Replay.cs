@@ -50,15 +50,28 @@ namespace OpenSeat
         public Replay(int maxExamples = 3) => _maxExamples = maxExamples;
 
         /// <summary>
-        /// The messages of a log: one JSON object per line, gzipped if the name ends in .gz
+        /// The messages of a log: one JSON object per line, gzipped if the name ends in .gz. A log whose writer was
+        /// stopped ends early (a cut gzip stream, a half-written last line): it is read up to there.
         /// </summary>
         public static IEnumerable<JsonNode> Read(string path)
         {
             using Stream file = File.OpenRead(path);
             using Stream input = path.EndsWith(".gz", StringComparison.OrdinalIgnoreCase) ? new GZipStream(file, CompressionMode.Decompress) : file;
             using StreamReader reader = new(input);
-            while (reader.ReadLine() is string line)
-                if (line.Length > 0) yield return JsonNode.Parse(line)!;
+            while (true)
+            {
+                string? line;
+                try { line = reader.ReadLine(); }
+                catch (Exception e) when (e is InvalidDataException or IOException) { line = null; }
+                if (line == null) yield break;
+                if (line.Length == 0) continue;
+                JsonNode? message;
+                try { message = JsonNode.Parse(line); }
+                catch (System.Text.Json.JsonException) { message = null; }
+                // A half-written line can only be the last one
+                if (message == null) yield break;
+                yield return message;
+            }
         }
 
         /// <summary>

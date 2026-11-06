@@ -52,6 +52,31 @@ namespace Tests
             Assert.InRange(report.Moves, steps * 3 / 4, steps);
         }
 
+        [Fact]
+        public void ALogCutShortReadsUpToTheCut()
+        {
+            // A stopped writer leaves a gzip stream cut off, its last line half written: read up to there, no failure
+            byte[] whole = File.ReadAllBytes(Fixture);
+            int messages = Replay.Read(Fixture).Count();
+            string cut = Path.Combine(Path.GetTempPath(), $"cut-{Guid.NewGuid():N}.jsonl.gz");
+            try
+            {
+                File.WriteAllBytes(cut, whole[..(whole.Length / 2)]);
+                int read = Replay.Read(cut).Count();
+                Assert.InRange(read, messages / 4, messages - 1);
+
+                // The same for a plain log whose last line is half written
+                string text = string.Join("\n", Replay.Read(Fixture).Take(100).Select(m => m.ToJsonString()));
+                File.WriteAllText(cut.Replace(".gz", ""), text[..^20]);
+                Assert.Equal(99, Replay.Read(cut.Replace(".gz", "")).Count());
+            }
+            finally
+            {
+                File.Delete(cut);
+                File.Delete(cut.Replace(".gz", ""));
+            }
+        }
+
         /// <summary>
         /// The first game of the fixture (which agrees to the end), with one message changed
         /// </summary>
