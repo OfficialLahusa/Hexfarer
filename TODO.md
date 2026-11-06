@@ -275,6 +275,7 @@
 	- Self-Hosted oder API?
 	- Playouts gegeneinander ohne Supervision
 	- Gängige Metagame-Varianten (German/American) ausprobieren (Insurances, Nonaggression Pacts, etc.)
+- Iterationsbudget im Client (Entwicklermenü "MCTS budget: Iterations") sucht immer in 256er-Batches, bei kleinem Budget schwach (5k: ~20 Baum-Updates, 32er dort +54); ggf. die Budgetregel der Arena (AgentSpec.LeavesFor) in die Agents ziehen, kostet im Client aber Zeit pro Zug (ein Spiel, nichts zu bündeln)
 - Szenarien und Varianten
 	- Basisspiel hat erstmal höchste Priorität
 	- Mainstream-Erweiterungen
