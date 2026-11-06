@@ -82,7 +82,7 @@
 		- Gleiche Denkzeit (0,25 s pro Zug) gegen E2: +132 Elo [+44, +242] (33 Paare, 16:4 doppelt gewonnen) => Policy lohnt sich trotz ~30% weniger Iterationen; offen: 60k-Duell
 		- c_puct (505oscbr gegen sich bei 1,414, 5k): 0,7 −44 [−92, +3], 1,0 +19 [−12, +50], 2,0 −78 [−147, −14], 3,0 −28 [−76, +19] => Optimum um 1,0-1,4, mehr Exploration schadet; c 1,0 gegen 1,414 (kt5fwcz5, SPRT [0, +20]): −3 [−22, +15] (997 Spiele, H0) => 1,414 bleibt
 		- First Play Urgency (bei c 1,0): 0,0 −10 [−50, +29], 0,25 −37 [−92, +16] gegen 0,1, beide SPRT H0 => 0,1 bleibt
-		- 64 statt 256 Blätter pro Batch bei gleichen Iterationen +10 [−43, +64] (68 Paare), pro Zug ~3x langsamer => 256 bleibt
+		- Blätter pro Batch bei gleichen Iterationen: erste Messung 64 gegen 256 (+10, 68 Paare) zu klein, neu bei 800 It. 64er +75, 16er +111 gegen 256 => kleine Batches, Details unter Catanatron Stufe 2
 		- Duelle mit SPRT [0, +40] (Arena mirror): alte Duelle wären nach 36-103 statt 50-269 Paaren entschieden gewesen; bisher liefen alle Duelle auf denselben Karten (Seeds ab 30000), jetzt eigener Seed-Bereich pro Duell aus dem Namen; P1 gegen E2 auf frischen Karten wiederholen
 		- Bei sofortigem Sieg wird nur der Siegzug gesucht; fast dominierte Züge (4:1 trotz Hafen, Opfer ohne Karten) bleiben, haben Nischenfälle, die Policy drückt sie, nur messen wie oft sie noch gewählt werden
 	- 6. Self-Play: Labels schwacher Agents binden das Net an deren Niveau
