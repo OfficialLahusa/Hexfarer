@@ -21,8 +21,9 @@ namespace OpenSeat
         private MCTSAgent? _agent;
         private string _gameId = "";
         private sbyte _seat;
-        // Per game: patched states, replaced moves, whether the copy was lost (it then plays the referee's first legal move)
-        private int _patches, _fallbacks, _decisions;
+        // Per game: decisions, those searched, patched states, replaced moves, whether the copy was lost (it then plays the
+        // referee's first legal move)
+        private int _patches, _fallbacks, _decisions, _searched;
         private bool _lost;
 
         public string Name => $"hexfarer-mcts-open-{(iterations > 0 ? $"{iterations}it" : $"{seconds}s")}";
@@ -64,7 +65,7 @@ namespace OpenSeat
                 case "decide":
                     return Decide(message);
                 case "after":
-                    log.WriteLine(new JsonObject { ["type"] = "stats", ["game_id"] = _gameId, ["seat"] = _seat, ["decisions"] = _decisions,
+                    log.WriteLine(new JsonObject { ["type"] = "stats", ["game_id"] = _gameId, ["seat"] = _seat, ["decisions"] = _decisions, ["searched"] = _searched,
                         ["patches"] = _patches, ["fallbacks"] = _fallbacks, ["lost"] = _lost }.ToJsonString());
                     log.Flush();
                     return null;
@@ -78,7 +79,7 @@ namespace OpenSeat
             _gameId = before["game_id"]!.GetValue<string>();
             _seat = (sbyte)before["seat"]!.GetValue<int>();
             _replica = new Replica(before);
-            _patches = _fallbacks = _decisions = 0;
+            _patches = _fallbacks = _decisions = _searched = 0;
             _lost = !_replica.BoardMatches(before);
             if (_lost) log.WriteLine($"{_gameId}: the board doesn't write back as sent");
             _agent = new MCTSAgent(_seat, _replica.State, timeLimitSeconds: seconds, valueNet: net, iterationLimit: iterations);
@@ -123,6 +124,7 @@ namespace OpenSeat
             if (legal.Count == 1) return Answer(legal[0]!);
 
             Action chosen = _agent!.Act(_replica.State);
+            _searched++;
             if (Allowed(chosen) is JsonNode move) return Answer(move);
 
             // The referee doesn't allow the move (its rules are narrower): the most visited root move it allows

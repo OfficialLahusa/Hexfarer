@@ -1,4 +1,5 @@
 using Agents;
+using Agents.Inference;
 using Common;
 using Common.Actions;
 using Common.Osp;
@@ -90,6 +91,42 @@ namespace Tests
             // A move Hexfarer doesn't allow
             Replay.Report illegal = ReplayChanged(m => At(m, "step", 0), m => m["action"] = JsonNode.Parse("[\"end_turn\"]"));
             Assert.Equal((1, 1), (illegal.Diverged, illegal.Counts.GetValueOrDefault("step: Hexfarer doesn't allow end_turn")));
+        }
+
+        [Theory]
+        [InlineData("catanatron-100", false)]
+        [InlineData("catanatron-101", true)]
+        public void TheAgentAnswersEveryDecisionLegallyAndTakesOverTheRefereesState(string game, bool differs)
+        {
+            // Seat 0 of a recorded game (catanatron-101 reaches the known Longest Road difference): the agent follows the
+            // recorded moves and answers the seat's decisions (its answers don't change the recorded game)
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.Cpu);
+            StringWriter log = new();
+            SeatAgent agent = new(net, 32, 0, log);
+            Assert.Equal("osp", agent.Handle(JsonNode.Parse("""{"type":"hello","protocol":"osp","version":1}""")!)!["protocol"]!.GetValue<string>());
+            int answered = 0, choices = 0;
+            foreach (JsonNode recorded in Replay.Read(Fixture).Where(m => m["game_id"]!.GetValue<string>() == game))
+            {
+                JsonNode message = recorded.DeepClone();
+                string type = message["type"]!.GetValue<string>();
+                if (type == "before") message["seat"] = 0;
+                if (type == "decide" && Int(message["seat"]) != 0) continue;
+                JsonNode? answer = agent.Handle(message);
+                if (type != "decide") continue;
+                HashSet<string> legal = message["legal"]!.AsArray().Select(OspCodec.Canonical).ToHashSet();
+                Assert.Contains(OspCodec.Canonical(answer!["action"]), legal);
+                Assert.Equal(Int(message["n"]), Int(answer["n"]));
+                answered++;
+                if (legal.Count > 1) choices++;
+            }
+            Assert.True(answered > 30, $"{answered} decisions");
+
+            // The copy never got lost; it took over the referee's state only where the rules differ
+            JsonNode stats = JsonNode.Parse(log.ToString().Trim().Split('\n').Last())!;
+            Assert.Equal((answered, false), (Int(stats["decisions"]), stats["lost"]!.GetValue<bool>()));
+            // It searched every decision with a choice (single legal moves need none)
+            Assert.Equal(choices, Int(stats["searched"]));
+            Assert.Equal(differs, Int(stats["patches"]) > 0);
         }
 
         [Fact]

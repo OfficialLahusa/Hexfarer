@@ -253,6 +253,7 @@
 			- Partien ohne PYTHONHASHSEED nicht reproduzierbar (legale Züge aus Mengen, Zufallsbots wählen per Index)
 			- LONGEST_ROAD_LENGTH ist ein Cache: im Setup 0, sonst nur bei manchen Zügen aktualisiert
 		- JSettlers weicht ab: noch nicht untersucht (Stufe 5)
+		- Vor dem nächsten Push: OSP-Format (Bridges/PROTOCOL.md) und Beispiel-Logs selbst durchsehen, ob es so gefällt und als Standard taugt
 	- 2. Hexfarer als Gast bei Catanatron (Player.decide bekommt das ganze Spiel => selbst schwärzen; Räuber = Feld + Opfer in einer Aktion): fair und open-hand, 2v2 gespiegelt und 1v3, 5k Iterationen und gleiche Denkzeit, gegen AlphaBeta (~2 Tage)
 	- 3. Catanatron-Bots in der Hexfarer-Sim: Python-Adapter als Agent-Bridge-Client mit synchroner Catanatron-Partie, im Client als open-hand gekennzeichnet oder mit gezogener Welt fair (~2 Tage) => erste gemischte Partien im Client
 	- 4. Relay-Matches: von fremden Schiedsrichtern geleitete Partien in den Client streamen (Catanatron mit allen Händen, JSettlers nur öffentlich plus eigene Sitze) (~2 Tage)
