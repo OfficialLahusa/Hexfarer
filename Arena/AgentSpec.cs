@@ -3,13 +3,14 @@ using Agents.Inference;
 using Agents.MCTS;
 using Common;
 using System.Globalization;
+using System.Numerics;
 
 namespace Arena
 {
     /// <summary>
     /// An MCTS agent of a duel, given as "NAME=MODEL.onnx[=OPTION...]". Options: an opponent model (MaxN, Paranoid, Random;
-    /// MaxN if none), cX exploration constant, bN leaves per batch (default 16 with an iteration budget, 256 with a time
-    /// budget, see BatchFor), fX first play reduction, pX placement weight, u PUCT
+    /// MaxN if none), cX exploration constant, bN leaves per batch (default from the iteration budget, 16 to 256, or 256
+    /// with a time budget, see BatchFor), fX first play reduction, pX placement weight, u PUCT
     /// with uniform priors instead of the policy head's, dN hidden information: only its seat's view, searched as N
     /// determinizations (PIMC, see DeterminizedMCTSAgent), is hidden information searched as one tree over the seat's
     /// information sets (see InformationSetMCTSAgent), isfull the same search on the true position (an ablation); without
@@ -38,23 +39,78 @@ namespace Arena
         double SetupBudget = 1)
     {
         /// <summary>
-        /// Leaves per batch with an iteration budget when no bN is given: the tree takes in the evaluations after every
-        /// batch, so small batches search much better at the same budget (800 iterations: 16 against 256 +111 Elo, 5000:
-        /// 32 against 256 +54); the budget doesn't depend on throughput
+        /// Tree updates per decision that the default batch size keeps with an iteration budget: the tree takes in the
+        /// evaluations after every batch, so small batches search much better at the same budget (800 iterations: 16 leaves,
+        /// 50 updates, against 256 +111 Elo; 5000: 32 leaves, 156 updates, against 256 +54), while larger ones fill the net
+        /// calls faster
         /// </summary>
-        public const int IterationBudgetLeavesPerBatch = 16;
+        public const int UpdatesPerDecision = 100;
 
         /// <summary>
-        /// The leaves per batch of the search: bN if given, else IterationBudgetLeavesPerBatch with an iteration budget and
-        /// MCTSAgent.DefaultLeavesPerBatch with a time budget (where the throughput of large batches counts: on DirectML,
-        /// 32 against 256 gained nothing at 0.1 s), the same on every machine
+        /// Fewest leaves per batch by default with an iteration budget: at the same games at once batches of 8 played about
+        /// half the games per hour of 16, and what they would gain in strength is unmeasured
         /// </summary>
-        public int BatchFor(long iterations) => LeavesPerBatch ?? (iterations > 0 ? IterationBudgetLeavesPerBatch : MCTSAgent.DefaultLeavesPerBatch);
+        public const int MinLeavesPerBatch = 16;
 
         /// <summary>
-        /// Rows per net call at most when the leaf batches of games played at once are merged (16 games in batches of 16)
+        /// Leaves per batch by default for a search of this many iterations: the largest power of two that still gives the tree
+        /// UpdatesPerDecision updates, at least MinLeavesPerBatch and at most MCTSAgent.DefaultLeavesPerBatch (800 and
+        /// 1600 iterations: 16, 3200 and 5000: 32, 6400: 64, from 25600: 256)
+        /// </summary>
+        public static int LeavesFor(long iterations)
+        {
+            long most = Math.Max(1, iterations / UpdatesPerDecision);
+            long leaves = Math.Min(MCTSAgent.DefaultLeavesPerBatch, 1L << BitOperations.Log2((ulong)most));
+            return (int)Math.Max(MinLeavesPerBatch, leaves);
+        }
+
+        /// <summary>
+        /// The leaves per batch of the search: bN if given, else LeavesFor its iterations with an iteration budget (PIMC's
+        /// determinizations share the budget, so each searches a tree of its share) and MCTSAgent.DefaultLeavesPerBatch with
+        /// a time budget (where the throughput of large batches counts: 32 against 256 gained nothing at 0.1 s, on DirectML
+        /// and on the CPU), the same on every machine
+        /// </summary>
+        public int BatchFor(long iterations) => LeavesPerBatch
+            ?? (iterations > 0 ? LeavesFor(iterations / Math.Max(1, Determinizations)) : MCTSAgent.DefaultLeavesPerBatch);
+
+        /// <summary>
+        /// Leaf rows per net file that the games played at once keep in flight by default: throughput follows games times
+        /// leaves per batch, the rows waiting to be merged (800 iterations in batches of 16, one file, games per hour on CUDA
+        /// and DirectML: 16 games 3137 and 2835, 38% and 39% of the rows run used; 32 games 4325 and 4988; 64 games 5248 and
+        /// 6249, 91% and 92%, more than batches of 256 unmerged, 4413 and 3760). With two files each side's evaluator gets
+        /// about half the rows: 64 games 4276 (54%), 128 games 5113 (86%); at 5000 iterations in batches of 32 on CUDA one
+        /// file and 32 games 716 (88%), two files and 32 games 597 (54%), 64 games 696 (82%), batches of 256 unmerged 731
+        /// </summary>
+        public const int RowsInFlight = 1024;
+
+        /// <summary>
+        /// Bounds of the games played at once by default per net file: at least as many as before the merging, and at most so
+        /// many that the games cancelled when the SPRT decides cost little
+        /// </summary>
+        public const int MinGamesAtOnce = 16, MaxGamesAtOnce = 64;
+
+        /// <summary>
+        /// Games played at once by default with an iteration budget for searches in batches of this size, with the sides'
+        /// nets in one or two files: enough for RowsInFlight leaf rows per file, between MinGamesAtOnce and MaxGamesAtOnce per
+        /// file (one file, batches of 16: 64 games, 32: 32, from 64: 16; two files twice that). More games don't change the
+        /// search, only the throughput
+        /// </summary>
+        public static int GamesFor(int leavesPerBatch, int files = 1) =>
+            files * Math.Clamp(RowsInFlight / leavesPerBatch, MinGamesAtOnce, MaxGamesAtOnce);
+
+        /// <summary>
+        /// Rows per net call at most when the leaf batches of games played at once are merged
         /// </summary>
         public const int MergedRows = 256;
+
+        /// <summary>
+        /// Whether a side's searches send their leaf batches to a merging evaluator: always on DirectML and the CPU (on
+        /// DirectML even in batches of 256: its two nets ran 1.2x the games per hour of one net shared by all games), on CUDA
+        /// only if a batch doesn't fill a merged call by itself (there the games run their calls on one net side by side,
+        /// and batches of 256 merged played 0.88x and 0.94x the games per hour at 800 and 5000 iterations)
+        /// </summary>
+        public static bool Merges(InferenceProvider provider, long iterations, params AgentSpec[] sides) =>
+            provider != InferenceProvider.Cuda || sides.Min(side => side.BatchFor(iterations)) < MergedRows;
 
         /// <summary>
         /// Nets per merging evaluator: one runs a call while the next one is collected
@@ -63,11 +119,11 @@ namespace Arena
 
         /// <summary>
         /// The nets of a duel's two sides. With an iteration budget and games played at once, each side's searches send their
-        /// leaf batches to one BatchingEvaluator, which merges those waiting into calls of up to MergedRows rows (the side's
-        /// batch size if larger): small batches searched alone left the GPU waiting on many small calls (16 games in batches
-        /// of 16 played 0.24x the games per hour of 256 on DirectML, 0.35x on CUDA). Both sides share it if they use the same
-        /// file. Otherwise every search runs its batches on its side's net, whose DirectML shape is the side's batch size;
-        /// shared with the same file and batch size.
+        /// leaf batches to one BatchingEvaluator (where Merges), which merges those waiting into calls of up to MergedRows rows
+        /// (the side's batch size if larger): small batches searched alone left the GPU waiting on many small calls (16 games
+        /// in batches of 16 played 0.24x the games per hour of 256 on DirectML, 0.35x on CUDA; merged 3.1x and 2.0x that).
+        /// Both sides share it if they use the same file. Otherwise every search runs its batches on its side's net, whose
+        /// DirectML shape is the side's batch size; shared with the same file and batch size.
         /// </summary>
         public static (SideNets challenger, SideNets baseline) Nets(AgentSpec challenger, AgentSpec baseline, InferenceProvider provider, long iterations, int parallel)
         {
@@ -77,7 +133,12 @@ namespace Arena
                 SideNets Merged(params AgentSpec[] sides)
                 {
                     int rows = Math.Max(MergedRows, sides.Max(side => side.BatchFor(iterations)));
-                    StateValueNet[] nets = Enumerable.Range(0, MergingNets).Select(_ => new StateValueNet(sides[0].ModelPath, provider: provider, fixedBatchSize: rows)).ToArray();
+                    StateValueNet first = new(sides[0].ModelPath, provider: provider, fixedBatchSize: rows);
+                    // The provider is known once the net is made (Auto, or a fallback to the CPU): on CUDA, batches that fill a
+                    // call by themselves run on the net side by side, unmerged
+                    if (!Merges(first.Provider, iterations, sides))
+                        return new SideNets(first, null);
+                    StateValueNet[] nets = [first, .. Enumerable.Range(1, MergingNets - 1).Select(_ => new StateValueNet(sides[0].ModelPath, provider: provider, fixedBatchSize: rows))];
                     // CUDA runs each call in the shape it gets, and its memory pool grows with every new shape: all calls get the full one
                     BatchingEvaluator leaves = new(nets, rows, padToMaxRows: nets[0].Provider == InferenceProvider.Cuda);
                     // The agents' own runs (encoding, trade judgments, single positions) go to the first worker's net
@@ -243,9 +304,15 @@ namespace Arena
         /// <summary>
         /// For the duel's first line: how the leaf batches reach the net
         /// </summary>
-        public static string Describe(SideNets challenger, SideNets baseline) => challenger.Leaves is BatchingEvaluator leaves
-            ? $", merged across games into net calls of up to {leaves.MaxRows} rows" + (baseline.Leaves == leaves ? " (shared by both sides)" : "")
-            : "";
+        public static string Describe(SideNets challenger, SideNets baseline)
+        {
+            BatchingEvaluator[] merging = new[] { challenger.Leaves, baseline.Leaves }.OfType<BatchingEvaluator>().Distinct().ToArray();
+            if (merging.Length == 0) return "";
+            // Whose batches are merged, if not both sides' through their own evaluators
+            string whose = challenger.Leaves == baseline.Leaves ? " (shared by both sides)"
+                : challenger.Leaves == null ? " (the baseline's only)" : baseline.Leaves == null ? " (the challenger's only)" : "";
+            return $", merged across games into net calls of up to {merging.Max(leaves => leaves.MaxRows)} rows{whose}";
+        }
 
         /// <summary>
         /// Stops the sides' merging evaluators (each once) and sums their calls

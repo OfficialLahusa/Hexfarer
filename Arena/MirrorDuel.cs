@@ -18,9 +18,19 @@ namespace Arena
         public long Iterations { get; init; } = 5000;
         public double Seconds { get; init; } = 0.25;
 
-        // Games played at once (an iteration budget only; a time budget plays one game at a time)
-        public int Parallel { get; init; } = 16;
+        // Games played at once with an iteration budget (null: from the batch size, see GamesAtOnce)
+        public int? Parallel { get; init; }
         public int MaxGames { get; init; } = 4000;
+
+        /// <summary>
+        /// Games played at once: with an iteration budget Parallel if given, else AgentSpec.GamesFor the smaller of the
+        /// sides' batches and their net files (each file gets its own merging evaluator, see AgentSpec.Nets), at most
+        /// MaxGames; a time budget plays one game at a time, as games at once would take each other's compute
+        /// </summary>
+        public int GamesAtOnce => Iterations > 0
+            ? Math.Max(1, Math.Min(MaxGames, Parallel ?? AgentSpec.GamesFor(Math.Min(Challenger.BatchFor(Iterations), Baseline.BatchFor(Iterations)),
+                Challenger.ModelPath == Baseline.ModelPath ? 1 : 2)))
+            : 1;
 
         // Map pair n is generated from seed SeedBase + n
         public int SeedBase { get; init; } = 30_000;
@@ -73,7 +83,7 @@ namespace Arena
         public PairStatistics Run(CancellationToken cancellation = default)
         {
             bool iterationBudget = settings.Iterations > 0;
-            int parallel = iterationBudget ? Math.Max(1, settings.Parallel) : 1;
+            int parallel = settings.GamesAtOnce;
             // With games played at once, each side's leaf batches are merged into larger net calls
             (SideNets challengerNets, SideNets baselineNets) = AgentSpec.Nets(settings.Challenger, settings.Baseline, settings.Provider, settings.Iterations, parallel);
             Nets = (challengerNets, baselineNets);

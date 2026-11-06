@@ -25,9 +25,9 @@ namespace Tests
             Assert.Equal("nets/i2.onnx", spec.ModelPath);
             Assert.Equal(OpponentModel.MaxN, spec.OpponentModel);
             Assert.Equal(1.414, spec.Exploration);
-            // No batch size given: small batches with an iteration budget, large ones with a time budget
+            // No batch size given: small batches with an iteration budget, growing with it, large ones with a time budget
             Assert.Null(spec.LeavesPerBatch);
-            Assert.Equal((AgentSpec.IterationBudgetLeavesPerBatch, MCTSAgent.DefaultLeavesPerBatch), (spec.BatchFor(800), spec.BatchFor(0)));
+            Assert.Equal((16, 32, MCTSAgent.DefaultLeavesPerBatch), (spec.BatchFor(800), spec.BatchFor(5000), spec.BatchFor(0)));
             Assert.Equal(0.1, spec.FirstPlayReduction);
             Assert.Equal(0, spec.PlacementWeight);
             Assert.False(spec.UniformPriors);
@@ -67,6 +67,117 @@ namespace Tests
             Assert.Equal(0, done % agent.BatchFor(iterations));
             if (iterations > 0) Assert.Equal(multiple, done);
             else Assert.True(done >= multiple, $"{done} iterations");
+        }
+
+        [Theory]
+        [InlineData(40, 16)]
+        [InlineData(800, 16)]
+        [InlineData(3199, 16)]
+        [InlineData(3200, 32)]
+        [InlineData(5000, 32)]
+        [InlineData(6399, 32)]
+        [InlineData(6400, 64)]
+        [InlineData(12800, 128)]
+        [InlineData(25599, 128)]
+        [InlineData(25600, 256)]
+        [InlineData(1_000_000, 256)]
+        public void TheDefaultBatchLeavesTheTreeAHundredUpdates(long iterations, int leaves)
+        {
+            // The largest power of two with at least 100 updates per decision, from 16 to 256
+            Assert.Equal(leaves, AgentSpec.LeavesFor(iterations));
+            Assert.Equal(leaves, AgentSpec.Parse("A=a.onnx").BatchFor(iterations));
+        }
+
+        [Fact]
+        public void TheDefaultBatchOfPimcFollowsTheShareOfEachDeterminization()
+        {
+            // Four determinizations of 5000 iterations search trees of 1250, two of 12800 trees of 6400; bN holds as given
+            Assert.Equal(16, AgentSpec.Parse("P=a.onnx=d4").BatchFor(5000));
+            Assert.Equal(64, AgentSpec.Parse("P=a.onnx=d2").BatchFor(12800));
+            Assert.Equal(128, AgentSpec.Parse("P=a.onnx=d1").BatchFor(12800));
+            Assert.Equal(32, AgentSpec.Parse("P=a.onnx=d4=b32").BatchFor(5000));
+            Assert.Equal(MCTSAgent.DefaultLeavesPerBatch, AgentSpec.Parse("P=a.onnx=d4").BatchFor(0));
+        }
+
+        [Theory]
+        [InlineData(8, 1, 64)]
+        [InlineData(16, 1, 64)]
+        [InlineData(32, 1, 32)]
+        [InlineData(48, 1, 21)]
+        [InlineData(64, 1, 16)]
+        [InlineData(256, 1, 16)]
+        [InlineData(512, 1, 16)]
+        [InlineData(8, 2, 128)]
+        [InlineData(16, 2, 128)]
+        [InlineData(32, 2, 64)]
+        [InlineData(256, 2, 32)]
+        public void TheDefaultGamesAtOnceKeepAThousandLeavesInFlightPerFile(int leavesPerBatch, int files, int games)
+        {
+            Assert.Equal(games, AgentSpec.GamesFor(leavesPerBatch, files));
+        }
+
+        [Fact]
+        public void TheGamesAtOnceFollowTheSmallerBatchUnlessGiven()
+        {
+            DuelSettings Duel(string challenger, string baseline, long iterations, int? parallel = null, int maxGames = 4000) => new()
+            {
+                Challenger = AgentSpec.Parse(challenger),
+                Baseline = AgentSpec.Parse(baseline),
+                Iterations = iterations,
+                Parallel = parallel,
+                MaxGames = maxGames,
+            };
+
+            // One file, 5000 iterations search in batches of 32: 32 games; a side in batches of 16 needs 64
+            Assert.Equal(32, Duel("C=a.onnx", "B=a.onnx", 5000).GamesAtOnce);
+            Assert.Equal(64, Duel("C=a.onnx=b16", "B=a.onnx", 5000).GamesAtOnce);
+            Assert.Equal(64, Duel("C=a.onnx", "B=a.onnx=b16", 5000).GamesAtOnce);
+            Assert.Equal(64, Duel("C=a.onnx", "B=a.onnx", 800).GamesAtOnce);
+            Assert.Equal(16, Duel("C=a.onnx=b256", "B=a.onnx=b64", 800).GamesAtOnce);
+            // Two files: each side's evaluator gets about half the leaves, so twice the games
+            Assert.Equal(64, Duel("C=c.onnx", "B=b.onnx", 5000).GamesAtOnce);
+            Assert.Equal(128, Duel("C=c.onnx", "B=b.onnx=b16", 5000).GamesAtOnce);
+            Assert.Equal(128, Duel("C=c.onnx", "B=b.onnx", 800).GamesAtOnce);
+            // --parallel holds as given, never more games than the duel plays, one at a time with a time budget
+            Assert.Equal(8, Duel("C=c.onnx", "B=b.onnx", 5000, parallel: 8).GamesAtOnce);
+            Assert.Equal(10, Duel("C=c.onnx", "B=b.onnx", 800, maxGames: 10).GamesAtOnce);
+            Assert.Equal(1, Duel("C=c.onnx", "B=b.onnx", 0, parallel: 8).GamesAtOnce);
+            Assert.Equal(1, Duel("C=a.onnx", "B=a.onnx", 0).GamesAtOnce);
+            Assert.Null(CommandLine.Parse(["mirror", "--challenger", "C=c.onnx", "--baseline", "B=b.onnx"]).Settings!.Parallel);
+        }
+
+        [Fact]
+        public void OnlyCudaRunsBatchesThatFillACallUnmerged()
+        {
+            AgentSpec small = AgentSpec.Parse("S=a.onnx"), b255 = AgentSpec.Parse("M=a.onnx=b255"), b256 = AgentSpec.Parse("L=a.onnx=b256"),
+                b512 = AgentSpec.Parse("X=a.onnx=b512");
+            Assert.True(AgentSpec.Merges(InferenceProvider.Cuda, 5000, small));
+            Assert.True(AgentSpec.Merges(InferenceProvider.Cuda, 5000, b255));
+            Assert.False(AgentSpec.Merges(InferenceProvider.Cuda, 5000, b256));
+            Assert.False(AgentSpec.Merges(InferenceProvider.Cuda, 5000, b256, b512));
+            // Without bN the budget sets the batch: 256 from 25600 iterations
+            Assert.False(AgentSpec.Merges(InferenceProvider.Cuda, 25600, small));
+            // Two sides sharing a file merge if either has small batches
+            Assert.True(AgentSpec.Merges(InferenceProvider.Cuda, 5000, b512, small));
+            Assert.True(AgentSpec.Merges(InferenceProvider.Cuda, 5000, small, b512));
+            Assert.True(AgentSpec.Merges(InferenceProvider.DirectML, 5000, b256));
+            Assert.True(AgentSpec.Merges(InferenceProvider.Cpu, 5000, b512));
+        }
+
+        [Fact]
+        public void TheHeaderSaysWhoseLeafBatchesAreMerged()
+        {
+            StateValueNet net = new(PlainModelPath, provider: InferenceProvider.Cpu);
+            using BatchingEvaluator small = new([net], 256), large = new([net], 512);
+            SideNets alone = new(net, null), merged = new(net, small), mergedLarge = new(net, large);
+
+            Assert.Equal("", MergedLeaves.Describe(alone, alone));
+            Assert.Equal(", merged across games into net calls of up to 256 rows (shared by both sides)", MergedLeaves.Describe(merged, merged));
+            Assert.Equal(", merged across games into net calls of up to 256 rows (the challenger's only)", MergedLeaves.Describe(merged, alone));
+            Assert.Equal(", merged across games into net calls of up to 256 rows (the baseline's only)", MergedLeaves.Describe(alone, merged));
+            // Two evaluators: the larger call size
+            Assert.Equal(", merged across games into net calls of up to 512 rows", MergedLeaves.Describe(merged, mergedLarge));
+            Assert.Equal(", merged across games into net calls of up to 512 rows", MergedLeaves.Describe(mergedLarge, merged));
         }
 
         [Fact]
@@ -318,7 +429,6 @@ namespace Tests
                 Challenger = AgentSpec.Parse($"C={PolicyModelPath}=b8"),
                 Baseline = AgentSpec.Parse($"B={PlainModelPath}=b8=nooffers"),
                 Iterations = 16,
-                Parallel = 4,
                 MaxGames = 4,
                 SeedBase = 321,
                 Provider = InferenceProvider.Cpu,
@@ -332,8 +442,9 @@ namespace Tests
             GroupStatistics result = duel.Run();
 
             string text = log.ToString();
-            // Four games at once with two files: the challenger's and the three baselines' leaf batches each went through
-            // their side's merging evaluator, and the summary counts both
+            // Four games at once (all the duel plays) with two files: the challenger's and the three baselines' leaf batches
+            // each went through their side's merging evaluator, and the summary counts both
+            Assert.Contains("16 iterations per decision, 4 games at once", text);
             Assert.Contains("merged across games into net calls of up to 256 rows;", text);
             AssertBothSidesMerged(duel.Nets!.Value, duel.Merged);
             Assert.Contains($"merged leaf batches: {duel.Merged}", text);
@@ -413,7 +524,6 @@ namespace Tests
                 Challenger = AgentSpec.Parse($"P={PolicyModelPath}=b8"),
                 Baseline = AgentSpec.Parse($"V={PlainModelPath}=b8"),
                 Iterations = 16,
-                Parallel = 4,
                 MaxGames = 4,
                 SeedBase = 123,
                 Provider = InferenceProvider.Cpu,
@@ -424,7 +534,9 @@ namespace Tests
             PairStatistics result = duel.Run();
 
             string text = log.ToString();
-            // Four games at once with two files: each side's leaf batches went through its own merging evaluator
+            // By default as many games at once as the duel plays (here fewer than GamesFor its batches of 8), with two files:
+            // each side's leaf batches went through its own merging evaluator
+            Assert.Contains("16 iterations per decision, 4 games at once", text);
             Assert.Contains("merged across games into net calls of up to 256 rows;", text);
             AssertBothSidesMerged(duel.Nets!.Value, duel.Merged);
             Assert.Contains($"merged leaf batches: {duel.Merged}", text);

@@ -60,8 +60,8 @@ namespace Arena
             (default 0 3), on the share of each map's four games it won. Same stops and exit codes.
 
             An AGENT is NAME=MODEL.onnx[=OPTION...] with the options MaxN, Paranoid or Random (opponent model, default MaxN),
-            cX (exploration constant, default 1.414), bN (leaves per batch, default 16 with --iterations, 256 with
-            --seconds), fX (first play reduction, default 0.1), pX (placement weight, default 0), u (uniform priors instead of the policy head's), dN (hidden information:
+            cX (exploration constant, default 1.414), bN (leaves per batch; default with --iterations the largest power of
+            two that leaves 100 tree updates per decision, 16 to 256, e.g. 16 at 800 and 32 at 5000; 256 with --seconds), fX (first play reduction, default 0.1), pX (placement weight, default 0), u (uniform priors instead of the policy head's), dN (hidden information:
             only its seat's view, searched as N determinizations), is (hidden information searched as one tree over the seat's
             information sets) and isfull (that search on the true position, an ablation); without dN or is the agent sees
             every hand. Ablations of the search: norm/nonorm (values scaled to the range seen in the tree or not; MCTS
@@ -82,8 +82,9 @@ namespace Arena
               --baseline AGENT       The agent it is compared with
               --iterations N         MCTS iterations per decision (default 5000)
               --seconds S            Seconds per decision instead of iterations; games then run one at a time
-              --parallel N           Games played at once with an iteration budget (default 16); each side's leaf batches
-                                     reach the net merged across them
+              --parallel N           Games played at once with an iteration budget (default: 1024 leaves in flight per net
+                                     file, 16 to 64 games per file, e.g. 64 in batches of 16 with one file, 128 with
+                                     two); each side's leaf batches reach the net merged across them
               --max-games N          Most games (default 4000)
               --name NAME            Names the duel; the maps are drawn from a seed derived from it
               --seed-base N          First map seed instead (default 30000)

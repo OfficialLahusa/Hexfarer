@@ -47,9 +47,9 @@ namespace Arena
         /// </summary>
         public GroupStatistics Run(CancellationToken cancellation = default)
         {
-            // Parallel games only with an iteration budget; with a time budget they would take each other's compute
+            // Games at once only with an iteration budget (see DuelSettings.GamesAtOnce)
             bool iterationBudget = settings.Iterations > 0;
-            int parallel = iterationBudget ? Math.Max(1, settings.Parallel) : 1;
+            int parallel = settings.GamesAtOnce;
             // With games played at once, each side's leaf batches are merged into larger net calls; both sides share the nets
             // and the merging if they use the same file
             (SideNets challengerNets, SideNets baselineNets) = AgentSpec.Nets(settings.Challenger, settings.Baseline, settings.Provider, settings.Iterations, parallel);
