@@ -40,6 +40,11 @@ namespace Agents.MCTS
         /// </summary>
         public BeliefTracker Beliefs => _beliefs;
 
+        /// <summary>
+        /// The game as the agent followed it (for checks that it still follows the real game; not to be changed)
+        /// </summary>
+        public GameState Mirror => _mirror;
+
         public MCTSAgent Search => _search;
 
         /// <summary>

@@ -1,5 +1,7 @@
+using Agents;
 using Agents.Inference;
 using Agents.MCTS;
+using Common;
 using Common.Actions;
 using Common.Osp;
 using System.Text.Json.Nodes;
@@ -13,13 +15,19 @@ namespace OpenSeat
     /// the game (Replica) that follows every step; before each decision it compares the copy with the referee's state and
     /// takes over what the referee's known rule differences change (Replica.Patch), since the referee decides the game.
     /// The search plans by Hexfarer's rules; a move the referee doesn't allow is replaced by the most visited root move it
-    /// allows. It needs the full state ("truth"): every hand is the true one, as for the open-hand MCTS in Hexfarer.
+    /// allows. It needs the full state ("truth"): every hand is the true one, as for the open-hand MCTS in Hexfarer. The
+    /// fair agent (fair: true) gets the same messages but plays like Hexfarer's fair agents in the Arena: Information Set
+    /// MCTS over worlds drawn from what its seat knows (BeliefTracker), which takes in every move as the seat sees it.
     /// </summary>
     internal sealed class SeatAgent(StateValueNet net, long iterations, double seconds, TextWriter log, int leavesPerBatch = MCTSAgent.DefaultLeavesPerBatch,
-        bool parallelSelection = true)
+        bool parallelSelection = true, bool fair = false)
     {
         private Replica? _replica;
         private MCTSAgent? _agent;
+        // The fair agent around the search (null for the open-hand agent)
+        private InformationSetMCTSAgent? _fair;
+        // Times the fair agent's own copy of the game had drifted from the replica and was set back to it (should stay 0)
+        private int _resyncs;
         private string _gameId = "";
         private sbyte _seat;
         // Per game: decisions, those searched, patched states, replaced moves, whether the copy was lost (it then plays the
@@ -31,7 +39,7 @@ namespace OpenSeat
         private long _searches, _iterations, _distinctLeaves;
         private double _searchSeconds;
 
-        public string Name => $"hexfarer-mcts-open-{(iterations > 0 ? $"{iterations}it" : $"{seconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}s")}"
+        public string Name => $"hexfarer-{(fair ? "ismcts-fair" : "mcts-open")}-{(iterations > 0 ? $"{iterations}it" : $"{seconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}s")}"
             + (leavesPerBatch != MCTSAgent.DefaultLeavesPerBatch ? $"-b{leavesPerBatch}" : "") + (parallelSelection ? "" : "-serial");
 
         /// <summary>
@@ -73,7 +81,8 @@ namespace OpenSeat
                 case "after":
                     log.WriteLine(new JsonObject { ["type"] = "stats", ["game_id"] = _gameId, ["seat"] = _seat, ["decisions"] = _decisions, ["searched"] = _searched,
                         ["patches"] = _patches, ["fallbacks"] = _fallbacks, ["lost"] = _lost,
-                        ["searches"] = _searches, ["iterations"] = _iterations, ["distinct_leaves"] = _distinctLeaves, ["search_seconds"] = Math.Round(_searchSeconds, 3) }.ToJsonString());
+                        ["searches"] = _searches, ["iterations"] = _iterations, ["distinct_leaves"] = _distinctLeaves, ["search_seconds"] = Math.Round(_searchSeconds, 3),
+                        ["fair"] = fair, ["resyncs"] = _resyncs }.ToJsonString());
                     log.Flush();
                     return null;
                 default:
@@ -89,10 +98,12 @@ namespace OpenSeat
             _patches = _fallbacks = _decisions = _searched = 0;
             _searches = _iterations = _distinctLeaves = 0;
             _searchSeconds = 0;
+            _resyncs = 0;
             _lost = !_replica.BoardMatches(before);
             if (_lost) log.WriteLine($"{_gameId}: the board doesn't write back as sent");
             _agent = new MCTSAgent(_seat, _replica.State, timeLimitSeconds: seconds, valueNet: net, iterationLimit: iterations, leavesPerBatch: leavesPerBatch,
                 parallelSelection: parallelSelection);
+            _fair = fair ? new InformationSetMCTSAgent(_agent, _replica.State) : null;
             // No trades between players under these rules
             _agent.Offers.Enabled = false;
         }
@@ -106,13 +117,20 @@ namespace OpenSeat
             if (step["state"] is JsonNode before && _replica.FirstDifference(before, $"move {step["n"]}") is (string differs, string why))
             {
                 _patches++;
+                GameState untouched = new(_replica.State);
                 if (!_replica.Patch(before))
                 {
                     _lost = true;
                     log.WriteLine($"{_gameId}: lost the game: can't take over {differs}: {why}");
                     return;
                 }
-                _agent!.ResetToState(_replica.State);
+                TookOver(untouched);
+            }
+            // The fair agent's copy must be the replica's position before the move, or its beliefs would follow another game
+            if (_fair != null && !_fair.Mirror.Equals(_replica.State))
+            {
+                _resyncs++;
+                _fair.ResetTo(_replica.State, _fair.Beliefs);
             }
             if (_replica.Follow(step) is (string kind, string detail))
             {
@@ -121,7 +139,30 @@ namespace OpenSeat
                 log.WriteLine($"{_gameId}: lost the game: {kind}: {detail}");
                 return;
             }
-            _agent!.HandleAction(_replica.Applied!);
+            Player.HandleAction(_replica.Applied!);
+        }
+
+        /// <summary>
+        /// The fair agent (for tests), null for the open-hand agent
+        /// </summary>
+        internal InformationSetMCTSAgent? Fair => _fair;
+
+        // The agent that plays the seat: the fair one around the search, or the open-hand search itself
+        private Agent Player => (Agent?)_fair ?? _agent!;
+
+        // After the replica took over the referee's state: the open-hand search starts from it; the fair agent takes the
+        // change in as an edit everyone sees (a bank, hands after a payout by the referee's rules, the Longest Road holder,
+        // a game going on), so its beliefs keep what it doesn't know (a reset would make every hand known)
+        private void TookOver(GameState untouched)
+        {
+            if (_fair == null)
+            {
+                _agent!.ResetToState(_replica!.State);
+                return;
+            }
+            BeliefTracker beliefs = new(_fair.Beliefs);
+            beliefs.Observe(untouched, null, _replica!.State);
+            _fair.ResetTo(_replica.State, beliefs);
         }
 
         private JsonNode Decide(JsonNode decide)
@@ -135,12 +176,13 @@ namespace OpenSeat
             {
                 // The referee decides: take over its state where the known differences changed it
                 _patches++;
+                GameState untouched = new(_replica.State);
                 if (!_replica.Patch(decide["state"]!))
                 {
                     _lost = true;
                     log.WriteLine($"{_gameId}: lost the game: can't take over {kind}: {detail}");
                 }
-                else _agent!.ResetToState(_replica.State);
+                else TookOver(untouched);
             }
             if (_lost || _replica!.Acting() != _seat) return Answer(legal[0]!);
 
@@ -154,8 +196,9 @@ namespace OpenSeat
                 return Answer(legal[0]!);
             }
 
+            // The fair agent searches worlds drawn from its beliefs, not the true state it is given
             SearchStatistics? previous = _agent!.LastSearch;
-            Action chosen = _agent.Act(_replica.State);
+            Action chosen = Player.Act(_replica.State);
             _searched++;
             // A new statistics object means a search ran for this decision (the last one stays when Act needs none)
             if (_agent.LastSearch is SearchStatistics search && !ReferenceEquals(search, previous))
@@ -169,7 +212,7 @@ namespace OpenSeat
 
             // The referee doesn't allow the move (its rules are narrower): the most visited root move it allows
             _fallbacks++;
-            (_, IReadOnlyList<MCTSAgent.RootMove> roots) = _agent.GetRootMoves();
+            (_, IReadOnlyList<MCTSAgent.RootMove> roots) = _fair?.GetRootMoves() ?? _agent.GetRootMoves();
             foreach (MCTSAgent.RootMove root in roots.OrderByDescending(r => r.Visits))
                 if (Allowed(root.Move) is JsonNode fallback) return Answer(fallback);
             return Answer(legal[0]!);

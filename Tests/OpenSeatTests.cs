@@ -285,6 +285,86 @@ namespace Tests
             Assert.True(games[1].seconds < games[0].seconds + 0.02 * games[1].searches, $"{games[0]} then {games[1]}");
         }
 
+        [Theory]
+        [InlineData("catanatron-100", false)]
+        [InlineData("catanatron-101", false)]
+        [InlineData("catanatron-100", true)]
+        public void TheFairAgentPlaysFromWhatItsSeatSaw(string game, bool payout)
+        {
+            // Seat 0 of a recorded game with the fair agent (catanatron-101 takes over the referee's state): it answers
+            // legally, its copy never drifts from the replica, its decisions come from its information-set tree, and its
+            // beliefs at the end are what a tracker of seat 0 holds after the same moves, with every takeover as a public
+            // edit (a reset would make the hands known). With payout, the referee's state at one of seat 0's decisions gives
+            // an extra card to a player whose hand seat 0 doesn't fully know, as a payout by other rules would (the next state
+            // takes it back)
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.Cpu);
+            StringWriter log = new();
+            SeatAgent agent = new(net, 32, 0, log, leavesPerBatch: 16, fair: true);
+            Assert.Contains("-ismcts-fair-", agent.Name);
+            Replica? expected = null;
+            BeliefTracker? seen = null;
+            uint mostUnknown = 0;
+            int patches = 0;
+            bool paid = false;
+            void TakeOver(JsonNode state)
+            {
+                if (expected!.FirstDifference(state, "test") == null) return;
+                GameState untouched = new(expected.State);
+                Assert.True(expected.Patch(state));
+                seen!.Observe(untouched, null, expected.State);
+                patches++;
+            }
+            foreach (JsonNode recorded in Replay.Read(Fixture).Where(m => m["game_id"]!.GetValue<string>() == game))
+            {
+                JsonNode message = recorded.DeepClone();
+                string type = message["type"]!.GetValue<string>();
+                if (type == "before") message["seat"] = 0;
+                if (type == "decide" && Int(message["seat"]) != 0) continue;
+                if (payout && !paid && type == "decide" && Enumerable.Range(1, 3).FirstOrDefault(p => seen!.Hand(p).Unknown > 0) is int player and > 0
+                    && message["state"]!["bank"]!["ore"]!.GetValue<int>() > 0)
+                {
+                    JsonNode state = message["state"]!;
+                    state["bank"]!["ore"] = state["bank"]!["ore"]!.GetValue<int>() - 1;
+                    state["players"]![player]!["hand"]!["ore"] = state["players"]![player]!["hand"]!["ore"]!.GetValue<int>() + 1;
+                    paid = true;
+                }
+                if (type == "after")
+                {
+                    // Before the end: the beliefs as the seat built them, against the independent ones
+                    Assert.Equal(seen, agent.Fair!.Beliefs);
+                    Assert.True(mostUnknown > 0, "the game has a steal seat 0 didn't see");
+                    Assert.Equal(game == "catanatron-101" || payout, patches > 0);
+                    Assert.Equal(payout, paid);
+                }
+                JsonNode? answer = agent.Handle(message);
+                switch (type)
+                {
+                    case "before":
+                        expected = new Replica(message);
+                        seen = new BeliefTracker(0, expected.State);
+                        break;
+                    case "step":
+                        if (message["state"] is JsonNode state) TakeOver(state);
+                        GameState pre = new(expected!.State);
+                        Assert.Null(expected.Follow(message));
+                        seen!.Observe(pre, expected.Applied, expected.State);
+                        mostUnknown = Math.Max(mostUnknown, Enumerable.Range(1, 3).Max(p => seen.Hand(p).Unknown));
+                        break;
+                    case "decide":
+                        TakeOver(message["state"]!);
+                        Assert.Contains(OspCodec.Canonical(answer!["action"]), message["legal"]!.AsArray().Select(OspCodec.Canonical).ToHashSet());
+                        break;
+                }
+                // After every message the seat knows what the independent tracker knows, no more and no less
+                if (type is "step" or "decide") Assert.Equal(seen, agent.Fair!.Beliefs);
+            }
+            JsonNode stats = JsonNode.Parse(log.ToString().Trim().Split('\n').Last())!;
+            Assert.Equal((true, false, 0), (stats["fair"]!.GetValue<bool>(), stats["lost"]!.GetValue<bool>(), Int(stats["resyncs"])));
+            Assert.True(Int(stats["searches"]) > 10);
+            Assert.NotNull(agent.Fair!.LastTree);
+            Assert.False(agent.Fair.FullKnowledge);
+        }
+
         [Fact]
         public void ADecisionWithoutASearchAddsNoSearchWork()
         {
