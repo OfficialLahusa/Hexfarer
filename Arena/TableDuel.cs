@@ -29,6 +29,16 @@ namespace Arena
 
         public GroupStatistics Statistics { get; private set; } = GroupStatistics.Of([], 0.25, 0.28);
 
+        /// <summary>
+        /// The net calls of the merged leaf batches after the duel (none without merging)
+        /// </summary>
+        public MergedLeaves Merged { get; private set; }
+
+        /// <summary>
+        /// The sides' nets and merging evaluators of the last run (their counters stay readable after it)
+        /// </summary>
+        public (SideNets Challenger, SideNets Baseline)? Nets { get; private set; }
+
         private double S0 => 0.25 + settings.Elo0 / 100;
         private double S1 => 0.25 + settings.Elo1 / 100;
 
@@ -37,15 +47,17 @@ namespace Arena
         /// </summary>
         public GroupStatistics Run(CancellationToken cancellation = default)
         {
-            // One net for both sides if they use the same file and batch size
-            (StateValueNet challengerNet, StateValueNet baselineNet) = AgentSpec.Nets(settings.Challenger, settings.Baseline, settings.Provider, settings.Iterations);
             // Parallel games only with an iteration budget; with a time budget they would take each other's compute
             bool iterationBudget = settings.Iterations > 0;
             int parallel = iterationBudget ? Math.Max(1, settings.Parallel) : 1;
+            // With games played at once, each side's leaf batches are merged into larger net calls; both sides share the nets
+            // and the merging if they use the same file
+            (SideNets challengerNets, SideNets baselineNets) = AgentSpec.Nets(settings.Challenger, settings.Baseline, settings.Provider, settings.Iterations, parallel);
+            Nets = (challengerNets, baselineNets);
             Statistics = GroupStatistics.Of([], S0, S1, settings.Alpha, settings.Beta);
 
             Write($"[table duel] {settings.Challenger} against 3x {settings.Baseline}, free trade; batches of {settings.Challenger.BatchFor(settings.Iterations)} and "
-                + $"{settings.Baseline.BatchFor(settings.Iterations)} leaves; maps from seed {settings.SeedBase}, "
+                + $"{settings.Baseline.BatchFor(settings.Iterations)} leaves{MergedLeaves.Describe(challengerNets, baselineNets)}; maps from seed {settings.SeedBase}, "
                 + (iterationBudget ? $"{settings.Iterations} iterations per decision, {parallel} games at once" : $"{settings.Seconds.ToString(CultureInfo.InvariantCulture)}s per decision")
                 + FormattableString.Invariant($"; SPRT win rate [{S0:P1}, {S1:P1}], at most {settings.MaxGames} games and {settings.MaxDuration.TotalMinutes:F0} min"));
 
@@ -66,7 +78,7 @@ namespace Arena
                     {
                         try
                         {
-                            GameResult result = PlayGame(game, challengerNet, baselineNet, stop.Token);
+                            GameResult result = PlayGame(game, challengerNets, baselineNets, stop.Token);
                             // A game cut short by the stop doesn't count, unless it had ended anyway
                             if (!stop.IsCancellationRequested || result.State.HasEnded)
                                 Record(game, result, stop);
@@ -81,8 +93,10 @@ namespace Arena
             finally
             {
                 Console.SetOut(console);
+                Merged = MergedLeaves.Close(challengerNets, baselineNets);
             }
 
+            if (Merged.Calls > 0) Write($"merged leaf batches: {Merged}");
             if (Statistics.Verdict != 0) reason = "decided";
             else if (cancellation.IsCancellationRequested) reason = "cancelled";
             else if (stop.IsCancellationRequested) reason = "time limit";
@@ -97,7 +111,7 @@ namespace Arena
         private sealed record GameResult(GameState State, int ChallengerSeat, bool ChallengerWon, double Seconds, int ChallengerOffers,
             int ChallengerTrades, int ChallengerPartner, int BaselineOffers, int BaselineTrades, int ChallengerCounters, int BaselineCounters);
 
-        private GameResult PlayGame(int game, StateValueNet challengerNet, StateValueNet baselineNet, CancellationToken cancellation)
+        private GameResult PlayGame(int game, SideNets challengerNets, SideNets baselineNets, CancellationToken cancellation)
         {
             // The four games of a map share its seed, so they play the same map with the challenger in each seat once
             int challengerSeat = game % Seats;
@@ -106,8 +120,8 @@ namespace Arena
             state.Settings.FreeTrade = true;
             GameState start = state;
             Agent[] agents = Enumerable.Range(0, Seats).Select(seat => seat == challengerSeat
-                ? settings.Challenger.Create((sbyte)seat, start, challengerNet, settings.Iterations, settings.Seconds)
-                : settings.Baseline.Create((sbyte)seat, start, baselineNet, settings.Iterations, settings.Seconds)).ToArray();
+                ? settings.Challenger.Create((sbyte)seat, start, challengerNets.Net, settings.Iterations, settings.Seconds, challengerNets.Leaves)
+                : settings.Baseline.Create((sbyte)seat, start, baselineNets.Net, settings.Iterations, settings.Seconds, baselineNets.Leaves)).ToArray();
 
             int challengerOffers = 0, challengerTrades = 0, challengerPartner = 0, baselineOffers = 0, baselineTrades = 0, challengerCounters = 0, baselineCounters = 0;
             var stopwatch = Stopwatch.StartNew();

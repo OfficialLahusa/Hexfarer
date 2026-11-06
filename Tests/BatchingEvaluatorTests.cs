@@ -52,6 +52,64 @@ namespace Tests
 
             Assert.Equal(requests.Sum(request => request.features.Dimensions[0]), evaluator.Rows);
             Assert.True(evaluator.Batches < requests.Length, "no request was batched with another one");
+            // Without padding the nets run only the rows in use
+            Assert.Equal(evaluator.Rows, evaluator.RunRows);
+        }
+
+        [Fact]
+        public async Task PaddedBatchesRunTheFullShapeAndKeepEachRequestsRows()
+        {
+            StateValueNet reference = CpuNet();
+            const int MaxRows = 48;
+            using BatchingEvaluator evaluator = new([CpuNet(), CpuNet()], maxRows: MaxRows, padToMaxRows: true);
+            Random random = new(11);
+
+            // Requests of different sizes at once: every net run has all 48 rows, the unused ones left over from earlier runs
+            var requests = Enumerable.Range(0, 120).Select(_ =>
+            {
+                var features = new DenseTensor<float>([1 + random.Next(20), reference.InputDim]);
+                for (int j = 0; j < features.Buffer.Length; j++) features.Buffer.Span[j] = (float)random.NextDouble();
+                return features;
+            }).ToArray();
+
+            LeafValues[] results = await Task.WhenAll(requests.Select(features => Task.Run(() => evaluator.EvaluateAsync(features, false))));
+
+            for (int i = 0; i < requests.Length; i++)
+            {
+                float[] wins = reference.Run(requests[i]);
+                Assert.Equal(wins.Length, results[i].WinProbabilities.Length);
+                for (int j = 0; j < wins.Length; j++) Assert.Equal(wins[j], results[i].WinProbabilities[j], 1e-5);
+            }
+            Assert.Equal(requests.Sum(features => features.Dimensions[0]), evaluator.Rows);
+            Assert.Equal(evaluator.Batches * MaxRows, evaluator.RunRows);
+        }
+
+        [Fact]
+        public void AnAgentSearchesThroughTheEvaluatorItIsGiven()
+        {
+            // Its leaf batches go to the shared evaluator instead of its own net: each of the 48 iterations is a row there, in
+            // three requests of 16
+            TestUtil.Seed(151);
+            using BatchingEvaluator evaluator = new([CpuNet()], maxRows: 16);
+            GameState state = TestUtil.NewGame();
+            MCTSAgent agent = new(TestUtil.ActingPlayer(state), state, valueNet: CpuNet(), iterationLimit: 48, leavesPerBatch: 16,
+                parallelSelection: false, evaluator: evaluator);
+
+            Action move = agent.Act(state);
+
+            Assert.True(move.IsValidFor(state));
+            Assert.Equal(48, agent.LastSearch!.Iterations);
+            Assert.Equal(48, evaluator.Rows);
+            Assert.Equal(3, evaluator.Batches);
+        }
+
+        [Fact]
+        public void AnEvaluatorOfAnotherModelIsRejected()
+        {
+            // The agent encodes its positions for its own net, so the evaluator has to run that model
+            using BatchingEvaluator policyEvaluator = new([new StateValueNet(TestUtil.FixturePath("ValueNet", "policy_tiny.onnx"), provider: InferenceProvider.Cpu)], maxRows: 16);
+            GameState state = TestUtil.NewGame();
+            Assert.Throws<ArgumentException>(() => new MCTSAgent(0, state, valueNet: CpuNet(), evaluator: policyEvaluator));
         }
 
         [Fact]

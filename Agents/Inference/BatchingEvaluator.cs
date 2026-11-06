@@ -17,11 +17,14 @@ namespace Agents.Inference
         private readonly Thread[] _workers;
         private readonly int _maxRows;
         private readonly int _featureDim;
-        private long _batches, _rows;
+        private readonly bool _padToMaxRows;
+        private long _batches, _rows, _runRows;
 
         /// <param name="nets">One net per worker, all of the same model</param>
         /// <param name="maxRows">Rows per net batch at most; nets with a fixed batch size (DirectML) need it at least this large</param>
-        public BatchingEvaluator(IReadOnlyList<StateValueNet> nets, int maxRows)
+        /// <param name="padToMaxRows">Nets without a fixed batch size run every batch with maxRows rows too (unused rows are
+        /// ignored): one shape instead of one per batch size, since CUDA's memory pool grows with every new shape</param>
+        public BatchingEvaluator(IReadOnlyList<StateValueNet> nets, int maxRows, bool padToMaxRows = false)
         {
             if (nets.Count == 0) throw new ArgumentException("At least one net is needed.", nameof(nets));
             if (nets.Any(net => net.FixedBatchSize < maxRows))
@@ -30,6 +33,7 @@ namespace Agents.Inference
                 throw new ArgumentException("The nets must be of the same model.", nameof(nets));
 
             _maxRows = maxRows;
+            _padToMaxRows = padToMaxRows;
             _featureDim = nets[0].InputDim;
             HasPlacements = nets[0].HasPlacements;
             Policy = nets[0].Policy;
@@ -43,6 +47,11 @@ namespace Agents.Inference
         public PolicyHead? Policy { get; }
 
         /// <summary>
+        /// Rows per net batch at most
+        /// </summary>
+        public int MaxRows => _maxRows;
+
+        /// <summary>
         /// Net batches run so far
         /// </summary>
         public long Batches => Interlocked.Read(ref _batches);
@@ -51,6 +60,11 @@ namespace Agents.Inference
         /// Rows evaluated so far (Rows / Batches is the mean batch size)
         /// </summary>
         public long Rows => Interlocked.Read(ref _rows);
+
+        /// <summary>
+        /// Rows the nets ran so far, padding included (RunRows / Batches is the shape they ran)
+        /// </summary>
+        public long RunRows => Interlocked.Read(ref _runRows);
 
         public Task<LeafValues> EvaluateAsync(DenseTensor<float> features, bool withPlacements, bool withPolicy = false, LeafValues? destination = null)
         {
@@ -104,7 +118,7 @@ namespace Agents.Inference
 
                 try
                 {
-                    int runRows = net.FixedBatchSize ?? rows;
+                    int runRows = net.FixedBatchSize ?? (_padToMaxRows ? _maxRows : rows);
                     var input = new DenseTensor<float>(buffer.AsMemory(0, runRows * _featureDim), [runRows, _featureDim]);
                     // The outputs stay in the runtime's memory, and each request gets its rows in its own arrays (those it brought,
                     // which a search reuses): no batch allocates large arrays, which would force full collections
@@ -122,6 +136,7 @@ namespace Agents.Inference
 
                     Interlocked.Increment(ref _batches);
                     Interlocked.Add(ref _rows, rows);
+                    Interlocked.Add(ref _runRows, runRows);
                 }
                 catch (Exception e)
                 {

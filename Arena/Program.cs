@@ -82,7 +82,8 @@ namespace Arena
               --baseline AGENT       The agent it is compared with
               --iterations N         MCTS iterations per decision (default 5000)
               --seconds S            Seconds per decision instead of iterations; games then run one at a time
-              --parallel N           Games played at once with an iteration budget (default 16)
+              --parallel N           Games played at once with an iteration budget (default 16); each side's leaf batches
+                                     reach the net merged across them
               --max-games N          Most games (default 4000)
               --name NAME            Names the duel; the maps are drawn from a seed derived from it
               --seed-base N          First map seed instead (default 30000)

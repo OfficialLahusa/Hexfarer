@@ -52,14 +52,44 @@ namespace Arena
         public int BatchFor(long iterations) => LeavesPerBatch ?? (iterations > 0 ? IterationBudgetLeavesPerBatch : MCTSAgent.DefaultLeavesPerBatch);
 
         /// <summary>
-        /// The nets of a duel's two sides: one per side, shared if both use the same file and batch size; on DirectML the
-        /// session's fixed batch shape is the side's batch size, so smaller batches aren't padded to 256 rows
+        /// Rows per net call at most when the leaf batches of games played at once are merged (16 games in batches of 16)
         /// </summary>
-        public static (StateValueNet challenger, StateValueNet baseline) Nets(AgentSpec challenger, AgentSpec baseline, InferenceProvider provider, long iterations)
+        public const int MergedRows = 256;
+
+        /// <summary>
+        /// Nets per merging evaluator: one runs a call while the next one is collected
+        /// </summary>
+        public const int MergingNets = 2;
+
+        /// <summary>
+        /// The nets of a duel's two sides. With an iteration budget and games played at once, each side's searches send their
+        /// leaf batches to one BatchingEvaluator, which merges those waiting into calls of up to MergedRows rows (the side's
+        /// batch size if larger): small batches searched alone left the GPU waiting on many small calls (16 games in batches
+        /// of 16 played 0.24x the games per hour of 256 on DirectML, 0.35x on CUDA). Both sides share it if they use the same
+        /// file. Otherwise every search runs its batches on its side's net, whose DirectML shape is the side's batch size;
+        /// shared with the same file and batch size.
+        /// </summary>
+        public static (SideNets challenger, SideNets baseline) Nets(AgentSpec challenger, AgentSpec baseline, InferenceProvider provider, long iterations, int parallel)
         {
+            bool sameFile = baseline.ModelPath == challenger.ModelPath;
+            if (iterations > 0 && parallel > 1)
+            {
+                SideNets Merged(params AgentSpec[] sides)
+                {
+                    int rows = Math.Max(MergedRows, sides.Max(side => side.BatchFor(iterations)));
+                    StateValueNet[] nets = Enumerable.Range(0, MergingNets).Select(_ => new StateValueNet(sides[0].ModelPath, provider: provider, fixedBatchSize: rows)).ToArray();
+                    // CUDA runs each call in the shape it gets, and its memory pool grows with every new shape: all calls get the full one
+                    BatchingEvaluator leaves = new(nets, rows, padToMaxRows: nets[0].Provider == InferenceProvider.Cuda);
+                    // The agents' own runs (encoding, trade judgments, single positions) go to the first worker's net
+                    return new SideNets(nets[0], leaves);
+                }
+                SideNets merged = sameFile ? Merged(challenger, baseline) : Merged(challenger);
+                return (merged, sameFile ? merged : Merged(baseline));
+            }
+
             StateValueNet first = new(challenger.ModelPath, provider: provider, fixedBatchSize: challenger.BatchFor(iterations));
-            bool shared = baseline.ModelPath == challenger.ModelPath && baseline.BatchFor(iterations) == challenger.BatchFor(iterations);
-            return (first, shared ? first : new StateValueNet(baseline.ModelPath, provider: provider, fixedBatchSize: baseline.BatchFor(iterations)));
+            bool shared = sameFile && baseline.BatchFor(iterations) == challenger.BatchFor(iterations);
+            return (new SideNets(first, null), new SideNets(shared ? first : new StateValueNet(baseline.ModelPath, provider: provider, fixedBatchSize: baseline.BatchFor(iterations)), null));
         }
 
         public static AgentSpec Parse(string spec)
@@ -157,12 +187,13 @@ namespace Arena
         /// <summary>
         /// The agent for a seat, searching with the given net and budget (iterations, or seconds if 0)
         /// </summary>
-        public Agent Create(sbyte seat, GameState start, StateValueNet net, long iterations, double seconds)
+        public Agent Create(sbyte seat, GameState start, StateValueNet net, long iterations, double seconds, ILeafEvaluator? leaves = null)
         {
-            // The agent picks the encoding of its net (see Vectorizers): a belief-aware net sees its seat's view
+            // The agent picks the encoding of its net (see Vectorizers): a belief-aware net sees its seat's view; its search's
+            // leaf batches go to leaves if given (shared with the other games), else to the net
             MCTSAgent search = new MCTSAgent(seat, start, explorationParameter: Exploration, timeLimitSeconds: seconds,
                 valueNet: net, placementWeight: PlacementWeight, opponentModel: OpponentModel,
-                iterationLimit: iterations, leavesPerBatch: BatchFor(iterations))
+                iterationLimit: iterations, leavesPerBatch: BatchFor(iterations), evaluator: leaves)
             {
                 UniformPriors = UniformPriors, FirstPlayReduction = FirstPlayReduction, NormalizeValues = NormalizeValues ?? true, ReuseTree = ReuseTree,
                 EvaluateNewLeaves = EvaluateNewLeaves, PlayForcedMovesAtOnce = PlayForcedMovesAtOnce, SetupBudgetFactor = SetupBudget
@@ -196,5 +227,41 @@ namespace Arena
             }
             return Determinizations > 0 ? new DeterminizedMCTSAgent(search, start, Determinizations) : search;
         }
+    }
+
+    /// <summary>
+    /// A duel side's nets: Net for what its agents run themselves (their encoding, trade judgments, single positions), and
+    /// Leaves for their searches' leaf batches, merged across the games played at once (null: each search runs them on Net)
+    /// </summary>
+    internal sealed record SideNets(StateValueNet Net, BatchingEvaluator? Leaves);
+
+    /// <summary>
+    /// The net calls of a duel's merged leaf batches: calls, the leaves they evaluated and the rows they ran (padding included)
+    /// </summary>
+    internal readonly record struct MergedLeaves(long Calls, long Rows, long RunRows)
+    {
+        /// <summary>
+        /// For the duel's first line: how the leaf batches reach the net
+        /// </summary>
+        public static string Describe(SideNets challenger, SideNets baseline) => challenger.Leaves is BatchingEvaluator leaves
+            ? $", merged across games into net calls of up to {leaves.MaxRows} rows" + (baseline.Leaves == leaves ? " (shared by both sides)" : "")
+            : "";
+
+        /// <summary>
+        /// Stops the sides' merging evaluators (each once) and sums their calls
+        /// </summary>
+        public static MergedLeaves Close(SideNets challenger, SideNets baseline)
+        {
+            MergedLeaves total = default;
+            foreach (BatchingEvaluator leaves in new[] { challenger.Leaves, baseline.Leaves }.OfType<BatchingEvaluator>().Distinct())
+            {
+                leaves.Dispose();
+                total = new MergedLeaves(total.Calls + leaves.Batches, total.Rows + leaves.Rows, total.RunRows + leaves.RunRows);
+            }
+            return total;
+        }
+
+        public override string ToString() => Calls == 0 ? "none"
+            : FormattableString.Invariant($"{Calls} net calls, {(double)Rows / Calls:F1} leaves per call ({(double)Rows / RunRows:P0} of the rows run)");
     }
 }

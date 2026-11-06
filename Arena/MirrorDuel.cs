@@ -58,22 +58,34 @@ namespace Arena
         public PairStatistics Statistics { get; private set; } = PairStatistics.Of([], 0, 40);
 
         /// <summary>
+        /// The net calls of the merged leaf batches after the duel (none without merging)
+        /// </summary>
+        public MergedLeaves Merged { get; private set; }
+
+        /// <summary>
+        /// The sides' nets and merging evaluators of the last run (their counters stay readable after it)
+        /// </summary>
+        public (SideNets Challenger, SideNets Baseline)? Nets { get; private set; }
+
+        /// <summary>
         /// Plays the duel and writes one line per game, one per completed pair and a last line with the result
         /// </summary>
         public PairStatistics Run(CancellationToken cancellation = default)
         {
-            (StateValueNet challengerNet, StateValueNet baselineNet) = AgentSpec.Nets(settings.Challenger, settings.Baseline, settings.Provider, settings.Iterations);
-            var nets = new Dictionary<AgentSpec, StateValueNet>
-            {
-                [settings.Challenger] = challengerNet,
-                [settings.Baseline] = baselineNet,
-            };
             bool iterationBudget = settings.Iterations > 0;
             int parallel = iterationBudget ? Math.Max(1, settings.Parallel) : 1;
+            // With games played at once, each side's leaf batches are merged into larger net calls
+            (SideNets challengerNets, SideNets baselineNets) = AgentSpec.Nets(settings.Challenger, settings.Baseline, settings.Provider, settings.Iterations, parallel);
+            Nets = (challengerNets, baselineNets);
+            var nets = new Dictionary<AgentSpec, SideNets>
+            {
+                [settings.Challenger] = challengerNets,
+                [settings.Baseline] = baselineNets,
+            };
             Statistics = PairStatistics.Of([], settings.Elo0, settings.Elo1, settings.Alpha, settings.Beta);
 
             Write($"[mirror duel] {settings.Challenger} against {settings.Baseline}; batches of {settings.Challenger.BatchFor(settings.Iterations)} and "
-                + $"{settings.Baseline.BatchFor(settings.Iterations)} leaves; maps from seed {settings.SeedBase}, "
+                + $"{settings.Baseline.BatchFor(settings.Iterations)} leaves{MergedLeaves.Describe(challengerNets, baselineNets)}; maps from seed {settings.SeedBase}, "
                 + (iterationBudget ? $"{settings.Iterations} iterations per decision, {parallel} games at once" : $"{settings.Seconds.ToString(CultureInfo.InvariantCulture)}s per decision")
                 + $"; SPRT [{settings.Elo0:+0;-0;0}, {settings.Elo1:+0;-0;0}], at most {settings.MaxGames} games and {settings.MaxDuration.TotalMinutes:F0} min");
 
@@ -107,8 +119,10 @@ namespace Arena
             finally
             {
                 Console.SetOut(console);
+                Merged = MergedLeaves.Close(challengerNets, baselineNets);
             }
 
+            if (Merged.Calls > 0) Write($"merged leaf batches: {Merged}");
             if (Statistics.Verdict != 0) reason = "decided";
             else if (cancellation.IsCancellationRequested) reason = "cancelled";
             else if (stop.IsCancellationRequested) reason = "time limit";
@@ -116,7 +130,7 @@ namespace Arena
             return Statistics;
         }
 
-        private string? PlayGame(int game, Dictionary<AgentSpec, StateValueNet> nets, CancellationToken cancellation,
+        private string? PlayGame(int game, Dictionary<AgentSpec, SideNets> nets, CancellationToken cancellation,
             out GameState state, out double seconds)
         {
             AgentSpec[] seats = game % 2 == 0
@@ -126,7 +140,7 @@ namespace Arena
             state = new GameState(MapGenerator.GenerateRandomClassic(), 4);
             state.Settings.FreeTrade = settings.FreeTrade;
             GameState start = state;
-            Agent[] agents = Enumerable.Range(0, 4).Select(seat => seats[seat].Create((sbyte)seat, start, nets[seats[seat]], settings.Iterations, settings.Seconds)).ToArray();
+            Agent[] agents = Enumerable.Range(0, 4).Select(seat => seats[seat].Create((sbyte)seat, start, nets[seats[seat]].Net, settings.Iterations, settings.Seconds, nets[seats[seat]].Leaves)).ToArray();
 
             var stopwatch = Stopwatch.StartNew();
             while (!state.HasEnded && state.Turn.RoundCounter < 300)

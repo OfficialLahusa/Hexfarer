@@ -3,6 +3,7 @@ using Agents.Inference;
 using Agents.MCTS;
 using Arena;
 using Common;
+using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace Tests
 {
@@ -71,16 +72,68 @@ namespace Tests
         [Fact]
         public void BothSidesShareANetOnlyWithTheSameFileAndBatchSize()
         {
+            // One game at a time: no merging, every search runs its batches on its side's net
             AgentSpec a = AgentSpec.Parse($"a={PlainModelPath}"), b64 = AgentSpec.Parse($"b={PlainModelPath}=b64"), c = AgentSpec.Parse($"c={PolicyModelPath}");
-            (StateValueNet first, StateValueNet second) = AgentSpec.Nets(a, AgentSpec.Parse($"a2={PlainModelPath}"), InferenceProvider.Cpu, 800);
-            Assert.Same(first, second);
-            (first, second) = AgentSpec.Nets(a, b64, InferenceProvider.Cpu, 800);
-            Assert.NotSame(first, second);
-            // With a time budget both default to 256: the same net again, unless the file differs
-            (first, second) = AgentSpec.Nets(AgentSpec.Parse($"t={PlainModelPath}=b256"), a, InferenceProvider.Cpu, 0);
-            Assert.Same(first, second);
-            (first, second) = AgentSpec.Nets(a, c, InferenceProvider.Cpu, 0);
-            Assert.NotSame(first, second);
+            (SideNets first, SideNets second) = AgentSpec.Nets(a, AgentSpec.Parse($"a2={PlainModelPath}"), InferenceProvider.Cpu, 800, 1);
+            Assert.Same(first.Net, second.Net);
+            Assert.Null(first.Leaves);
+            Assert.Null(second.Leaves);
+            (first, second) = AgentSpec.Nets(a, b64, InferenceProvider.Cpu, 800, 1);
+            Assert.NotSame(first.Net, second.Net);
+            // With a time budget both default to 256: the same net again, unless the file differs; never merged, even with
+            // several games allowed (a time budget plays one at a time)
+            (first, second) = AgentSpec.Nets(AgentSpec.Parse($"t={PlainModelPath}=b256"), a, InferenceProvider.Cpu, 0, 16);
+            Assert.Same(first.Net, second.Net);
+            Assert.Null(first.Leaves);
+            (first, second) = AgentSpec.Nets(a, c, InferenceProvider.Cpu, 0, 1);
+            Assert.NotSame(first.Net, second.Net);
+        }
+
+        /// <summary>
+        /// Both sides' searches sent their leaf batches to their own merging evaluator, and the duel's summary adds them up
+        /// </summary>
+        private static void AssertBothSidesMerged((SideNets Challenger, SideNets Baseline) nets, MergedLeaves merged)
+        {
+            BatchingEvaluator challenger = nets.Challenger.Leaves!, baseline = nets.Baseline.Leaves!;
+            Assert.NotSame(challenger, baseline);
+            Assert.True(challenger.Batches > 0, "the challenger's searches sent no batches");
+            Assert.True(baseline.Batches > 0, "the baselines' searches sent no batches");
+            Assert.Equal(challenger.Batches + baseline.Batches, merged.Calls);
+            Assert.Equal(challenger.Rows + baseline.Rows, merged.Rows);
+            Assert.Equal(challenger.RunRows + baseline.RunRows, merged.RunRows);
+        }
+
+        [Fact]
+        public void GamesAtOnceMergeTheLeafBatchesOfEachFile()
+        {
+            AgentSpec a = AgentSpec.Parse($"a={PlainModelPath}"), b64 = AgentSpec.Parse($"b={PlainModelPath}=b64"), c = AgentSpec.Parse($"c={PolicyModelPath}");
+
+            // The same file: one merging evaluator and one net for both sides, whatever their batch sizes
+            (SideNets first, SideNets second) = AgentSpec.Nets(a, b64, InferenceProvider.Cpu, 800, 4);
+            Assert.NotNull(first.Leaves);
+            Assert.Same(first.Leaves, second.Leaves);
+            Assert.Same(first.Net, second.Net);
+            Assert.Equal(AgentSpec.MergedRows, first.Leaves!.MaxRows);
+            // On the CPU a call runs only the rows in use (the full shape is for CUDA)
+            first.Leaves.EvaluateAsync(new DenseTensor<float>([3, first.Net.InputDim]), false).GetAwaiter().GetResult();
+            Assert.Equal(3, first.Leaves.Rows);
+            Assert.Equal(3, first.Leaves.RunRows);
+            MergedLeaves.Close(first, second);
+
+            // A side's batches larger than a merged call set its size
+            (first, second) = AgentSpec.Nets(AgentSpec.Parse($"big={PlainModelPath}=b512"), a, InferenceProvider.Cpu, 800, 4);
+            Assert.Equal(512, first.Leaves!.MaxRows);
+            MergedLeaves.Close(first, second);
+
+            // Different files: one evaluator each, running its side's model
+            (first, second) = AgentSpec.Nets(a, c, InferenceProvider.Cpu, 800, 4);
+            Assert.NotNull(first.Leaves);
+            Assert.NotNull(second.Leaves);
+            Assert.NotSame(first.Leaves, second.Leaves);
+            Assert.Null(first.Leaves!.Policy);
+            Assert.NotNull(second.Leaves!.Policy);
+            Assert.NotNull(second.Net.Policy);
+            MergedLeaves.Close(first, second);
         }
 
         [Fact]
@@ -262,7 +315,7 @@ namespace Tests
         {
             var settings = new DuelSettings
             {
-                Challenger = AgentSpec.Parse($"C={PlainModelPath}=b8"),
+                Challenger = AgentSpec.Parse($"C={PolicyModelPath}=b8"),
                 Baseline = AgentSpec.Parse($"B={PlainModelPath}=b8=nooffers"),
                 Iterations = 16,
                 Parallel = 4,
@@ -275,9 +328,15 @@ namespace Tests
             };
             var log = new StringWriter();
 
-            GroupStatistics result = new TableDuel(settings, log).Run();
+            TableDuel duel = new(settings, log);
+            GroupStatistics result = duel.Run();
 
             string text = log.ToString();
+            // Four games at once with two files: the challenger's and the three baselines' leaf batches each went through
+            // their side's merging evaluator, and the summary counts both
+            Assert.Contains("merged across games into net calls of up to 256 rows;", text);
+            AssertBothSidesMerged(duel.Nets!.Value, duel.Merged);
+            Assert.Contains($"merged leaf batches: {duel.Merged}", text);
             Assert.Equal(1, result.Groups);
             string[] games = text.Split('\n').Where(line => line.Contains(" done): ")).ToArray();
             Assert.Equal(4, games.Length);
@@ -361,9 +420,14 @@ namespace Tests
             };
             var log = new StringWriter();
 
-            PairStatistics result = new MirrorDuel(settings, log).Run();
+            MirrorDuel duel = new(settings, log);
+            PairStatistics result = duel.Run();
 
             string text = log.ToString();
+            // Four games at once with two files: each side's leaf batches went through its own merging evaluator
+            Assert.Contains("merged across games into net calls of up to 256 rows;", text);
+            AssertBothSidesMerged(duel.Nets!.Value, duel.Merged);
+            Assert.Contains($"merged leaf batches: {duel.Merged}", text);
             Assert.Equal(2, result.Pairs);
             Assert.Equal(4, text.Split('\n').Count(line => line.Contains(" game ")));
             Assert.Contains("seats C B C B", text);

@@ -230,7 +230,7 @@ namespace Agents.MCTS
 
         public MCTSAgent(sbyte playerIndex, GameState initialState, double explorationParameter = 1.414, double timeLimitSeconds = TIME_LIMIT_SECONDS,
             StateValueNet? valueNet = null, IStateVectorizer? vectorizer = null, double placementWeight = 0, OpponentModel opponentModel = OpponentModel.MaxN,
-            long iterationLimit = 0, int leavesPerBatch = DefaultLeavesPerBatch, bool parallelSelection = true)
+            long iterationLimit = 0, int leavesPerBatch = DefaultLeavesPerBatch, bool parallelSelection = true, ILeafEvaluator? evaluator = null)
             : base(playerIndex)
         {
             _explorationParameter = explorationParameter;
@@ -238,8 +238,12 @@ namespace Agents.MCTS
             IterationLimit = iterationLimit;
             _stateValueNet = valueNet ?? DefaultValueNet.Value;
             _stateVectorizer = vectorizer ?? Vectorizers.For(_stateValueNet, playerIndex);
+            // The leaf batches go to the net directly, or to an evaluator shared with other searches (e.g. a BatchingEvaluator
+            // that merges the batches of games played at once), which has to run the same model
+            if (evaluator != null && (evaluator.HasPlacements != _stateValueNet.HasPlacements || (evaluator.Policy == null) != (_stateValueNet.Policy == null)))
+                throw new ArgumentException("The evaluator has to run the value net's model.", nameof(evaluator));
             // Selection on one thread repeats a search exactly (for tests), on all cores it is faster
-            _search = new MCTSSearch(new DirectEvaluator(_stateValueNet), _stateVectorizer, leavesPerBatch, parallelSelection);
+            _search = new MCTSSearch(evaluator ?? new DirectEvaluator(_stateValueNet), _stateVectorizer, leavesPerBatch, parallelSelection);
             PlacementWeight = placementWeight;
             _opponentModel = opponentModel;
 
