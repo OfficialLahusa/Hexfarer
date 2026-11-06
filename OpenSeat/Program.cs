@@ -19,6 +19,7 @@ namespace OpenSeat
         public const string Usage = """
             Usage: OpenSeat replay LOG [LOG ...] [--max-games N] [--examples K]
                    OpenSeat agent [--net MODEL.onnx] [--iterations N | --seconds S] [--provider auto|cpu|dml|cuda] [--leaves-per-batch B]
+                                  [--threads T] [--serial]
                    OpenSeat boards --seed-base S --count N --out FILE
                    OpenSeat bench [--games N] [--seed S]
 
@@ -30,7 +31,9 @@ namespace OpenSeat
             agent: plays one seat for a referee over the protocol on standard input and output, with open-hand MCTS and the
             value net (default: the deployed net, 5000 iterations per decision; budgets round up to whole batches of B leaves,
             default 256). Needs the full state ("truth"). Writes one stats line per game to standard error, with the
-            search's leaf evaluations and the distinct positions among them.
+            search's leaf evaluations and the distinct positions among them. --threads sets the value net's threads per
+            evaluation (default half the logical cores), --serial selects each batch on one thread instead of all cores:
+            both for an agent pinned to few cores, e.g. at equal thinking time on one core against another engine's bot.
 
             boards: writes the boards of the map seeds S to S+N-1 as the Arena generates them, one protocol board per line.
 
@@ -74,12 +77,16 @@ namespace OpenSeat
                         };
                         double seconds = double.Parse(Option("--seconds", "0"), CultureInfo.InvariantCulture);
                         long iterations = seconds > 0 ? 0 : long.Parse(Option("--iterations", "5000"));
-                        StateValueNet net = new(Option("--net", StateValueNet.DefaultModelPath), provider: provider);
+                        // Threads of the value net inside one evaluation (0: half the logical cores)
+                        int threads = int.Parse(Option("--threads", "0"));
+                        StateValueNet net = new(Option("--net", StateValueNet.DefaultModelPath), intraOpThreads: threads, provider: provider);
                         // The agents' console output would mix with the protocol
                         TextWriter protocol = Console.Out;
                         Console.SetOut(TextWriter.Null);
                         int leavesPerBatch = int.Parse(Option("--leaves-per-batch", MCTSAgent.DefaultLeavesPerBatch.ToString()));
-                        new SeatAgent(net, iterations, seconds, Console.Error, leavesPerBatch).Run(Console.In, protocol);
+                        // Select each batch on the calling thread instead of on all cores (e.g. for a process pinned to one core)
+                        bool serial = args.Contains("--serial");
+                        new SeatAgent(net, iterations, seconds, Console.Error, leavesPerBatch, parallelSelection: !serial).Run(Console.In, protocol);
                         return 0;
                     }
                 case "boards":

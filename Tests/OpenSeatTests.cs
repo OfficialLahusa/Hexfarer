@@ -254,6 +254,38 @@ namespace Tests
         }
 
         [Fact]
+        public void AnAgentWithATimeBudgetReportsItsSearchTime()
+        {
+            // 20 ms per decision, batches of 16 selected on one thread: each search takes at least its budget and at most a
+            // few batches longer, and the game's search time is the sum over its searches
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), intraOpThreads: 1, provider: InferenceProvider.Cpu);
+            StringWriter log = new();
+            SeatAgent agent = new(net, 0, 0.02, log, leavesPerBatch: 16, parallelSelection: false);
+            Assert.EndsWith("-0.02s-b16-serial", agent.Name);
+            List<(int searches, double seconds)> games = [];
+            foreach (string game in new[] { "catanatron-100", "catanatron-102" })
+            {
+                foreach (JsonNode recorded in Replay.Read(Fixture).Where(m => m["game_id"]!.GetValue<string>() == game))
+                {
+                    JsonNode message = recorded.DeepClone();
+                    string type = message["type"]!.GetValue<string>();
+                    if (type == "before") message["seat"] = 0;
+                    if (type == "decide" && Int(message["seat"]) != 0) continue;
+                    agent.Handle(message);
+                }
+                JsonNode stats = JsonNode.Parse(log.ToString().Trim().Split('\n').Last())!;
+                int searches = Int(stats["searches"]);
+                double seconds = stats["search_seconds"]!.GetValue<double>();
+                Assert.True(searches > 10, $"{searches} searches");
+                Assert.InRange(seconds, 0.02 * searches, 0.25 * searches);
+                Assert.Equal(0, stats["iterations"]!.GetValue<long>() % 16);
+                games.Add((searches, seconds));
+            }
+            // The second game counts only its own searches: carried over, it would hold the first game's time on top
+            Assert.True(games[1].seconds < games[0].seconds + 0.02 * games[1].searches, $"{games[0]} then {games[1]}");
+        }
+
+        [Fact]
         public void ADecisionWithoutASearchAddsNoSearchWork()
         {
             // The same game twice; the second time the referee also lists a move Hexfarer's rules don't have next to every

@@ -15,7 +15,8 @@ namespace OpenSeat
     /// The search plans by Hexfarer's rules; a move the referee doesn't allow is replaced by the most visited root move it
     /// allows. It needs the full state ("truth"): every hand is the true one, as for the open-hand MCTS in Hexfarer.
     /// </summary>
-    internal sealed class SeatAgent(StateValueNet net, long iterations, double seconds, TextWriter log, int leavesPerBatch = MCTSAgent.DefaultLeavesPerBatch)
+    internal sealed class SeatAgent(StateValueNet net, long iterations, double seconds, TextWriter log, int leavesPerBatch = MCTSAgent.DefaultLeavesPerBatch,
+        bool parallelSelection = true)
     {
         private Replica? _replica;
         private MCTSAgent? _agent;
@@ -28,9 +29,10 @@ namespace OpenSeat
         // Per game, the search's work: searches that ran (a decision with an immediate win may skip it), leaf evaluations
         // (whole batches) and the distinct positions among them, for comparisons with other engines at equal work
         private long _searches, _iterations, _distinctLeaves;
+        private double _searchSeconds;
 
-        public string Name => $"hexfarer-mcts-open-{(iterations > 0 ? $"{iterations}it" : $"{seconds}s")}"
-            + (leavesPerBatch != MCTSAgent.DefaultLeavesPerBatch ? $"-b{leavesPerBatch}" : "");
+        public string Name => $"hexfarer-mcts-open-{(iterations > 0 ? $"{iterations}it" : $"{seconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}s")}"
+            + (leavesPerBatch != MCTSAgent.DefaultLeavesPerBatch ? $"-b{leavesPerBatch}" : "") + (parallelSelection ? "" : "-serial");
 
         /// <summary>
         /// Answers the referee's messages until its input ends
@@ -71,7 +73,7 @@ namespace OpenSeat
                 case "after":
                     log.WriteLine(new JsonObject { ["type"] = "stats", ["game_id"] = _gameId, ["seat"] = _seat, ["decisions"] = _decisions, ["searched"] = _searched,
                         ["patches"] = _patches, ["fallbacks"] = _fallbacks, ["lost"] = _lost,
-                        ["searches"] = _searches, ["iterations"] = _iterations, ["distinct_leaves"] = _distinctLeaves }.ToJsonString());
+                        ["searches"] = _searches, ["iterations"] = _iterations, ["distinct_leaves"] = _distinctLeaves, ["search_seconds"] = Math.Round(_searchSeconds, 3) }.ToJsonString());
                     log.Flush();
                     return null;
                 default:
@@ -86,9 +88,11 @@ namespace OpenSeat
             _replica = new Replica(before);
             _patches = _fallbacks = _decisions = _searched = 0;
             _searches = _iterations = _distinctLeaves = 0;
+            _searchSeconds = 0;
             _lost = !_replica.BoardMatches(before);
             if (_lost) log.WriteLine($"{_gameId}: the board doesn't write back as sent");
-            _agent = new MCTSAgent(_seat, _replica.State, timeLimitSeconds: seconds, valueNet: net, iterationLimit: iterations, leavesPerBatch: leavesPerBatch);
+            _agent = new MCTSAgent(_seat, _replica.State, timeLimitSeconds: seconds, valueNet: net, iterationLimit: iterations, leavesPerBatch: leavesPerBatch,
+                parallelSelection: parallelSelection);
             // No trades between players under these rules
             _agent.Offers.Enabled = false;
         }
@@ -159,6 +163,7 @@ namespace OpenSeat
                 _searches++;
                 _iterations += search.Iterations;
                 _distinctLeaves += search.DistinctLeaves;
+                _searchSeconds += search.Seconds;
             }
             if (Allowed(chosen) is JsonNode move) return Answer(move);
 
