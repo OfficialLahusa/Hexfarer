@@ -135,6 +135,35 @@ namespace Common
         }
 
         /// <summary>
+        /// A classic board with the given contents (e.g. a board from another engine, see Common.Osp): the land tile at every
+        /// map position within distance 2 of the center (type and number), water around it, the ports and the robber's map
+        /// position. Shares the shape and geometry of every classic board.
+        /// </summary>
+        public static Board CreateClassic(IReadOnlyDictionary<(int x, int y), (TileType type, byte? number)> land, List<Port> ports, (int x, int y) robber)
+        {
+            HexMap<Tile> map = new HexMap<Tile>(7, 7, new Tile(0, 0, TileType.NonPlayable, null));
+            for (int y = 0; y < map.Height; y++)
+            {
+                for (int x = 0; x < map.Width; x++)
+                {
+                    int dist = Coordinates.Distance(x, y, 3, 3);
+                    if (dist < 3)
+                    {
+                        // Every land position needs its tile
+                        if (!land.TryGetValue((x, y), out var tile)) throw new ArgumentException($"No land tile at ({x}, {y}).", nameof(land));
+                        map.SetTile(x, y, new Tile((byte)x, (byte)y, tile.type, tile.number));
+                    }
+                    else map.SetTile(x, y, new Tile((byte)x, (byte)y, dist < 4 ? TileType.Water : TileType.NonPlayable, null));
+                }
+            }
+            if (land.Count != 19) throw new ArgumentException($"{land.Count} land tiles instead of 19.", nameof(land));
+
+            ClassicGeometry geometry = Geometry.Value;
+            AdjacencyMatrix adjacency = new AdjacencyMatrix(geometry.Adjacency, map, geometry.Intersections, geometry.Edges);
+            return new Board(map, geometry.Intersections, geometry.Edges, ports, adjacency, map.GetTile(robber.x, robber.y));
+        }
+
+        /// <summary>
         /// Shape of the classic board, built once: adjacency, intersections and edges, and the neighbors of every map position
         /// </summary>
         private sealed record ClassicGeometry(AdjacencyMatrix Adjacency, List<Intersection> Intersections, List<Edge> Edges, int[][] Neighbors);

@@ -166,7 +166,8 @@ class Encoder:
             "prompt": self.prompt(),
             "current": state.current_player_index,
             "turn": state.num_turns,
-            "free_roads": state.free_roads_available if state.is_road_building else 0,
+            # The free roads that can still be placed (Catanatron counts 2 when the card is played, even with 1 road left)
+            "free_roads": min(state.free_roads_available, ps[f"P{state.current_player_index}_ROADS_AVAILABLE"]) if state.is_road_building else 0,
             "robber": list(osp_board.axial(state.board.robber_coordinate)),
             "buildings": {"settlements": sorted(settlements), "cities": sorted(cities), "roads": sorted(roads.values())},
             "bank": {**{RESOURCE_NAMES[r]: n for r, n in zip(RESOURCES, state.resource_freqdeck)},

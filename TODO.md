@@ -239,7 +239,20 @@
 	- Lizenz: Repo bleibt vorerst ARR, nur die Adapter in eigenem Unterordner unter GPL-3.0 (eigene LICENSE, Satz im README); vorher Root-LICENSE mit ARR, sonst hält GitHub das ganze Repo für GPL; Kern und Adapter nur über die Prozessgrenze (JSON), kein Hexfarer-Code in den Adaptern, Fremdcode nur als Abhängigkeit
 	- Regelsätze als Spieleinstellung: Catanatron-Regeln (kein Spielerhandel, Abwurf Karte für Karte, Bankmangel trifft alle, Sieg auch im fremden Zug, Zuglimit 1000 = Remis) neben den vollen Regeln; Agents deklarieren ihre Regelsätze, die Lobby bietet nur passende Sitze an
 	- 1. Bridge-Host (C#): Replik pro Sitz, nach jeder Aktion öffentlichen Zustand und legale Züge gegen den Schiedsrichter prüfen, Koordinaten-Mapping aus der Geometrie mit Tests (~1-2 Tage)
-		- Umgesetzt: Lizenz-Layout (Bridges unter GPL), OSP-Entwurf, Brett-Schlüssel (BoardGeometry, osp/classic-board.json; Catanatrons Brett passt exakt, Häfen eingeschlossen), Catanatron-Recorder (record.py); offen: Replay in Hexfarer
+		- Umgesetzt: Lizenz-Layout (Bridges unter GPL), OSP-Entwurf, Brett-Schlüssel (BoardGeometry, osp/classic-board.json; Catanatrons Brett passt exakt, Häfen eingeschlossen), Catanatron-Recorder (record.py), Replay-Harness (OpenSeat replay)
+		- Catanatron weicht ab (für PR und Paper; aus Quellcode und Replay, Commit ecf9311):
+			- Längste Straße: das Stück bis an eine fremde Siedlung zählt nicht (longest_acyclic_path betritt fremde Knoten nicht), Regel: zählt bis dorthin; entscheidend in 46 von 300 Zufallspartien und 2 von 50 AlphaBeta-Partien
+			- Längste Straße nach einer Siedlung, die eine Straße zerschneidet: Board.build_settlement vergibt sie an den Längsten aller (max über road_lengths), bei Gleichstand nach eigener Reihenfolge statt an den Inhaber und auch unter 5, Regel: Inhaber behält sie bei Gleichstand, unter 5 niemand; 4 von 300 Zufallspartien
+			- Straße durch eine fremde Siedlung weitergebaut, die vor der eigenen Straße dort stand (trotz Fix #377 d3f4ad0), Regel: dort endet die Straße; 1 von 300 Zufallspartien, Ursache noch nicht verfolgt
+			- Bankmangel: niemand bekommt die Ressource, auch wenn nur ein Spieler sie bekäme (yield_resources), Regel: der Einzige bekommt den Rest
+			- Sieg in jedem Zug und mit verdeckten Siegpunkten (winning_color nach jeder Aktion), Regel: nur im eigenen Zug
+			- Legale Züge enger als die Regel, im Spiel meist ohne Wirkung: Räuber nur gegen Opfer mit Karten, Seehandel nur zum besten Kurs, Straßenbaukarte nur mit baubarer Kante und Straßen sofort
+			- Spielerhandel im Modell (OFFER_TRADE), aber nie unter den legalen Zügen
+			- Sicht für Bots (client_view): das Opfer sieht die gestohlene Karte nicht
+			- Bot-Protokoll: 1 s Timeout, dann Zufallszug, nach 3 Fehlern aufgegeben => für Messungen ungeeignet
+			- Partien ohne PYTHONHASHSEED nicht reproduzierbar (legale Züge aus Mengen, Zufallsbots wählen per Index)
+			- LONGEST_ROAD_LENGTH ist ein Cache: im Setup 0, sonst nur bei manchen Zügen aktualisiert
+		- JSettlers weicht ab: noch nicht untersucht (Stufe 5)
 	- 2. Hexfarer als Gast bei Catanatron (Player.decide bekommt das ganze Spiel => selbst schwärzen; Räuber = Feld + Opfer in einer Aktion): fair und open-hand, 2v2 gespiegelt und 1v3, 5k Iterationen und gleiche Denkzeit, gegen AlphaBeta (~2 Tage)
 	- 3. Catanatron-Bots in der Hexfarer-Sim: Python-Adapter als Agent-Bridge-Client mit synchroner Catanatron-Partie, im Client als open-hand gekennzeichnet oder mit gezogener Welt fair (~2 Tage) => erste gemischte Partien im Client
 	- 4. Relay-Matches: von fremden Schiedsrichtern geleitete Partien in den Client streamen (Catanatron mit allen Händen, JSettlers nur öffentlich plus eigene Sitze) (~2 Tage)

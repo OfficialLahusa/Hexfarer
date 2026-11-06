@@ -28,6 +28,7 @@
     <ProjectReference Include="..\SelfPlayCollector\SelfPlayCollector.csproj" />
     <ProjectReference Include="..\Arena\Arena.csproj" />
     <ProjectReference Include="..\Simulation\Simulation.csproj" />
+    <ProjectReference Include="..\OpenSeat\OpenSeat.csproj" />
   </ItemGroup>
 
   <ItemGroup>

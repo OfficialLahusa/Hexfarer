@@ -10,6 +10,9 @@ Usage: python record.py --bots R,R,R,R --games 100 --seed 1 --out games.jsonl.gz
 import argparse
 import gzip
 import json
+import os
+import random
+import subprocess
 import sys
 from collections import Counter
 
@@ -72,6 +75,8 @@ def main(argv=None):
     bots = args.bots.split(",")
     if len(bots) != 4:
         raise SystemExit("--bots needs four bot codes")
+    # Catanatron's random bots draw from the global generator, the game from its own seed: both seeded, a recording repeats
+    random.seed(args.seed)
 
     results = Counter()
     with gzip.open(args.out, "wt", encoding="utf-8") as file:
@@ -88,4 +93,7 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    # Catanatron keeps legal moves in sets, whose order depends on the hash seed: with it fixed, a recording repeats
+    if os.environ.get("PYTHONHASHSEED") != "0":
+        sys.exit(subprocess.call([sys.executable, *sys.argv], env={**os.environ, "PYTHONHASHSEED": "0"}))
     main()
