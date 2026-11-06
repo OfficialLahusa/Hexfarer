@@ -133,7 +133,7 @@ namespace OpenSeat
 
             public void After(JsonNode after)
             {
-                if (!Compare(after["state"]!, "after")) return;
+                if (_replica.FirstDifference(after["state"]!, "after", goesOn: false) is (string kind, string detail)) { Diverge(kind, detail); return; }
                 int? winner = after["winner"] is JsonNode w ? w.GetValue<int>() : null;
                 int? ours = _replica.State.HasEnded ? _replica.State.Turn.PlayerIndex : null;
                 if (winner == ours) return;

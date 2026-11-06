@@ -131,7 +131,8 @@ namespace OpenSeat
         /// The first difference between the referee's state and Hexfarer's, its kind (a known rule difference named as
         /// such) and detail, or null if they agree
         /// </summary>
-        public (string kind, string detail)? FirstDifference(JsonNode theirs, string at)
+        /// <param name="goesOn">Whether the referee's game goes on (it asks for a move), so Hexfarer's mustn't have ended</param>
+        public (string kind, string detail)? FirstDifference(JsonNode theirs, string at, bool goesOn = true)
         {
             JsonObject ours = Codec.State(State);
             foreach (string field in new[] { "prompt", "current", "free_roads", "robber" })
@@ -170,12 +171,15 @@ namespace OpenSeat
                 // Hexfarer counts only the knights played
                 if (!Same(a["played"]!["knight"], b["played"]!["knight"])) return ("state: knights played", $"{at}, seat {seat}: referee {a["played"]!["knight"]}, Hexfarer {b["played"]!["knight"]}");
             }
+            // The referee asks for a move, so its game goes on (Hexfarer's may have ended by points the referee doesn't give)
+            if (goesOn && State.HasEnded) return ("state: game over (Hexfarer's rules ended the game, the referee's go on)", $"{at}: seat {State.Turn.PlayerIndex} won by Hexfarer's rules");
             return null;
         }
 
         /// <summary>
         /// Takes over what the referee's known rule differences change, since the referee decides the game: every hand,
-        /// the bank, and who holds Longest Road (with its points). Returns whether the states agree afterwards.
+        /// the bank, who holds Longest Road (with its points), and that the game goes on. Only for a state the referee asks
+        /// a move in. Returns whether the states agree afterwards.
         /// </summary>
         public bool Patch(JsonNode theirs)
         {
@@ -196,6 +200,8 @@ namespace OpenSeat
                 }
                 ours.VictoryPoints.LongestRoadPoints = (byte)(player["has_longest_road"]!.GetValue<bool>() ? 2 : 0);
             }
+            // A game Hexfarer's rules ended goes on as the referee's does (ending only marks the round as ended)
+            if (State.HasEnded) State.Turn.TypeOfRound = TurnState.RoundType.Normal;
             return FirstDifference(theirs, "patch") == null;
         }
 

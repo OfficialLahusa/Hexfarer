@@ -130,6 +130,29 @@ namespace Tests
         }
 
         [Fact]
+        public void AGameHexfarersRulesEndedGoesOnWhenTheRefereeAsksForAMove()
+        {
+            // The copy of a recorded game up to a decision, then ended by Hexfarer's rules (as when its Longest Road gives a
+            // player 10 points Catanatron doesn't): the referee's next decision revives it, and the agent searches on
+            List<JsonNode> game = Replay.Read(Fixture).Where(m => m["game_id"]!.GetValue<string>() == "catanatron-100").ToList();
+            JsonNode before = game[0].DeepClone();
+            before["seat"] = 0;
+            Replica replica = new(before);
+            JsonNode decide = game.First(m => m["type"]!.GetValue<string>() == "decide" && Int(m["n"]) > 80 && Int(m["seat"]) == 0 && m["legal"]!.AsArray().Count > 1);
+            foreach (JsonNode step in game.Where(m => m["type"]!.GetValue<string>() == "step" && Int(m["n"]) < Int(decide["n"])))
+                Assert.Null(replica.Follow(step));
+            Assert.Null(replica.FirstDifference(decide["state"]!, "test"));
+
+            replica.State.Turn.TypeOfRound = TurnState.RoundType.MatchEnded;
+            Assert.StartsWith("state: game over", replica.FirstDifference(decide["state"]!, "test")!.Value.kind);
+            Assert.Empty(replica.Legal());
+            Assert.True(replica.Patch(decide["state"]!));
+            Assert.False(replica.State.HasEnded);
+            Assert.NotEmpty(replica.Legal());
+            Assert.Null(replica.FirstDifference(decide["state"]!, "test"));
+        }
+
+        [Fact]
         public void TheAgentTakesOverAHandAndBankTheRefereeHoldsDifferently()
         {
             // A referee that gave seat 2 an ore from the bank Hexfarer's rules wouldn't have (as Catanatron's bank shortage

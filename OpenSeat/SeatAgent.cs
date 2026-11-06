@@ -122,6 +122,13 @@ namespace OpenSeat
 
             // A single legal move needs no search
             if (legal.Count == 1) return Answer(legal[0]!);
+            // A copy without a legal move (it would have to be lost) can't search
+            if (!_replica.Legal().Any())
+            {
+                _lost = true;
+                log.WriteLine($"{_gameId}: lost the game: no legal move in Hexfarer's copy at move {decide["n"]}");
+                return Answer(legal[0]!);
+            }
 
             Action chosen = _agent!.Act(_replica.State);
             _searched++;
