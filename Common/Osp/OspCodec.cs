@@ -303,6 +303,21 @@ namespace Common.Osp
         }
 
         /// <summary>
+        /// The state as a seat sees it (stub)
+        /// </summary>
+        public JsonObject View(GameState state, int seat) => throw new NotImplementedException();
+
+        /// <summary>
+        /// A move's result as a seat may see it (stub)
+        /// </summary>
+        public static JsonNode? Result(Action applied, int seat) => throw new NotImplementedException();
+
+        /// <summary>
+        /// The game's rules as the protocol's ruleset (stub)
+        /// </summary>
+        public static JsonObject Ruleset(GameSettings settings) => throw new NotImplementedException();
+
+        /// <summary>
         /// JSON with every object's members sorted by name, so that equal values have equal text
         /// </summary>
         public static string Canonical(JsonNode? node) => JsonSerializer.Serialize(Sorted(node));

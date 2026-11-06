@@ -547,5 +547,91 @@ namespace Tests
             Assert.Contains("all games played: 4 games", text);
             Assert.Matches(@"[+-]?\d+ Elo \[[+-]?\d+, [+-]?\d+\]", text.TrimEnd().Split('\n')[^1]);
         }
+
+        // Hexfarer's own Open Seat Agent, built next to the tests, as an external command
+        private static string OpenSeatAgentCommand => $"dotnet \"{Path.Combine(AppContext.BaseDirectory, "OpenSeat.dll")}\" agent --net \"{PlainModelPath}\" --iterations 16 --leaves-per-batch 16 --provider cpu";
+
+        [Fact]
+        public void AnAgentSpecCanNameAnOpenSeatAgentCommand()
+        {
+            // Everything after "command:" is the command line, equals signs included
+            AgentSpec spec = AgentSpec.Parse("AB2=command:python open_seat_agent.py --bot AB:2 --needs=truth");
+            Assert.Equal("AB2", spec.Name);
+            Assert.True(spec.IsOpenSeatAgent);
+            Assert.Equal("python open_seat_agent.py --bot AB:2 --needs=truth", spec.Command);
+            Assert.Equal("AB2 Open Seat Agent: python open_seat_agent.py --bot AB:2 --needs=truth", spec.ToString());
+            Assert.False(AgentSpec.Parse("I2=nets/i2.onnx").IsOpenSeatAgent);
+            Assert.Throws<ArgumentException>(() => AgentSpec.Parse("AB2=command:"));
+        }
+
+        [Fact]
+        public void OnlyTheSidesWithANetGetNetsAndSetTheGamesAtOnce()
+        {
+            AgentSpec hexfarer = AgentSpec.Parse($"H={PlainModelPath}"), external = AgentSpec.Parse("E=command:python x.py");
+            (SideNets challenger, SideNets baseline) = AgentSpec.Nets(hexfarer, external, InferenceProvider.Cpu, 800, 4);
+            Assert.NotNull(challenger.Net);
+            Assert.Null(baseline.Net);
+            Assert.Null(baseline.Leaves);
+            MergedLeaves.Close(challenger, baseline);
+            // One net file: the games at once follow its batches alone
+            DuelSettings settings = new() { Challenger = hexfarer, Baseline = external, Iterations = 800 };
+            Assert.Equal(AgentSpec.GamesFor(16, files: 1), settings.GamesAtOnce);
+            settings = new() { Challenger = external, Baseline = AgentSpec.Parse($"H={PlainModelPath}=b64"), Iterations = 800 };
+            Assert.Equal(AgentSpec.GamesFor(64, files: 1), settings.GamesAtOnce);
+        }
+
+        [Fact]
+        public void ATableCanDoWithoutTradesBetweenPlayers()
+        {
+            Assert.True(CommandLine.Parse(["table", "--challenger", "C=c.onnx", "--baseline", "B=b.onnx"]).Settings!.FreeTrade);
+            Assert.False(CommandLine.Parse(["table", "--challenger", "C=c.onnx", "--baseline", "B=b.onnx", "--no-free-trade"]).Settings!.FreeTrade);
+        }
+
+        [Fact]
+        public void ATableDuelSeatsOpenSeatAgentProcesses()
+        {
+            var settings = new DuelSettings
+            {
+                Challenger = AgentSpec.Parse($"C={PlainModelPath}=b8"),
+                Baseline = AgentSpec.Parse($"B=command:{OpenSeatAgentCommand}"),
+                Iterations = 16,
+                MaxGames = 4,
+                SeedBase = 321,
+                Provider = InferenceProvider.Cpu,
+                FreeTrade = false,
+                Elo0 = 0,
+                Elo1 = 3,
+            };
+            var log = new StringWriter();
+            GroupStatistics result = new TableDuel(settings, log).Run();
+
+            string text = log.ToString();
+            Assert.Contains("B Open Seat Agent: dotnet", text);
+            // What the agent asked for is named once, so every game is labeled with what its seats received
+            Assert.Contains("Open Seat Agent B: hexfarer-mcts-open-16it-b16, needs truth", text);
+            Assert.DoesNotContain("failed", text);
+            Assert.Equal(1, result.Groups);
+            Assert.Contains("all games played: 4 games", text);
+        }
+
+        [Fact]
+        public void AMirrorDuelSeatsOpenSeatAgentProcesses()
+        {
+            var settings = new DuelSettings
+            {
+                Challenger = AgentSpec.Parse($"C={PlainModelPath}=b8"),
+                Baseline = AgentSpec.Parse($"B=command:{OpenSeatAgentCommand} --fair"),
+                Iterations = 16,
+                MaxGames = 2,
+                SeedBase = 123,
+                Provider = InferenceProvider.Cpu,
+            };
+            var log = new StringWriter();
+            PairStatistics result = new MirrorDuel(settings, log).Run();
+            string text = log.ToString();
+            Assert.Contains("Open Seat Agent B: hexfarer-ismcts-fair-16it-b16, needs truth", text);
+            Assert.DoesNotContain("failed", text);
+            Assert.Equal(1, result.Pairs);
+        }
     }
 }

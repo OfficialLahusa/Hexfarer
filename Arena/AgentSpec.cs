@@ -36,8 +36,13 @@ namespace Arena
         bool EvaluateNewLeaves = true, bool PlayForcedMovesAtOnce = true, double ReuseDecay = 1, bool MakeOffers = true,
         double OfferMargin = 0.005, int MaxOffers = 3, int OfferWorlds = 8, bool TwoForTwo = false, double AnswerMargin = 0.002, bool Counters = true,
         bool ThreeForOne = false, double AnswerFairness = 1, bool LearnsFromTrades = true, int MaxCards = 3, int Prune = 16, double PartnerFairness = 0,
-        double SetupBudget = 1)
+        double SetupBudget = 1, string? Command = null)
     {
+        /// <summary>
+        /// Whether an Open Seat Agent process plays the side (stub)
+        /// </summary>
+        public bool IsOpenSeatAgent => Command != null;
+
         /// <summary>
         /// Tree updates per decision that the default batch size keeps with an iteration budget: the tree takes in the
         /// evaluations after every batch, so small batches search much better at the same budget (800 iterations: 16 leaves,
@@ -294,7 +299,7 @@ namespace Arena
     /// A duel side's nets: Net for what its agents run themselves (their encoding, trade judgments, single positions), and
     /// Leaves for their searches' leaf batches, merged across the games played at once (null: each search runs them on Net)
     /// </summary>
-    internal sealed record SideNets(StateValueNet Net, BatchingEvaluator? Leaves);
+    internal sealed record SideNets(StateValueNet? Net, BatchingEvaluator? Leaves);
 
     /// <summary>
     /// The net calls of a duel's merged leaf batches: calls, the leaves they evaluated and the rows they ran (padding included)
