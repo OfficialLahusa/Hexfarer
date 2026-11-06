@@ -59,7 +59,8 @@ namespace Arena
             the challenger in each seat once; the SPRT tests its win rate 25% + ELO0 against 25% + ELO1 percentage points
             (default 0 3), on the share of each map's four games it won. Same stops and exit codes.
 
-            An AGENT is NAME=MODEL.onnx[=OPTION...] with the options MaxN, Paranoid or Random (opponent model, default MaxN),
+            An AGENT is NAME=command:COMMAND LINE (an Open Seat Agent process per game and seat, see Bridges/PROTOCOL.md)
+            or NAME=MODEL.onnx[=OPTION...] with the options MaxN, Paranoid or Random (opponent model, default MaxN),
             cX (exploration constant, default 1.414), bN (leaves per batch; default with --iterations the largest power of
             two that leaves 100 tree updates per decision, 16 to 256, e.g. 16 at 800 and 32 at 5000; 256 with --seconds), fX (first play reduction, default 0.1), pX (placement weight, default 0), u (uniform priors instead of the policy head's), dN (hidden information:
             only its seat's view, searched as N determinizations), is (hidden information searched as one tree over the seat's
@@ -93,7 +94,8 @@ namespace Arena
               --beta B               False negative rate of the SPRT (default 0.05)
               --max-minutes M        Stop after M minutes even if the SPRT is open (default 120)
               --provider cpu|dml|cuda  Where the nets run (default: the GPU if available)
-              --free-trade           Trades between players in a mirror duel too (always on at a table)
+              --free-trade           Trades between players in a mirror duel too (on at a table unless --no-free-trade)
+              --no-free-trade        No trades between players at a table (e.g. against Open Seat Agents that can't trade)
               --help                 Show this help
             """;
 
@@ -111,7 +113,7 @@ namespace Arena
             long iterations = 5000;
             double? seconds = null;
             var settings = new DuelSettings { Challenger = null!, Baseline = null! };
-            bool sprt = false;
+            bool sprt = false, noFreeTrade = false;
 
             for (int i = 1; i < args.Length; i++)
             {
@@ -131,6 +133,7 @@ namespace Arena
                     case "--seed-base": seedBase = IntValue(); break;
                     case "--sprt": settings = settings with { Elo0 = DoubleValue(), Elo1 = DoubleValue() }; sprt = true; break;
                     case "--free-trade": settings = settings with { FreeTrade = true }; break;
+                    case "--no-free-trade": noFreeTrade = true; break;
                     case "--alpha": settings = settings with { Alpha = DoubleValue() }; break;
                     case "--beta": settings = settings with { Beta = DoubleValue() }; break;
                     case "--max-minutes": settings = settings with { MaxDuration = TimeSpan.FromMinutes(DoubleValue()) }; break;
@@ -152,10 +155,10 @@ namespace Arena
 
             if (challenger == null || baseline == null)
                 throw new ArgumentException("A duel needs --challenger and --baseline.");
-            // A table always has free trade; without --sprt it tests a win rate of 25% against 28%
+            // A table has free trade unless --no-free-trade; without --sprt it tests a win rate of 25% against 28%
             if (table)
             {
-                settings = settings with { FreeTrade = true };
+                settings = settings with { FreeTrade = !noFreeTrade };
                 if (!sprt) settings = settings with { Elo0 = 0, Elo1 = 3 };
             }
             if (challenger.Name == baseline.Name)

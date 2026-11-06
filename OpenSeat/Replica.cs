@@ -9,7 +9,8 @@ namespace OpenSeat
     /// <summary>
     /// Hexfarer's copy of a game another engine's referee runs over the Open Seat Protocol: built from the referee's board,
     /// it follows the referee's moves with their recorded results (dice, drawn cards, steals) and is compared with the
-    /// referee's state. The referee's known rule differences (Catanatron's, see Normalize) are folded into the legal moves;
+    /// referee's state. The referee's rules that narrow the legal moves (its ruleset: Catanatron's preset, or single options)
+    /// are folded into the legal moves;
     /// the differences that change a state are named by FirstDifference and can be taken over from the referee (Patch),
     /// since the referee decides the game.
     /// </summary>
@@ -23,11 +24,22 @@ namespace OpenSeat
         /// </summary>
         public string LastMove { get; private set; } = "";
 
+        // The referee's rules that narrow Hexfarer's legal moves: robbing only victims with cards, only the best bank rate
+        // per resource, Road Building's roads placed at once (and the card only with a road left and a place for it)
+        private readonly bool _robbedNeedCards, _bestBankRateOnly, _forcedRoadBuilding;
+
         public Replica(JsonNode before)
         {
             Board board = OspCodec.BuildBoard(before["board"]!);
             Codec = new OspCodec(board);
-            State = new GameState(board, before["players"]!.GetValue<uint>());
+            State = new GameState(board, (uint)before["players"]!.GetValue<int>());
+            // The ruleset's options, by default its preset's: Catanatron's narrow the moves, the rulebook's ("standard") don't
+            JsonNode? ruleset = before["ruleset"];
+            bool catanatron = ruleset?["preset"]?.GetValue<string>() == "catanatron";
+            string Option(string name, string rulebook, string catanatrons) => ruleset?[name]?.GetValue<string>() ?? (catanatron ? catanatrons : rulebook);
+            _robbedNeedCards = Option("robber_victims", "adjacent", "with_cards") == "with_cards";
+            _bestBankRateOnly = Option("bank_rates", "all", "best_only") == "best_only";
+            _forcedRoadBuilding = Option("road_building", "optional", "forced") == "forced";
         }
 
         /// <summary>
@@ -46,9 +58,10 @@ namespace OpenSeat
         }
 
         /// <summary>
-        /// Hexfarer's legal moves with the referee's known differences folded in (Catanatron's rules): a robber move
-        /// against a victim without cards steals from nobody, only the best bank rate per resource is offered, the roads
-        /// of a Road Building card have to be placed before anything else, and the card needs a road left and a place for it
+        /// Hexfarer's legal moves with the referee's narrower rules folded in (Catanatron's, if its ruleset says so): a
+        /// robber move against a victim without cards steals from nobody, only the best bank rate per resource is offered,
+        /// the roads of a Road Building card have to be placed before anything else, and the card needs a road left and a
+        /// place for it
         /// </summary>
         public IEnumerable<(Action action, JsonArray move)> Legal()
         {
@@ -56,17 +69,17 @@ namespace OpenSeat
             if (seat < 0) yield break;
             List<Action> legal = LegalActionProvider.GetActionsForState(State, seat);
             PlayerState player = State.Players[seat];
-            bool forcedRoads = player.BuildingStock.FreeRoads > 0 && legal.Any(a => a is RoadAction);
+            bool forcedRoads = _forcedRoadBuilding && player.BuildingStock.FreeRoads > 0 && legal.Any(a => a is RoadAction);
             // Road Building only with a road left and a place to build it
             bool roadsPossible = player.BuildingStock.RemainingRoads > 0 && State.Board.GetRoadSites(seat) != UInt128.Zero;
             foreach (Action action in legal)
             {
                 if (forcedRoads && action is not RoadAction) continue;
-                if (action is RoadBuildingAction && !roadsPossible) continue;
-                if (action is FourToOneTradeAction four && legal.Any(a => a is ThreeToOneTradeAction t && t.InputType == four.InputType || a is TwoToOneTradeAction s && s.InputType == four.InputType)) continue;
-                if (action is ThreeToOneTradeAction three && legal.Any(a => a is TwoToOneTradeAction s && s.InputType == three.InputType)) continue;
+                if (_forcedRoadBuilding && action is RoadBuildingAction && !roadsPossible) continue;
+                if (_bestBankRateOnly && action is FourToOneTradeAction four && legal.Any(a => a is ThreeToOneTradeAction t && t.InputType == four.InputType || a is TwoToOneTradeAction s && s.InputType == four.InputType)) continue;
+                if (_bestBankRateOnly && action is ThreeToOneTradeAction three && legal.Any(a => a is TwoToOneTradeAction s && s.InputType == three.InputType)) continue;
                 JsonArray move = Codec.Move(action);
-                if (action is RobberAction robber && robber.TargetPlayerIndex is sbyte victim && State.Players[victim].ResourceCards.Count() == 0)
+                if (_robbedNeedCards && action is RobberAction robber && robber.TargetPlayerIndex is sbyte victim && State.Players[victim].ResourceCards.Count() == 0)
                 {
                     // A victim without cards isn't one: on a hex where someone has cards only they can be robbed,
                     // otherwise the robber moves there without stealing

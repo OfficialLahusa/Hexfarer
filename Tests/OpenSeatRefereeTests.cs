@@ -87,6 +87,12 @@ namespace Tests
                 for (int seat = 0; seat < 4; seat++)
                 {
                     JsonNode? result = OspCodec.Result(applied, seat);
+                    // As the referee sees it (for open-hand agents): everything
+                    Assert.Equal(OspCodec.Canonical(OspCodec.Result(applied, seat: null)), OspCodec.Canonical(OspCodec.Result(applied, applied switch
+                    {
+                        RobberAction robber => robber.PlayerIndex,
+                        _ => applied.PlayerIndex,
+                    })));
                     switch (applied)
                     {
                         case RollAction roll:
@@ -358,6 +364,10 @@ namespace Tests
                 Assert.Equal(OspCodec.Canonical(codec.State(befores[Int(step["n"])])), OspCodec.Canonical(step["state"]));
             foreach (JsonNode decide in agent.OfType("decide"))
                 Assert.Equal(OspCodec.Canonical(codec.State(befores[Int(decide["n"])])), OspCodec.Canonical(decide["state"]));
+            // An open-hand agent sees every result in full: another seat's bought card and steal too
+            Assert.Contains(steps, s => Int(s["seat"]) != 0 && s["result"]?["card"] is JsonValue);
+            Assert.DoesNotContain(steps, s => s["result"]?["card"] is null && s["action"]![0]!.GetValue<string>() == "buy_development");
+            Assert.DoesNotContain(steps, s => s["result"]?["stolen"]?.GetValue<string>() == "unknown");
         }
 
         [Fact]
@@ -411,7 +421,8 @@ namespace Tests
         private sealed class InProcessAgent(SeatAgent agent) : IOpenSeatChannel
         {
             private readonly Queue<JsonNode> _answers = new();
-            public void Send(JsonNode message) { if (agent.Handle(message.DeepClone()) is JsonNode answer) _answers.Enqueue(answer); }
+            // Through text both ways, as over a process's streams
+            public void Send(JsonNode message) { if (agent.Handle(JsonNode.Parse(message.ToJsonString())!) is JsonNode answer) _answers.Enqueue(JsonNode.Parse(answer.ToJsonString())!); }
             public JsonNode Receive(CancellationToken cancellation = default) => _answers.Dequeue();
             public void Dispose() { }
         }
@@ -429,7 +440,7 @@ namespace Tests
             JsonNode stats = JsonNode.Parse(log.ToString().Trim().Split('\n')[^1])!;
             Assert.Equal(0, Int(stats["patches"]));
             Assert.Equal(0, Int(stats["fallbacks"]));
-            Assert.False(stats["lost"]!.GetValue<bool>());
+            Assert.False(stats["lost"]!.GetValue<bool>(), log.ToString());
             Assert.True(Int(stats["decisions"]) > 20);
         }
         #endregion

@@ -24,6 +24,7 @@ namespace Arena
         private readonly object _lock = new();
         private readonly Dictionary<int, bool?[]> _groups = [];
         private readonly List<double> _scores = [];
+        private readonly Seating _seating = new();
         private int _wins, _games;
         private long _challengerOffers, _challengerTrades, _baselineOffers, _baselineTrades, _challengerPartner, _challengerCounters, _baselineCounters;
 
@@ -56,7 +57,7 @@ namespace Arena
             Nets = (challengerNets, baselineNets);
             Statistics = GroupStatistics.Of([], S0, S1, settings.Alpha, settings.Beta);
 
-            Write($"[table duel] {settings.Challenger} against 3x {settings.Baseline}, free trade; batches of {settings.Challenger.BatchFor(settings.Iterations)} and "
+            Write($"[table duel] {settings.Challenger} against 3x {settings.Baseline}, {(settings.FreeTrade ? "free trade" : "no trades between players")}; batches of {settings.Challenger.BatchFor(settings.Iterations)} and "
                 + $"{settings.Baseline.BatchFor(settings.Iterations)} leaves{MergedLeaves.Describe(challengerNets, baselineNets)}; maps from seed {settings.SeedBase}, "
                 + (iterationBudget ? $"{settings.Iterations} iterations per decision, {parallel} games at once" : $"{settings.Seconds.ToString(CultureInfo.InvariantCulture)}s per decision")
                 + FormattableString.Invariant($"; SPRT win rate [{S0:P1}, {S1:P1}], at most {settings.MaxGames} games and {settings.MaxDuration.TotalMinutes:F0} min"));
@@ -117,11 +118,25 @@ namespace Arena
             int challengerSeat = game % Seats;
             Utils.Random.SeedCurrentThread(settings.SeedBase + game / Seats);
             GameState state = new GameState(MapGenerator.GenerateRandomClassic(), Seats);
-            state.Settings.FreeTrade = true;
+            state.Settings.FreeTrade = settings.FreeTrade;
             GameState start = state;
-            Agent[] agents = Enumerable.Range(0, Seats).Select(seat => seat == challengerSeat
-                ? settings.Challenger.Create((sbyte)seat, start, challengerNets.Net, settings.Iterations, settings.Seconds, challengerNets.Leaves)
-                : settings.Baseline.Create((sbyte)seat, start, baselineNets.Net, settings.Iterations, settings.Seconds, baselineNets.Leaves)).ToArray();
+            Agent[] agents = Seating.Create(Seats, seat => seat == challengerSeat
+                ? settings.Challenger.Create((sbyte)seat, start, challengerNets.Net, settings.Iterations, settings.Seconds, challengerNets.Leaves, $"{game + 1}")
+                : settings.Baseline.Create((sbyte)seat, start, baselineNets.Net, settings.Iterations, settings.Seconds, baselineNets.Leaves, $"{game + 1}"));
+            for (int seat = 0; seat < Seats; seat++)
+                if (_seating.Name(seat == challengerSeat ? settings.Challenger.Name : settings.Baseline.Name, agents[seat]) is string line) Write(line);
+            try
+            {
+                return Play(state, agents, challengerSeat, cancellation);
+            }
+            finally
+            {
+                Seating.Close(agents);
+            }
+        }
+
+        private static GameResult Play(GameState state, Agent[] agents, int challengerSeat, CancellationToken cancellation)
+        {
 
             int challengerOffers = 0, challengerTrades = 0, challengerPartner = 0, baselineOffers = 0, baselineTrades = 0, challengerCounters = 0, baselineCounters = 0;
             var stopwatch = Stopwatch.StartNew();

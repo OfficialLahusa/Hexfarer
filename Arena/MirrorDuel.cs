@@ -27,10 +27,18 @@ namespace Arena
         /// sides' batches and their net files (each file gets its own merging evaluator, see AgentSpec.Nets), at most
         /// MaxGames; a time budget plays one game at a time, as games at once would take each other's compute
         /// </summary>
-        public int GamesAtOnce => Iterations > 0
-            ? Math.Max(1, Math.Min(MaxGames, Parallel ?? AgentSpec.GamesFor(Math.Min(Challenger.BatchFor(Iterations), Baseline.BatchFor(Iterations)),
-                Challenger.ModelPath == Baseline.ModelPath ? 1 : 2)))
-            : 1;
+        public int GamesAtOnce => Iterations > 0 ? Math.Max(1, Math.Min(MaxGames, Parallel ?? DefaultGamesAtOnce)) : 1;
+
+        // From the sides with a net (an Open Seat Agent brings its own): their smaller batch and their files
+        private int DefaultGamesAtOnce
+        {
+            get
+            {
+                AgentSpec[] withNets = new[] { Challenger, Baseline }.Where(side => !side.IsOpenSeatAgent).ToArray();
+                if (withNets.Length == 0) return AgentSpec.MinGamesAtOnce;
+                return AgentSpec.GamesFor(withNets.Min(side => side.BatchFor(Iterations)), withNets.Select(side => side.ModelPath).Distinct().Count());
+            }
+        }
 
         // Map pair n is generated from seed SeedBase + n
         public int SeedBase { get; init; } = 30_000;
@@ -63,6 +71,7 @@ namespace Arena
         private readonly object _lock = new();
         private readonly Dictionary<int, string?[]> _pairWinners = [];
         private readonly List<double> _scores = [];
+        private readonly Seating _seating = new();
         private int _wins, _losses, _games;
 
         public PairStatistics Statistics { get; private set; } = PairStatistics.Of([], 0, 40);
@@ -150,8 +159,21 @@ namespace Arena
             state = new GameState(MapGenerator.GenerateRandomClassic(), 4);
             state.Settings.FreeTrade = settings.FreeTrade;
             GameState start = state;
-            Agent[] agents = Enumerable.Range(0, 4).Select(seat => seats[seat].Create((sbyte)seat, start, nets[seats[seat]].Net, settings.Iterations, settings.Seconds, nets[seats[seat]].Leaves)).ToArray();
+            Agent[] agents = Seating.Create(4, seat => seats[seat].Create((sbyte)seat, start, nets[seats[seat]].Net, settings.Iterations, settings.Seconds, nets[seats[seat]].Leaves, $"{game + 1}"));
+            for (int seat = 0; seat < 4; seat++)
+                if (_seating.Name(seats[seat].Name, agents[seat]) is string line) Write(line);
+            try
+            {
+                return Play(state, agents, seats, cancellation, out seconds);
+            }
+            finally
+            {
+                Seating.Close(agents);
+            }
+        }
 
+        private static string? Play(GameState state, Agent[] agents, AgentSpec[] seats, CancellationToken cancellation, out double seconds)
+        {
             var stopwatch = Stopwatch.StartNew();
             while (!state.HasEnded && state.Turn.RoundCounter < 300)
             {

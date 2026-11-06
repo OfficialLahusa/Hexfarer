@@ -1,6 +1,7 @@
 using Agents;
 using Agents.Inference;
 using Agents.MCTS;
+using Agents.OpenSeat;
 using Common;
 using System.Globalization;
 using System.Numerics;
@@ -39,9 +40,15 @@ namespace Arena
         double SetupBudget = 1, string? Command = null)
     {
         /// <summary>
-        /// Whether an Open Seat Agent process plays the side (stub)
+        /// Whether an Open Seat Agent plays the side: a process started from Command (see OpenSeatAgentProxy), given as
+        /// "NAME=command:COMMAND LINE"
         /// </summary>
         public bool IsOpenSeatAgent => Command != null;
+
+        /// <summary>
+        /// How long an Open Seat Agent may take for an answer before its game fails
+        /// </summary>
+        public static readonly TimeSpan OpenSeatAgentTimeout = TimeSpan.FromMinutes(5);
 
         /// <summary>
         /// Tree updates per decision that the default batch size keeps with an iteration budget: the tree takes in the
@@ -132,6 +139,15 @@ namespace Arena
         /// </summary>
         public static (SideNets challenger, SideNets baseline) Nets(AgentSpec challenger, AgentSpec baseline, InferenceProvider provider, long iterations, int parallel)
         {
+            // An Open Seat Agent brings its own: only a side with a net gets one, as if it played itself
+            if (challenger.IsOpenSeatAgent || baseline.IsOpenSeatAgent)
+            {
+                SideNets none = new(null, null);
+                if (challenger.IsOpenSeatAgent && baseline.IsOpenSeatAgent) return (none, none);
+                AgentSpec withNet = challenger.IsOpenSeatAgent ? baseline : challenger;
+                SideNets nets = Nets(withNet, withNet, provider, iterations, parallel).challenger;
+                return challenger.IsOpenSeatAgent ? (none, nets) : (nets, none);
+            }
             bool sameFile = baseline.ModelPath == challenger.ModelPath;
             if (iterations > 0 && parallel > 1)
             {
@@ -163,6 +179,14 @@ namespace Arena
             string[] parts = spec.Split('=');
             if (parts.Length < 2 || parts[0].Length == 0 || parts[1].Length == 0)
                 throw new ArgumentException($"Agent \"{spec}\" is not NAME=MODEL.onnx[=OPTION...].");
+            // An Open Seat Agent: the rest of the spec is its command line, equals signs and all
+            const string command = "command:";
+            if (parts[1].StartsWith(command, StringComparison.Ordinal))
+            {
+                string line = spec[(parts[0].Length + 1 + command.Length)..].Trim();
+                if (line.Length == 0) throw new ArgumentException($"Agent \"{spec}\" names no command.");
+                return new AgentSpec(parts[0], "", OpponentModel.MaxN, 1.414, null, 0.1, 0, false, Command: line);
+            }
 
             var result = new AgentSpec(parts[0], parts[1], OpponentModel.MaxN, 1.414, null, 0.1, 0, false);
             foreach (string option in parts.Skip(2))
@@ -218,6 +242,7 @@ namespace Arena
         /// </summary>
         public override string ToString()
         {
+            if (IsOpenSeatAgent) return $"{Name} Open Seat Agent: {Command}";
             List<string> options = [OpponentModel.ToString()];
             if (Exploration != 1.414) options.Add($"c{Exploration.ToString(CultureInfo.InvariantCulture)}");
             if (LeavesPerBatch is int batch) options.Add($"b{batch}");
@@ -253,8 +278,12 @@ namespace Arena
         /// <summary>
         /// The agent for a seat, searching with the given net and budget (iterations, or seconds if 0)
         /// </summary>
-        public Agent Create(sbyte seat, GameState start, StateValueNet net, long iterations, double seconds, ILeafEvaluator? leaves = null)
+        public Agent Create(sbyte seat, GameState start, StateValueNet? net, long iterations, double seconds, ILeafEvaluator? leaves = null, string gameId = "game")
         {
+            // An Open Seat Agent plays the seat as a process of its own, one per game and seat
+            if (IsOpenSeatAgent) return new OpenSeatAgentProxy(seat, start, OpenSeatAgentProcess.Start(Command!, OpenSeatAgentTimeout), gameId);
+            if (net == null) throw new ArgumentNullException(nameof(net), $"Agent {Name} needs a net.");
+
             // The agent picks the encoding of its net (see Vectorizers): a belief-aware net sees its seat's view; its search's
             // leaf batches go to leaves if given (shared with the other games), else to the net
             MCTSAgent search = new MCTSAgent(seat, start, explorationParameter: Exploration, timeLimitSeconds: seconds,
@@ -300,6 +329,49 @@ namespace Arena
     /// Leaves for their searches' leaf batches, merged across the games played at once (null: each search runs them on Net)
     /// </summary>
     internal sealed record SideNets(StateValueNet? Net, BatchingEvaluator? Leaves);
+
+    /// <summary>
+    /// A game's agents: created seat by seat (if one fails, those already made are closed), closed after the game (an
+    /// Open Seat Agent hears the end and its process stops), and the Open Seat Agents named once per side in the log
+    /// </summary>
+    internal sealed class Seating
+    {
+        private readonly HashSet<string> _named = [];
+
+        public static Agent[] Create(int seats, Func<int, Agent> create)
+        {
+            List<Agent> agents = [];
+            try
+            {
+                for (int seat = 0; seat < seats; seat++) agents.Add(create(seat));
+            }
+            catch
+            {
+                Close(agents);
+                throw;
+            }
+            return agents.ToArray();
+        }
+
+        public static void Close(IEnumerable<Agent> agents)
+        {
+            foreach (Agent agent in agents) (agent as IDisposable)?.Dispose();
+        }
+
+        /// <summary>
+        /// The line naming a side's Open Seat Agent (its name, what it needs, its rulesets, whether it observes), the first
+        /// time the side's agent answered, else null
+        /// </summary>
+        public string? Name(string side, Agent agent)
+        {
+            if (agent is not OpenSeatAgentProxy proxy) return null;
+            lock (_named)
+                if (!_named.Add(side)) return null;
+            OpenSeatHello hello = proxy.Hello;
+            return $"Open Seat Agent {side}: {hello.Name}, needs {hello.Needs.ToString().ToLowerInvariant()}, rulesets {string.Join(" ", hello.Rulesets)}"
+                + (hello.Observe ? ", observes every move" : "");
+        }
+    }
 
     /// <summary>
     /// The net calls of a duel's merged leaf batches: calls, the leaves they evaluated and the rows they ran (padding included)

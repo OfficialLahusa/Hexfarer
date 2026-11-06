@@ -154,8 +154,17 @@ namespace Common.Osp
             FourToOneTradeAction a => BankTrade(a.InputType, 4, a.OutputType),
             ThreeToOneTradeAction a => BankTrade(a.InputType, 3, a.OutputType),
             TwoToOneTradeAction a => BankTrade(a.InputType, 2, a.OutputType),
+            // Trades between players: the offer to a set of seats (a bit per seat), the answers, the offerer's choice
+            OfferTradeAction a => ["offer", new JsonObject { ["give"] = Cards(a.Give), ["get"] = Cards(a.Get), ["to"] = Seats(a.Recipients) }],
+            RespondToTradeAction a => ["respond", new JsonObject { ["accept"] = a.Accept }],
+            CounterTradeAction a => ["counter", new JsonObject { ["give"] = Cards(a.Give), ["get"] = Cards(a.Get) }],
+            ConfirmTradeAction a => ["confirm", new JsonObject { ["partner"] = a.Partner }],
+            CancelTradeAction => ["cancel"],
             _ => throw new NotSupportedException($"No protocol move for {action.GetType().Name} yet."),
         };
+
+        // The seats of a bit set, in order
+        private static JsonArray Seats(byte seats) => new(Enumerable.Range(0, 8).Where(seat => (seats & 1 << seat) != 0).Select(seat => (JsonNode)seat).ToArray());
 
         private static JsonArray BankTrade(ResourceCardType give, uint count, ResourceCardType get) =>
             ["bank_trade", new JsonObject { ["give"] = new JsonObject { [ResourceNames[give]] = count }, ["get"] = new JsonObject { [ResourceNames[get]] = 1 } }];
@@ -277,6 +286,8 @@ namespace Common.Osp
                 players.Add(new JsonObject
                 {
                     ["seat"] = seat,
+                    ["hand_size"] = player.ResourceCards.Count(),
+                    ["development_size"] = player.DevelopmentCards.Count(),
                     ["public_vp"] = player.VictoryPoints.Total - player.VictoryPoints.DevelopmentCardPoints,
                     ["vp"] = player.VictoryPoints.Total,
                     ["hand"] = hand,
@@ -299,23 +310,93 @@ namespace Common.Osp
                 ["buildings"] = new JsonObject { ["settlements"] = settlements, ["cities"] = cities, ["roads"] = roads },
                 ["bank"] = bank,
                 ["players"] = players,
+                ["offer"] = Offer(state),
             };
         }
 
         /// <summary>
-        /// The state as a seat sees it (stub)
+        /// The state as a seat sees it: the full state without the other seats' hands, development cards and points with
+        /// victory point cards (their counts stay)
         /// </summary>
-        public JsonObject View(GameState state, int seat) => throw new NotImplementedException();
+        public JsonObject View(GameState state, int seat)
+        {
+            JsonObject view = State(state);
+            foreach (JsonNode? player in view["players"]!.AsArray())
+            {
+                if (player!["seat"]!.GetValue<int>() == seat) continue;
+                player["hand"] = null;
+                player["development"] = null;
+                player["vp"] = null;
+            }
+            return view;
+        }
 
         /// <summary>
-        /// A move's result as a seat may see it (stub)
+        /// A move's result as a seat may see it, from the move as it was applied (its history), or null for a move
+        /// without one: the dice for everyone, a bought card only for the buyer, a stolen card for the thief and the victim
+        /// ("unknown" for the others, null if nothing was stolen), the cards a monopoly took from each player. A null seat
+        /// sees everything, as the referee does (for open-hand agents).
         /// </summary>
-        public static JsonNode? Result(Action applied, int seat) => throw new NotImplementedException();
+        public static JsonNode? Result(Action applied, int? seat) => applied switch
+        {
+            RollAction roll => new JsonObject { ["dice"] = new JsonArray(roll.History!.RollResult.First, roll.History.RollResult.Second) },
+            BuyDevelopmentCardAction buy => new JsonObject { ["card"] = seat == null || seat == buy.PlayerIndex ? CardNames[buy.History!.DrawnType] : null },
+            RobberAction robber => new JsonObject
+            {
+                ["stolen"] = robber.History!.StolenCard is not ResourceCardType stolen ? null
+                    : seat == null || seat == robber.PlayerIndex || seat == robber.TargetPlayerIndex ? ResourceNames[stolen] : "unknown",
+            },
+            MonopolyAction monopoly => new JsonObject
+            {
+                ["taken"] = new JsonObject(monopoly.History!.TransferredCards.Select(t => KeyValuePair.Create(t.Item1.ToString(), (JsonNode?)t.Item2))),
+            },
+            _ => null,
+        };
 
         /// <summary>
-        /// The game's rules as the protocol's ruleset (stub)
+        /// The game's rules as the protocol's ruleset: the rulebook ("standard") and the options that differ from it
         /// </summary>
-        public static JsonObject Ruleset(GameSettings settings) => throw new NotImplementedException();
+        public static JsonObject Ruleset(GameSettings settings)
+        {
+            JsonObject ruleset = new() { ["preset"] = "standard" };
+            if (!settings.FreeTrade) ruleset["player_trading"] = "none";
+            if (settings.VictoryPoints != 10) ruleset["victory_points"] = settings.VictoryPoints;
+            if (settings.RobberCardLimit != 7) ruleset["discard_limit"] = settings.RobberCardLimit;
+            return ruleset;
+        }
+
+        /// <summary>
+        /// The open offer between players: who offered what to whom, the answers so far (accept, decline or counter) and
+        /// the counteroffers in the offerer's terms; null without one
+        /// </summary>
+        public static JsonObject? Offer(GameState state)
+        {
+            if (state.Turn.PendingTrade is not TradeOffer offer) return null;
+            JsonObject answers = [], counters = [];
+            for (int seat = 0; seat < offer.Responses.Length; seat++)
+            {
+                string? answer = offer.Responses[seat] switch
+                {
+                    TradeResponse.Accepted => "accept",
+                    TradeResponse.Rejected => "decline",
+                    TradeResponse.Countered => "counter",
+                    _ => null,
+                };
+                if (answer != null) answers[seat.ToString()] = answer;
+            }
+            foreach (TradeCounter counter in offer.Counters)
+                counters[counter.Player.ToString()] = new JsonObject { ["give"] = Cards(counter.Give), ["get"] = Cards(counter.Get) };
+            JsonObject result = new()
+            {
+                ["from"] = offer.Offerer,
+                ["give"] = Cards(offer.Give),
+                ["get"] = Cards(offer.Get),
+                ["to"] = new JsonArray(Enumerable.Range(0, offer.Responses.Length).Where(seat => offer.Responses[seat] != TradeResponse.NotAsked).Select(seat => (JsonNode)seat).ToArray()),
+                ["answers"] = answers,
+            };
+            if (counters.Count > 0) result["counters"] = counters;
+            return result;
+        }
 
         /// <summary>
         /// JSON with every object's members sorted by name, so that equal values have equal text

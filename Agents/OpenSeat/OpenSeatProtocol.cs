@@ -33,8 +33,32 @@ namespace Agents.OpenSeat
     public sealed record OpenSeatHello(string Name, IReadOnlyList<string> Rulesets, bool Observe, OpenSeatNeeds Needs)
     {
         /// <summary>
-        /// Greets the agent and reads its answer
+        /// The protocol's name and version this referee speaks
         /// </summary>
-        public static OpenSeatHello Exchange(IOpenSeatChannel channel) => throw new NotImplementedException();
+        public const string Protocol = "osp";
+        public const int Version = 1;
+
+        /// <summary>
+        /// Greets the agent and reads its answer: it has to answer with the same protocol and version; it needs its seat's
+        /// view and doesn't observe unless it says otherwise
+        /// </summary>
+        public static OpenSeatHello Exchange(IOpenSeatChannel channel)
+        {
+            channel.Send(new JsonObject { ["type"] = "hello", ["protocol"] = Protocol, ["version"] = Version });
+            JsonNode answer = channel.Receive();
+            if (Text(answer["type"]) != "hello" || Text(answer["protocol"]) != Protocol || answer["version"]?.ToJsonString() != Version.ToString())
+                throw new OpenSeatException($"The agent didn't answer hello in protocol {Protocol} version {Version}: {answer.ToJsonString()}");
+            OpenSeatNeeds needs = Text(answer["needs"]) switch
+            {
+                null or "view" => OpenSeatNeeds.View,
+                "world" => OpenSeatNeeds.World,
+                "truth" => OpenSeatNeeds.Truth,
+                string other => throw new OpenSeatException($"The agent needs \"{other}\", which isn't view, world or truth."),
+            };
+            string[] rulesets = answer["rulesets"] is JsonArray list ? list.Select(r => r!.GetValue<string>()).ToArray() : [];
+            return new OpenSeatHello(Text(answer["name"]) ?? "unnamed", rulesets, answer["observe"]?.GetValue<bool>() ?? false, needs);
+        }
+
+        private static string? Text(JsonNode? node) => node is JsonValue value && value.TryGetValue(out string? text) ? text : null;
     }
 }
