@@ -612,8 +612,7 @@ namespace Tests
             Assert.DoesNotContain("failed", text);
             // Without trades between players nobody offers any
             Assert.Contains("no trades between players", text);
-            Assert.All(text.Split('
-').Where(line => line.Contains(" done): ")), line => Assert.Contains("offers C 0 (0 traded), B 0", line));
+            Assert.All(text.Split('\n').Where(line => line.Contains(" done): ")), line => Assert.Contains("offers C 0 (0 traded), B 0", line));
             Assert.Equal(1, result.Groups);
             Assert.Contains("all games played: 4 games", text);
         }
