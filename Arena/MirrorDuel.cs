@@ -62,9 +62,7 @@ namespace Arena
         /// </summary>
         public PairStatistics Run(CancellationToken cancellation = default)
         {
-            var challengerNet = new StateValueNet(settings.Challenger.ModelPath, provider: settings.Provider);
-            var baselineNet = settings.Baseline.ModelPath == settings.Challenger.ModelPath
-                ? challengerNet : new StateValueNet(settings.Baseline.ModelPath, provider: settings.Provider);
+            (StateValueNet challengerNet, StateValueNet baselineNet) = AgentSpec.Nets(settings.Challenger, settings.Baseline, settings.Provider, settings.Iterations);
             var nets = new Dictionary<AgentSpec, StateValueNet>
             {
                 [settings.Challenger] = challengerNet,
@@ -74,7 +72,8 @@ namespace Arena
             int parallel = iterationBudget ? Math.Max(1, settings.Parallel) : 1;
             Statistics = PairStatistics.Of([], settings.Elo0, settings.Elo1, settings.Alpha, settings.Beta);
 
-            Write($"[mirror duel] {settings.Challenger} against {settings.Baseline}; maps from seed {settings.SeedBase}, "
+            Write($"[mirror duel] {settings.Challenger} against {settings.Baseline}; batches of {settings.Challenger.BatchFor(settings.Iterations)} and "
+                + $"{settings.Baseline.BatchFor(settings.Iterations)} leaves; maps from seed {settings.SeedBase}, "
                 + (iterationBudget ? $"{settings.Iterations} iterations per decision, {parallel} games at once" : $"{settings.Seconds.ToString(CultureInfo.InvariantCulture)}s per decision")
                 + $"; SPRT [{settings.Elo0:+0;-0;0}, {settings.Elo1:+0;-0;0}], at most {settings.MaxGames} games and {settings.MaxDuration.TotalMinutes:F0} min");
 

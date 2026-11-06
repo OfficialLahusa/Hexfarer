@@ -8,7 +8,8 @@ namespace Arena
 {
     /// <summary>
     /// An MCTS agent of a duel, given as "NAME=MODEL.onnx[=OPTION...]". Options: an opponent model (MaxN, Paranoid, Random;
-    /// MaxN if none), cX exploration constant, bN leaves per batch, fX first play reduction, pX placement weight, u PUCT
+    /// MaxN if none), cX exploration constant, bN leaves per batch (default 16 with an iteration budget, 256 with a time
+    /// budget, see BatchFor), fX first play reduction, pX placement weight, u PUCT
     /// with uniform priors instead of the policy head's, dN hidden information: only its seat's view, searched as N
     /// determinizations (PIMC, see DeterminizedMCTSAgent), is hidden information searched as one tree over the seat's
     /// information sets (see InformationSetMCTSAgent), isfull the same search on the true position (an ablation); without
@@ -28,7 +29,7 @@ namespace Arena
     /// af0 any gain above the margin), amX accepts an offer from a gain above X (default 0.002), noco answers
     /// an offer it turns down without a counteroffer (co with one, the default).
     /// </summary>
-    internal sealed record AgentSpec(string Name, string ModelPath, OpponentModel OpponentModel, double Exploration, int LeavesPerBatch,
+    internal sealed record AgentSpec(string Name, string ModelPath, OpponentModel OpponentModel, double Exploration, int? LeavesPerBatch,
         double FirstPlayReduction, double PlacementWeight, bool UniformPriors, int Determinizations = 0, bool InformationSets = false,
         bool FullKnowledge = false, bool? NormalizeValues = null, bool BranchHiddenOutcomes = false, bool ReuseTree = true,
         bool EvaluateNewLeaves = true, bool PlayForcedMovesAtOnce = true, double ReuseDecay = 1, bool MakeOffers = true,
@@ -36,13 +37,38 @@ namespace Arena
         bool ThreeForOne = false, double AnswerFairness = 1, bool LearnsFromTrades = true, int MaxCards = 3, int Prune = 16, double PartnerFairness = 0,
         double SetupBudget = 1)
     {
+        /// <summary>
+        /// Leaves per batch with an iteration budget when no bN is given: the tree takes in the evaluations after every
+        /// batch, so small batches search much better at the same budget (800 iterations: 16 against 256 +111 Elo, 5000:
+        /// 32 against 256 +54); the budget doesn't depend on throughput
+        /// </summary>
+        public const int IterationBudgetLeavesPerBatch = 16;
+
+        /// <summary>
+        /// The leaves per batch of the search: bN if given, else IterationBudgetLeavesPerBatch with an iteration budget and
+        /// MCTSAgent.DefaultLeavesPerBatch with a time budget (where the throughput of large batches counts: on DirectML,
+        /// 32 against 256 gained nothing at 0.1 s), the same on every machine
+        /// </summary>
+        public int BatchFor(long iterations) => LeavesPerBatch ?? (iterations > 0 ? IterationBudgetLeavesPerBatch : MCTSAgent.DefaultLeavesPerBatch);
+
+        /// <summary>
+        /// The nets of a duel's two sides: one per side, shared if both use the same file and batch size; on DirectML the
+        /// session's fixed batch shape is the side's batch size, so smaller batches aren't padded to 256 rows
+        /// </summary>
+        public static (StateValueNet challenger, StateValueNet baseline) Nets(AgentSpec challenger, AgentSpec baseline, InferenceProvider provider, long iterations)
+        {
+            StateValueNet first = new(challenger.ModelPath, provider: provider, fixedBatchSize: challenger.BatchFor(iterations));
+            bool shared = baseline.ModelPath == challenger.ModelPath && baseline.BatchFor(iterations) == challenger.BatchFor(iterations);
+            return (first, shared ? first : new StateValueNet(baseline.ModelPath, provider: provider, fixedBatchSize: baseline.BatchFor(iterations)));
+        }
+
         public static AgentSpec Parse(string spec)
         {
             string[] parts = spec.Split('=');
             if (parts.Length < 2 || parts[0].Length == 0 || parts[1].Length == 0)
                 throw new ArgumentException($"Agent \"{spec}\" is not NAME=MODEL.onnx[=OPTION...].");
 
-            var result = new AgentSpec(parts[0], parts[1], OpponentModel.MaxN, 1.414, MCTSAgent.DefaultLeavesPerBatch, 0.1, 0, false);
+            var result = new AgentSpec(parts[0], parts[1], OpponentModel.MaxN, 1.414, null, 0.1, 0, false);
             foreach (string option in parts.Skip(2))
             {
                 double Number() => double.Parse(option[1..], CultureInfo.InvariantCulture);
@@ -98,7 +124,7 @@ namespace Arena
         {
             List<string> options = [OpponentModel.ToString()];
             if (Exploration != 1.414) options.Add($"c{Exploration.ToString(CultureInfo.InvariantCulture)}");
-            if (LeavesPerBatch != MCTSAgent.DefaultLeavesPerBatch) options.Add($"b{LeavesPerBatch}");
+            if (LeavesPerBatch is int batch) options.Add($"b{batch}");
             if (FirstPlayReduction != 0.1) options.Add($"f{FirstPlayReduction.ToString(CultureInfo.InvariantCulture)}");
             if (PlacementWeight != 0) options.Add($"p{PlacementWeight.ToString(CultureInfo.InvariantCulture)}");
             if (UniformPriors) options.Add("u");
@@ -136,7 +162,7 @@ namespace Arena
             // The agent picks the encoding of its net (see Vectorizers): a belief-aware net sees its seat's view
             MCTSAgent search = new MCTSAgent(seat, start, explorationParameter: Exploration, timeLimitSeconds: seconds,
                 valueNet: net, placementWeight: PlacementWeight, opponentModel: OpponentModel,
-                iterationLimit: iterations, leavesPerBatch: LeavesPerBatch)
+                iterationLimit: iterations, leavesPerBatch: BatchFor(iterations))
             {
                 UniformPriors = UniformPriors, FirstPlayReduction = FirstPlayReduction, NormalizeValues = NormalizeValues ?? true, ReuseTree = ReuseTree,
                 EvaluateNewLeaves = EvaluateNewLeaves, PlayForcedMovesAtOnce = PlayForcedMovesAtOnce, SetupBudgetFactor = SetupBudget

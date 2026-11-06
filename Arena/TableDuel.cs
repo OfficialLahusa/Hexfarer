@@ -37,16 +37,15 @@ namespace Arena
         /// </summary>
         public GroupStatistics Run(CancellationToken cancellation = default)
         {
-            // One net for both sides if they use the same file
-            var challengerNet = new StateValueNet(settings.Challenger.ModelPath, provider: settings.Provider);
-            var baselineNet = settings.Baseline.ModelPath == settings.Challenger.ModelPath
-                ? challengerNet : new StateValueNet(settings.Baseline.ModelPath, provider: settings.Provider);
+            // One net for both sides if they use the same file and batch size
+            (StateValueNet challengerNet, StateValueNet baselineNet) = AgentSpec.Nets(settings.Challenger, settings.Baseline, settings.Provider, settings.Iterations);
             // Parallel games only with an iteration budget; with a time budget they would take each other's compute
             bool iterationBudget = settings.Iterations > 0;
             int parallel = iterationBudget ? Math.Max(1, settings.Parallel) : 1;
             Statistics = GroupStatistics.Of([], S0, S1, settings.Alpha, settings.Beta);
 
-            Write($"[table duel] {settings.Challenger} against 3x {settings.Baseline}, free trade; maps from seed {settings.SeedBase}, "
+            Write($"[table duel] {settings.Challenger} against 3x {settings.Baseline}, free trade; batches of {settings.Challenger.BatchFor(settings.Iterations)} and "
+                + $"{settings.Baseline.BatchFor(settings.Iterations)} leaves; maps from seed {settings.SeedBase}, "
                 + (iterationBudget ? $"{settings.Iterations} iterations per decision, {parallel} games at once" : $"{settings.Seconds.ToString(CultureInfo.InvariantCulture)}s per decision")
                 + FormattableString.Invariant($"; SPRT win rate [{S0:P1}, {S1:P1}], at most {settings.MaxGames} games and {settings.MaxDuration.TotalMinutes:F0} min"));
 

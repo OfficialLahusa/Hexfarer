@@ -24,7 +24,9 @@ namespace Tests
             Assert.Equal("nets/i2.onnx", spec.ModelPath);
             Assert.Equal(OpponentModel.MaxN, spec.OpponentModel);
             Assert.Equal(1.414, spec.Exploration);
-            Assert.Equal(MCTSAgent.DefaultLeavesPerBatch, spec.LeavesPerBatch);
+            // No batch size given: small batches with an iteration budget, large ones with a time budget
+            Assert.Null(spec.LeavesPerBatch);
+            Assert.Equal((AgentSpec.IterationBudgetLeavesPerBatch, MCTSAgent.DefaultLeavesPerBatch), (spec.BatchFor(800), spec.BatchFor(0)));
             Assert.Equal(0.1, spec.FirstPlayReduction);
             Assert.Equal(0, spec.PlacementWeight);
             Assert.False(spec.UniformPriors);
@@ -39,10 +41,46 @@ namespace Tests
             Assert.Equal(OpponentModel.Paranoid, spec.OpponentModel);
             Assert.Equal(1.0, spec.Exploration);
             Assert.Equal(64, spec.LeavesPerBatch);
+            // A given batch size holds for either budget
+            Assert.Equal((64, 64), (spec.BatchFor(800), spec.BatchFor(0)));
             Assert.Equal(0.25, spec.FirstPlayReduction);
             Assert.Equal(0.5, spec.PlacementWeight);
             Assert.True(spec.UniformPriors);
             Assert.Equal("c1 a.onnx Paranoid c1 b64 f0.25 p0.5 u", spec.ToString());
+        }
+
+        [Theory]
+        [InlineData("A=x.onnx", 40, 0, 48)]
+        [InlineData("A=x.onnx=b32", 40, 0, 64)]
+        [InlineData("A=x.onnx", 0, 0.02, 256)]
+        public void TheAgentSearchesInTheBatchesOfItsBudget(string spec, long iterations, double seconds, int multiple)
+        {
+            // The search runs whole batches: 40 iterations are three batches of 16 by default and two of 32 with b32; a time
+            // budget searches in batches of 256
+            AgentSpec agent = AgentSpec.Parse(spec.Replace("x.onnx", PlainModelPath));
+            StateValueNet net = new(PlainModelPath, provider: InferenceProvider.Cpu);
+            GameState state = new GameState(MapGenerator.GenerateRandomClassic(), 4);
+            MCTSAgent search = Assert.IsType<MCTSAgent>(agent.Create(0, state, net, iterations, seconds));
+            search.Act(state);
+            long done = search.LastSearch!.Iterations;
+            Assert.Equal(0, done % agent.BatchFor(iterations));
+            if (iterations > 0) Assert.Equal(multiple, done);
+            else Assert.True(done >= multiple, $"{done} iterations");
+        }
+
+        [Fact]
+        public void BothSidesShareANetOnlyWithTheSameFileAndBatchSize()
+        {
+            AgentSpec a = AgentSpec.Parse($"a={PlainModelPath}"), b64 = AgentSpec.Parse($"b={PlainModelPath}=b64"), c = AgentSpec.Parse($"c={PolicyModelPath}");
+            (StateValueNet first, StateValueNet second) = AgentSpec.Nets(a, AgentSpec.Parse($"a2={PlainModelPath}"), InferenceProvider.Cpu, 800);
+            Assert.Same(first, second);
+            (first, second) = AgentSpec.Nets(a, b64, InferenceProvider.Cpu, 800);
+            Assert.NotSame(first, second);
+            // With a time budget both default to 256: the same net again, unless the file differs
+            (first, second) = AgentSpec.Nets(AgentSpec.Parse($"t={PlainModelPath}=b256"), a, InferenceProvider.Cpu, 0);
+            Assert.Same(first, second);
+            (first, second) = AgentSpec.Nets(a, c, InferenceProvider.Cpu, 0);
+            Assert.NotSame(first, second);
         }
 
         [Fact]
