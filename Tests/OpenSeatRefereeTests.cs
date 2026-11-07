@@ -507,6 +507,31 @@ namespace Tests
         }
 
         [Fact]
+        public void ALaterRollBeforeAnyBuildingIsntTheGamesFirst()
+        {
+            // The first player rolls with nobody having built since the setup, but the hands have grown: a later round, not
+            // the game's first roll (which the value net's features mark). Only the hands' sizes tell, also when the state
+            // gives none and the hands add up
+            GameState game = RandomMoves(games: 1, firstSeed: 8).Select(m => m.before).First(s => s.Turn.RoundCounter == 2 && s.Turn.MustRoll);
+            game.Turn.RoundCounter = 3;
+            game.ResourceBank.Remove(ResourceCardType.Brick, 4);
+            game.Players[1].ResourceCards.Add(ResourceCardType.Brick, 4);
+            (OspCodec codec, JsonNode state, JsonArray legal) = Message(game);
+            Assert.Equal(3, codec.BuildState(state, legal).Turn.RoundCounter);
+            foreach (JsonNode? player in state["players"]!.AsArray())
+            {
+                player!.AsObject().Remove("hand_size");
+                player.AsObject().Remove("development_size");
+            }
+            Assert.Equal(3, codec.BuildState(state, legal).Turn.RoundCounter);
+
+            // The game's first roll itself stays the first
+            GameState first = RandomMoves(games: 1, firstSeed: 8).Select(m => m.before).First(s => s.Turn.RoundCounter == 2 && s.Turn.MustRoll);
+            (codec, state, legal) = Message(first);
+            Assert.Equal(2, codec.BuildState(state, legal).Turn.RoundCounter);
+        }
+
+        [Fact]
         public void ARebuiltDeckLeavesOutEveryCardTheRefereeCountsAsPlayed()
         {
             // A referee that counts every card played (Catanatron does): a road building, a year of plenty and a monopoly
