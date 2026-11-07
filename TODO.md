@@ -289,6 +289,10 @@
 - Catan RL + MCTS (Hobbyprojekt: Strategie per RL wählen, dann heuristisch spielen) => https://github.com/kvombatkere/Catan-AI
 - Catanatron => https://github.com/bcollazo/catanatron
 - JSettlers => https://nand.net/jsettlers/
+- UCT mit Domänenwissen und Handel gegen JSettlers (1v3, 10k Rollouts: 58,2 ± 7,1 % mit Handel, 41,3 ± 7,7 % ohne, Tab. 1) => Rubin, Paz, Meneguzzi: "Optimizing UCT for Settlers of Catan" (SBGames 2017) https://www.sbgames.org/sbgames2017/papers/ComputacaoFull/175405.pdf
+- POMCP/Belief-MCTS mit Präferenzen aus menschlichen Partien => Dobre, Lascarides: "POMCP with Human Preferences in Settlers of Catan" (AIIDE 2018) https://doi.org/10.1609/aiide.v14i1.13014
+- StacSettlers (Edinburghs JSettlers-Fork mit Stac-Agent) => https://github.com/sorinMD/StacSettlers, Dobres MCTS-Agenten => https://github.com/sorinMD/MCTS
+- Belief-MCTS (TPOMCP) mit Vorwissen aus 60 menschlichen Partien: 53,65 % gegen 3 Stac-Agenten bei 40k It. (uninformiert 47,94 %, Tab. 8.16) => Dobre: "Low-resource Learning in Complex Games" (Dissertation, University of Edinburgh 2019) https://hdl.handle.net/1842/35534
 - LLMs für Tabletalking => Martinenghi et al.: "LLMs of Catan: Exploring Pragmatic Capabilities of Generative Chatbots Through Prediction and Classification of Dialogue Acts in Boardgames’ Multi-party Dialogues"
 - MCTS Variant Review => https://www.researchgate.net/publication/362115589_Monte_Carlo_Tree_Search_a_review_of_recent_modifications_and_applications
 - Particle MCTS => https://arxiv.org/abs/2605.08982
