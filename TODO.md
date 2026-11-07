@@ -69,7 +69,7 @@
 	- Phase 3: Netzarchitektur v2, Phase 4: Policy Head => Self-Play (Expert Iteration) => Belief-aware Net
 	- Nebenbei: alte v1-State-Matrizen löschen (Agents/Training/dataset noch ~19 GB, nur states.npy/1609/1610 sind nicht rekonstruierbar)
 - Weg zum starken Agent, nach Hebel sortiert
-	- 1. Messen: Catanatron- und JSettlers-Bridge stehen (5k gegen 3x AB:2 78,7 %, gegen 3 JSettlers-Robots open-hand 78,5 %, s. Bridges), Leaderboard offen
+	- 1. Messen: Catanatron- und JSettlers-Bridge stehen (5k gegen 3x AB:2 78,7 %, fair gegen 3 smarte JSettlers-Robots 81,0 %, bei gleicher Rechenzeit 50,7 %, s. Bridges), Leaderboard offen
 	- 2. max^n: erledigt (~+70 Elo), Explorationskonstante egal; offen: Paranoid testen, Gegnerzüge nach Policy-Prior
 	- 3. GPU-Inference: erledigt (DirectML 566k States/s, MCTS ~320k Iterationen/s, Self-Play ~445k über BatchingEvaluator, nur mit Server-GC), CUDA auf dem Server; jetzt bremst die Net-Auswertung
 		- FP16 (export_onnx.py --fp16): Ausgaben wie FP32 (Präzisions-Set identisch), hilft nur, wo die GPU begrenzt: Server-Self-Play +17% (382k => 448k, dann CPU-gebunden), Desktop (DirectML) unverändert => auf CUDA FP16 für Self-Play, Reanalyse und Duelle (beide Seiten gleich), FP32 bleibt Master
@@ -239,6 +239,7 @@
 			- Bot-Protokoll: 1 s Timeout, dann Zufallszug, nach 3 Fehlern aufgegeben => für Messungen ungeeignet
 			- Partien ohne PYTHONHASHSEED nicht reproduzierbar (legale Züge aus Mengen, Zufallsbots wählen per Index)
 			- LONGEST_ROAD_LENGTH ist ein Cache: im Setup 0, sonst nur bei manchen Zügen aktualisiert
+		- JSettlers-Robots unter sich (230 Partien): smart = fast ohne Handel (je 25,0 %), smart 2,9 ms CPU pro Entscheidung, fast 0,5 ms; 4 Endlospartien (bis 44k Züge, niemand kann bauen; JSettlers beendet sie erst nach 2 h); Replay ihrer Partien: 190 von 234 regelgleich, Rest bekannte Abweichungen
 		- JSettlers weicht ab (Recorder und Replay; Relay von 100 Zufallspartien: 41 neue Teile, davon 26 Bank, 8 Spielende): keine Ressourcenbank (Hände über 19, Bankzähler unter 0), Sieg durch Rittermacht erst nach dem Räuberzug, Startspieler gelost, gleichzeitiges Abwerfen; enger als die Regel und im Regelsatz deklariert: Seehandel nur zum besten Kurs, Räuber nur gegen Opfer mit Karten, Straßenbaukarte erzwungen und nur mit Straße übrig; canMakeBankTrade lässt die Umkehr des letzten Tauschs ohne Handprüfung durch und stürzt bei schlechterem Kurs ab
 		- Vor dem nächsten Push: OSP-Format (Bridges/PROTOCOL.md) und Beispiel-Logs selbst durchsehen, ob es so gefällt und als Standard taugt
 	- 2. Hexfarer als Gast bei Catanatron (Player.decide bekommt das ganze Spiel => selbst schwärzen; Räuber = Feld + Opfer in einer Aktion): fair und open-hand, 2v2 gespiegelt und 1v3, 5k Iterationen und gleiche Denkzeit, gegen AlphaBeta (~2 Tage)
@@ -252,11 +253,11 @@
 	- 3. Catanatron-Bots in der Hexfarer-Sim: Python-Adapter als Agent-Bridge-Client mit synchroner Catanatron-Partie, im Client als open-hand gekennzeichnet oder mit gezogener Welt fair (~2 Tage) => erste gemischte Partien im Client
 		- Umgesetzt (open_seat_agent.py, Arena, Client-Sitze aus settings.json): unter Hexfarers Schiedsrichter 5k gegen 3x AB:2 open-hand 79,5 % (bei Catanatron 78,7), fair 81,8 % (80,5), fair gegen AB:2 auf gezogenen Welten 83,8 %, 2v2 89,8 % (91,8) => Schiedsrichter egal; offen: Client-Sitz von Hand ausprobieren
 	- 4. Relay-Matches: von fremden Schiedsrichtern geleitete Partien in den Client streamen (Catanatron mit allen Händen, JSettlers nur öffentlich plus eigene Sitze) (~2 Tage)
-		- Aus Logs umgesetzt (OpenSeat relay: Spielstände, bei Regelabweichung neuer Teil aus dem Zustand des Schiedsrichters); offen: live streamen
+		- Umgesetzt aus Logs (OpenSeat relay: Spielstände, bei Regelabweichung neuer Teil aus dem Zustand des Schiedsrichters) und live (relay --live: folgt Log oder Verzeichnis, Client tritt als Zuschauer bei, Züge mit den Würfeln des Schiedsrichters); offen: im Client von Hand ausprobieren
 	- 5. Hexfarer-Roboter bei JSettlers (Vorlage Sample3PClient/Sample3PBrain, Robot-Cookie, Bot-Spiele mit fast_pause_percent ~2 min pro Partie): fair, erst ohne Handel, 2v2 und 1v3 (~3-5 Tage), dann mit Handel
-		- Open-hand umgesetzt (OspRobotClient/OspRobotBrain im Server-JVM liest das wahre Spiel, Agent als OSP-Prozess baut sein Spiel je Entscheidung neu), 5k ohne Handel gegen JSettlers-Standardrobots: 1v3 78,5 % [74,2, 82,2], 2v2 91,0 % (je 400 Partien); vom Server beendete Züge (26 in 600 Partien: Gehirn ohne Ping, neuer Bauauftrag vor dem Platzieren) behoben, danach 0 in 800; offen: fair (braucht Schritte aus JSettlers' Nachrichten), mit Handel, Spiel unter der Sperre des Servers lesen
+		- Umgesetzt (OspRobotClient/OspRobotBrain im Server-JVM, liest unter den Sperren des Servers; MoveLog macht aus JSettlers' Anfragen Schritte, also auch fair): 5k ohne Handel gegen 3 smarte Robots open-hand 79,8 %, fair 81,0 % [76,9, 84,5], 2v2 fair 93,5 % (je 400 Partien); gleiche Rechenzeit (ein Kern, 4 It. 3,9 ms gegen 3,3 ms pro Entscheidung) 50,7 % [45,9, 55,6], mehr Suche auf dem Kern 8 It. 60,2 %, 16 It. 63,2 %, 64 It. 72,8 %; offen: Handel
 	- 6. JSettlers-Bots in der Hexfarer-Sim nur über eine Emulation ihres Server-Protokolls (~1-2 Wochen, fragil); sonst gemischte Partien auf ihrem Server laufen lassen und per Relay verfolgen
-		- Gemischte Partien laufen über Stufe 5 auf ihrem Server, Relay aus Recorder-Logs steht; offen: Relay ihrer Serverpartien
+		- Gemischte Partien laufen über Stufe 5 auf ihrem Server; -Dosp.record schreibt Serverpartien live als Log (Replay, Relay, Live-Relay); Catanatrons AB:2 als Robot-Agent gegen 3 smarte Robots 21,5 % (erster Vergleich der beiden Bot-Familien)
 - Interface für JSettlers Agents/Server
 - Tabletalking über LLMs
 	- Zusätzlich zu Value Functions von einem Basisbot
