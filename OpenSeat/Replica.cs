@@ -146,12 +146,16 @@ namespace OpenSeat
         }
 
         /// <summary>
-        /// The legal move of the protocol's move (after Legal's folding), or null if Hexfarer doesn't allow it
+        /// The legal move of the protocol's move (after Legal's folding), also an offer or counteroffer the rules allow, or
+        /// null if Hexfarer doesn't allow it
         /// </summary>
         public Action? Find(JsonNode move)
         {
             string wanted = OSPCodec.Canonical(move);
-            return Legal().Where(m => OSPCodec.Canonical(m.move) == wanted).Select(m => m.action).FirstOrDefault();
+            Action? listed = Legal().Where(m => OSPCodec.Canonical(m.move) == wanted).Select(m => m.action).FirstOrDefault();
+            if (listed != null) return listed;
+            // Offers and counteroffers can be any cards, so no legal list holds them: read from the move, checked by the rules
+            return OSPCodec.TradeAction(move, Acting()) is Action trade && trade.IsValidFor(State) ? trade : null;
         }
 
         /// <summary>

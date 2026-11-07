@@ -32,6 +32,10 @@ namespace OpenSeat
         // Times the fair agent's own copy of the game had drifted from the replica and was set back to it (should stay 0),
         // and the decisions a lean agent asked the referee's state for
         private int _resyncs, _resyncsAsked;
+        // The copy's state at the last lean decision whose hash it didn't match, to name what differed once the state comes;
+        // the diagnostic lines a game has written (at most 5: what differed at a resync, a move the copy couldn't follow)
+        private JsonObject? _unmatched;
+        private int _unmatchedAt = -1, _diagnosed;
         private string _gameId = "";
         private sbyte _seat;
         // Per game: decisions, those searched, patched states, replaced moves, whether the copy was lost (it then plays the
@@ -160,6 +164,9 @@ namespace OpenSeat
             _searchSeconds = 0;
             _cpuAtStart = System.Diagnostics.Process.GetCurrentProcess().TotalProcessorTime;
             _resyncs = _resyncsAsked = 0;
+            _unmatched = null;
+            _unmatchedAt = -1;
+            _diagnosed = 0;
             _stale = false;
             _lost = !_replica.BoardMatches(before);
             if (_lost) log.WriteLine($"{_gameId}: the board doesn't write back as sent");
@@ -170,8 +177,10 @@ namespace OpenSeat
             _agent = new MCTSAgent(_seat, _replica.State, timeLimitSeconds: seconds > 0 ? Math.Min(seconds, budgetSeconds) : seconds, valueNet: net,
                 iterationLimit: iterations, leavesPerBatch: leavesPerBatch, parallelSelection: parallelSelection);
             _fair = fair ? new InformationSetMCTSAgent(_agent, _replica.State) : null;
-            // No trades between players under these rules
+            // A referee's legal moves hold no offers or counteroffers (their cards can be any), so the agent makes neither
+            // and answers an offer with what the list holds
             _agent.Offers.Enabled = false;
+            _agent.Offers.Counters = false;
         }
 
         private void Step(JsonNode step)
@@ -209,7 +218,11 @@ namespace OpenSeat
                     _lost = true;
                     log.WriteLine($"{_gameId}: lost the game: {kind}: {detail}");
                 }
-                else _stale = true;
+                else
+                {
+                    _stale = true;
+                    if (_diagnosed++ < 5) log.WriteLine($"{_gameId}: can't follow move {step["n"]} ({kind}), rebuilds at the next decision: {detail}");
+                }
                 return;
             }
             Player.HandleAction(_replica.Applied!);
@@ -219,6 +232,11 @@ namespace OpenSeat
         /// The fair agent (for tests), null for the open-hand agent
         /// </summary>
         internal InformationSetMCTSAgent? Fair => _fair;
+
+        /// <summary>
+        /// The search of the game (for tests)
+        /// </summary>
+        internal MCTSAgent? Search => _agent;
 
         // The agent that plays the seat: the fair one around the search, or the open-hand search itself
         private Agent Player => (Agent?)_fair ?? _agent!;
@@ -242,16 +260,55 @@ namespace OpenSeat
         {
             // A lean decision carries only the state's hash: the copy has to be the referee's game, else the agent asks for
             // the state (resync), and the referee sends the decision again with it
+            int n = decide["n"] is JsonValue at && at.TryGetValue(out int number) ? number : -1;
             if (decide["state"] == null)
             {
-                if (_replica == null || _lost || _stale || OSPCodec.Hash(_replica.Codec.State(_replica.State)) != decide["hash"]?.GetValue<string>())
+                JsonObject? mine = _replica == null || _lost || _stale ? null : _replica.Codec.State(_replica.State);
+                if (mine == null || OSPCodec.Hash(mine) != decide["hash"]?.GetValue<string>())
                 {
                     _resyncsAsked++;
+                    (_unmatched, _unmatchedAt) = (mine, n);
                     return new JsonObject { ["type"] = "resync", ["game_id"] = decide["game_id"]!.DeepClone(), ["n"] = decide["n"]!.DeepClone() };
                 }
                 return Choose(decide);
             }
+            // The state after a resync: what the copy had differently goes to the log (the first few of a game)
+            if (_unmatched != null && n == _unmatchedAt && _diagnosed++ < 5)
+                log.WriteLine($"{_gameId}: resync at move {n}: {string.Join("; ", Differences(_unmatched, decide["state"]!, "", 4))}");
+            _unmatched = null;
             return Choose(decide);
+        }
+
+        /// <summary>
+        /// Where two states differ, as paths with both values (ours, then the referee's), at most max of them
+        /// </summary>
+        internal static List<string> Differences(JsonNode? ours, JsonNode? theirs, string path, int max)
+        {
+            List<string> found = [];
+            void Walk(JsonNode? a, JsonNode? b, string at)
+            {
+                if (found.Count >= max) return;
+                if (a is JsonObject x && b is JsonObject y)
+                {
+                    // A key one side leaves out differs from a null on the other (the hash tells them apart)
+                    foreach (string key in x.Select(p => p.Key).Union(y.Select(p => p.Key)).Order(StringComparer.Ordinal))
+                        if (found.Count >= max) return;
+                        else if (x.ContainsKey(key) != y.ContainsKey(key))
+                            found.Add($"{at}.{key} {(x.ContainsKey(key) ? Shorten(OSPCodec.Canonical(x[key])) : "absent")} vs {(y.ContainsKey(key) ? Shorten(OSPCodec.Canonical(y[key])) : "absent")}");
+                        else Walk(x[key], y[key], $"{at}.{key}");
+                    return;
+                }
+                if (a is JsonArray u && b is JsonArray v && u.Count == v.Count)
+                {
+                    for (int i = 0; i < u.Count; i++) Walk(u[i], v[i], $"{at}[{i}]");
+                    return;
+                }
+                string mine = OSPCodec.Canonical(a), theirs = OSPCodec.Canonical(b);
+                if (mine != theirs) found.Add($"{(at.Length > 0 ? at : ".")} {Shorten(mine)} vs {Shorten(theirs)}");
+            }
+            static string Shorten(string text) => text.Length > 120 ? text[..120] + "..." : text;
+            Walk(ours, theirs, path);
+            return found;
         }
 
         private JsonNode Choose(JsonNode decide)

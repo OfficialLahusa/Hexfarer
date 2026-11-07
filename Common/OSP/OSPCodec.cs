@@ -163,6 +163,48 @@ namespace Common.OSP
             _ => throw new NotSupportedException($"No protocol move for {action.GetType().Name} yet."),
         };
 
+        /// <summary>
+        /// The Hexfarer action of a trade move that no legal list holds, since its cards can be any (an offer or a
+        /// counteroffer), made by the seat; null for any other move or one that doesn't read as either. Whether the rules
+        /// allow it is the caller's to check.
+        /// </summary>
+        public static Action? TradeAction(JsonNode? move, sbyte seat)
+        {
+            if (move is not JsonArray { Count: 2 } parts || parts[0] is not JsonValue kind || !kind.TryGetValue(out string? name)
+                || parts[1] is not JsonObject terms || ReadCards(terms["give"]) is not CardSet<ResourceCardType> give || ReadCards(terms["get"]) is not CardSet<ResourceCardType> get)
+                return null;
+            switch (name)
+            {
+                case "offer":
+                    if (terms["to"] is not JsonArray to) return null;
+                    byte recipients = 0;
+                    foreach (JsonNode? recipient in to)
+                    {
+                        if (recipient is not JsonValue value || !value.TryGetValue(out int number) || number is < 0 or > 7) return null;
+                        recipients |= (byte)(1 << number);
+                    }
+                    return new OfferTradeAction(seat, give, get, recipients);
+                case "counter":
+                    return new CounterTradeAction(seat, give, get);
+                default:
+                    return null;
+            }
+        }
+
+        // A card set of the protocol's resource names and counts, or null if it isn't one
+        private static CardSet<ResourceCardType>? ReadCards(JsonNode? set)
+        {
+            if (set is not JsonObject cards) return null;
+            CardSet<ResourceCardType> read = new();
+            foreach ((string name, JsonNode? count) in cards)
+            {
+                ResourceCardType type = ResourceNames.FirstOrDefault(n => n.Value == name).Key;
+                if (type == ResourceCardType.Unknown || count is not JsonValue value || !value.TryGetValue(out uint amount)) return null;
+                read.Add(type, amount);
+            }
+            return read;
+        }
+
         // The seats of a bit set, in order
         private static JsonArray Seats(byte seats) => new(Enumerable.Range(0, 8).Where(seat => (seats & 1 << seat) != 0).Select(seat => (JsonNode)seat).ToArray());
 

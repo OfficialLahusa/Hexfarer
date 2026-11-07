@@ -245,12 +245,13 @@ namespace Tests
         /// Plays a game with the proxy in one seat and random agents in the others, as the Arena does (the move applied,
         /// then every agent told); the states before each move, in order
         /// </summary>
-        private static List<GameState> PlayWithProxy(IOpenSeatChannel agent, int seed, sbyte seat = 0, Action<GameState>? setup = null, int maxMoves = 3000)
+        private static List<GameState> PlayWithProxy(IOpenSeatChannel agent, int seed, sbyte seat = 0, Action<GameState>? setup = null, int maxMoves = 3000,
+            Func<sbyte, Agent>? others = null)
         {
             TestUtil.Seed(seed);
             GameState state = TestUtil.NewGame();
             setup?.Invoke(state);
-            Agent[] agents = TestUtil.RandomAgents();
+            Agent[] agents = others == null ? TestUtil.RandomAgents() : Enumerable.Range(0, state.Players.Length).Select(s => others((sbyte)s)).ToArray();
             using OpenSeatAgentProxy proxy = new(seat, state, agent, $"g{seed}", seed: seed);
             agents[seat] = proxy;
             List<GameState> befores = [];
@@ -734,6 +735,97 @@ namespace Tests
             public void Dispose() { }
         }
 
+        /// <summary>
+        /// A random agent that also offers trades on its turn (one card for another, now and then) and counters some offers,
+        /// as Hexfarer's own agents do: moves no legal list holds
+        /// </summary>
+        private sealed class OfferingAgent(sbyte seat) : Agent(seat)
+        {
+            private readonly RandomAgent _random = new(seat);
+
+            public override Action Act(GameState state)
+            {
+                ResourceCardType[] held = Enum.GetValues<ResourceCardType>().Where(type => state.Players[PlayerIndex].ResourceCards.Contains(type)).ToArray();
+                CardSet<ResourceCardType> One(ResourceCardType type)
+                {
+                    CardSet<ResourceCardType> set = new();
+                    set.Add(type, 1);
+                    return set;
+                }
+                // Another of the five resources (1 to 5; 0 is Unknown)
+                ResourceCardType Other(ResourceCardType type) => (ResourceCardType)(((int)type + Utils.Random.Next(4)) % 5 + 1);
+                if (held.Length > 0 && OfferTradeAction.IsTurnValid(state, PlayerIndex) && Utils.Random.Next(3) == 0)
+                {
+                    ResourceCardType give = held[Utils.Random.Next(held.Length)];
+                    OfferTradeAction offer = new(PlayerIndex, One(give), One(Other(give)), OfferTradeAction.Everyone(state, PlayerIndex));
+                    if (offer.IsValidFor(state)) return offer;
+                }
+                // A counter in the offerer's terms: what the offerer would give, and a card of this player's for it
+                if (held.Length > 0 && RespondToTradeAction.IsTurnValid(state.Turn, PlayerIndex) && Utils.Random.Next(3) == 0)
+                {
+                    ResourceCardType mine = held[Utils.Random.Next(held.Length)];
+                    CounterTradeAction counter = new(PlayerIndex, One(Other(mine)), One(mine));
+                    if (counter.IsValidFor(state)) return counter;
+                }
+                return _random.Act(state);
+            }
+        }
+
+        [Fact]
+        public void TheDifferencesOfTwoStatesAreTheirPathsWithBothValues()
+        {
+            JsonNode ours = JsonNode.Parse("""{"a":1,"b":null,"c":[1,2],"d":{"e":"x"},"f":[1],"h":[[5],6]}""")!;
+            JsonNode theirs = JsonNode.Parse("""{"a":2,"c":[1,3],"d":{"e":"x"},"f":[1,2],"g":0,"h":[[7],6]}""")!;
+            // A key left out isn't a null (the hash tells them apart); lists of other lengths differ as a whole
+            Assert.Equal([".a 1 vs 2", ".b null vs absent", ".c[1] 2 vs 3", ".f [1] vs [1,2]", ".g absent vs 0", ".h[0][0] 5 vs 7"], SeatAgent.Differences(ours, theirs, "", 10));
+            Assert.Equal(2, SeatAgent.Differences(ours, theirs, "", 2).Count);
+            Assert.Empty(SeatAgent.Differences(ours, ours.DeepClone(), "", 10));
+        }
+
+        [Fact]
+        public void AnOfferOrCounterofferReadsBackAsItsActionAndNothingElseDoes()
+        {
+            TestUtil.Seed(24);
+            OSPCodec codec = new(TestUtil.NewGame().Board);
+            CardSet<ResourceCardType> Set(params (ResourceCardType type, uint count)[] cards)
+            {
+                CardSet<ResourceCardType> set = new();
+                foreach ((ResourceCardType type, uint count) in cards) set.Add(type, count);
+                return set;
+            }
+            // Seat 1 offers 2 brick for 1 ore to seats 0 and 3; seat 2 counters with 1 wool for 2 grain
+            OfferTradeAction offer = new(1, Set((ResourceCardType.Brick, 2)), Set((ResourceCardType.Ore, 1)), 0b1001);
+            OfferTradeAction readOffer = Assert.IsType<OfferTradeAction>(OSPCodec.TradeAction(codec.Move(offer), 1));
+            Assert.Equal((offer.PlayerIndex, offer.Give, offer.Get, offer.Recipients), (readOffer.PlayerIndex, readOffer.Give, readOffer.Get, readOffer.Recipients));
+            CounterTradeAction counter = new(2, Set((ResourceCardType.Wool, 1)), Set((ResourceCardType.Grain, 2), (ResourceCardType.Lumber, 1)));
+            CounterTradeAction readCounter = Assert.IsType<CounterTradeAction>(OSPCodec.TradeAction(codec.Move(counter), 2));
+            Assert.Equal((counter.PlayerIndex, counter.Give, counter.Get), (readCounter.PlayerIndex, readCounter.Give, readCounter.Get));
+            // Other moves, and trades that don't read as one, are none
+            foreach (string move in new[] { """["respond",{"accept":true}]""", """["cancel"]""", """["offer"]""", """["offer",{"give":{"brick":1},"get":{"gold":1},"to":[0]}]""",
+                         """["offer",{"give":{"brick":1},"get":{"ore":1},"to":[8]}]""", """["offer",{"give":{"brick":1},"get":{"ore":1}}]""",
+                         """["counter",{"give":{"brick":"one"},"get":{"ore":1}}]""", """["counter",{"give":["brick"],"get":{"ore":1}}]""",
+                         """["counter",{"give":{"brick":null},"get":{"ore":1}}]""", """["counter",{"give":{"brick":-1},"get":{"ore":1}}]""", """["counter",{"get":{"ore":1}}]""" })
+                Assert.Null(OSPCodec.TradeAction(JsonNode.Parse(move), 0));
+        }
+
+        [Fact]
+        public void HexfarersLeanAgentFollowsOffersAndCountersWithoutAResync()
+        {
+            // The other seats offer and counter, which the copy has to follow from the steps alone
+            StringWriter log = new();
+            SeatAgent seatAgent = new(new StateValueNet(TinyNet, provider: InferenceProvider.CPU), iterations: 16, seconds: 0, log, leavesPerBatch: 16, lean: true);
+            RecordingAgent agent = new(new InProcessAgent(seatAgent));
+            PlayWithProxy(agent, seed: 23, seat: 2, setup: state => state.Settings.FreeTrade = true, others: seat => new OfferingAgent(seat));
+            List<string> moves = agent.Sent.Where(m => m["type"]!.GetValue<string>() == "step").Select(m => m["action"]![0]!.GetValue<string>()).ToList();
+            Assert.Contains("offer", moves);
+            Assert.Contains("counter", moves);
+            Assert.Contains(agent.Sent, m => m["type"]!.GetValue<string>() == "decide" && m["legal"]!.AsArray().Any(move => move![0]!.GetValue<string>() == "respond"));
+            JsonNode stats = JsonNode.Parse(log.ToString().Split('\n').Last(line => line.Contains("\"stats\"")))!;
+            // Its answers are moves the referee listed: no offer or counteroffer of its own, which no list holds
+            Assert.Equal((0, 0, 0), (Int(stats["resyncs_asked"]), Int(stats["rebuilds"]), Int(stats["fallbacks"])));
+            Assert.Equal((false, false), (seatAgent.Search!.Offers.Enabled, seatAgent.Search.Offers.Counters));
+        }
+
         [Theory]
         [InlineData(false, 0)]
         [InlineData(true, 1)]
@@ -748,7 +840,12 @@ namespace Tests
             int asked = Int(stats["resyncs_asked"]);
             // Following every step its copy is the referee's game; without steps it asks whenever the game moved on
             if (minResyncs == 0) Assert.Equal(0, asked);
-            else Assert.True(asked >= minResyncs, $"{asked} resyncs");
+            else
+            {
+                Assert.True(asked >= minResyncs, $"{asked} resyncs");
+                // The log names what the copy had differently
+                Assert.Matches(@"g19: resync at move \d+: \.\w", log.ToString());
+            }
             Assert.Equal(asked, agent.Sent.Count(m => m["type"]!.GetValue<string>() == "decide" && m["state"] != null));
         }
 

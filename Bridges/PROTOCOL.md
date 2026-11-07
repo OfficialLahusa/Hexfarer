@@ -119,6 +119,10 @@ Every message that is answered may also be answered with `failure`.
   the true state under `truth`.
 - A lean agent keeps its own game from the steps and checks it against `hash`. If they differ, or it lost track, it
   answers `{"type":"resync","game_id":"g17","n":144}` and the referee sends the same decision again, with `state`.
+- Lean saves something only where the agent's copy writes the referee's state exactly, in practice an agent of the
+  referee's own engine (Hexfarer's agent under Hexfarer's referee). Engines fill the state's open fields differently
+  (`turn`, `played`, an `offer` left out or null), so under another engine's referee every lean decision costs a
+  resync.
 - The referee may send `state` in any decision on its own (a forced resync), for example after a change no step
   explains. An agent that isn't lean gets `state` every time.
 - The answer: `{"type":"decide","game_id":"g17","n":144,"action":...}`, a copy of one entry of `legal`. The referee

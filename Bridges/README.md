@@ -57,6 +57,7 @@ the differences, `OpenSeat relay LOG --save DIR` writes its games as save files 
 rules part), `OpenSeat relay LOG|DIR --live` hosts them for the client's watchers while the referee writes them (the
 client joins with the Watch role; a known rule difference such as JSettlers' unlimited bank comes in as an edit, so the
 game stays one), and `OpenSeat agent` is Hexfarer's own Open Seat Agent (`--fair` for the agent that
-plays from its seat's view, `--lean` for decisions with only the state's hash, checked against its own copy of the game). The Arena seats any agent as `NAME=command:COMMAND`,
+plays from its seat's view, `--lean` for decisions with only the state's hash, checked against its own copy of the game, which saves only under
+Hexfarer's own referee). The Arena seats any agent as `NAME=command:COMMAND`,
 and the client's local games seat those listed in `%AppData%\Hexfarer\settings.json` under `OpenSeatAgents`
 (`[{"Name": "...", "Command": "..."}]`).
