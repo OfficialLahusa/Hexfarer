@@ -28,8 +28,10 @@ import soc.util.SOCRobotParameters;
  * with the state and the legal moves as OspGame writes them (the true state for an open-hand agent, the seat's view
  * otherwise) and plays the answer through the robot client's requests, a protocol move that takes JSettlers two steps
  * (a bought piece and its place, a card and its resources, a robber move and its victim) one after the other. It doesn't
- * keep JSettlers' own robot logic or game tracking; the agent gets no steps, so it has to take its game from each
- * decision's state. If the agent fails, the first legal move is played. The agent's command comes from the system
+ * keep JSettlers' own robot logic or game tracking. An agent that observes gets every move of the game as a step from
+ * the server's move log (MoveLog), from the game's start, before each decision; one that doesn't has to take its game
+ * from each decision's state. The brain reads the game under the server's locks for it (OspServer.read), so it never
+ * sees a move half made. If the agent fails, the first legal move is played. The agent's command comes from the system
  * property osp.agent, its standard error goes to the directory osp.log if set; one statistics line per game goes to
  * the server's standard error.
  */
@@ -37,14 +39,16 @@ public class OspRobotBrain extends SOCRobotBrain
 {
     // The rules JSettlers plays, as the protocol names them: the rulebook without trades between players, narrower where
     // JSettlers is (see Recorder)
-    private static final Map<String, Object> RULESET = Json.object("preset", "standard", "player_trading", "none",
+    static final Map<String, Object> RULESET = Json.object("preset", "standard", "player_trading", "none",
         "bank_rates", "best_only", "robber_victims", "with_cards", "road_building", "forced");
     // How long the agent may think about one decision
     private static final long ANSWER_MILLIS = 120_000;
 
     private OspGame osp;
     private AgentProcess agent;
-    private boolean agentFailed, truth, after;
+    private boolean agentFailed, truth, observe, after;
+    // The steps the agent has been sent
+    private int sent;
     private String agentName = "?";
     // The true state the last move was chosen in, to wait for the server to take it
     private String actedIn;
@@ -54,7 +58,6 @@ public class OspRobotBrain extends SOCRobotBrain
     private Timer pings;
     private boolean pinged;
     private int pendingFrom, pendingWaits;
-    private long n;
     private int decisions, asked, fallbacks;
     private long thinkingMillis;
 
@@ -127,10 +130,13 @@ public class OspRobotBrain extends SOCRobotBrain
                 }
                 try
                 {
-                    synchronized (this)
-                    {
-                        act();
-                    }
+                    // Read outside the brain's lock: a server thread may wait for it (gameEnding) while holding the game's
+                    Seen seen = look();
+                    if (seen != null)
+                        synchronized (this)
+                        {
+                            act(seen);
+                        }
                 }
                 catch (Exception e)
                 {
@@ -155,30 +161,67 @@ public class OspRobotBrain extends SOCRobotBrain
         }
     }
 
-    // Plays the seat's move if the true game waits for it
-    private void act() throws Exception
+    /** What the brain read of the true game at one moment */
+    private static final class Seen
     {
-        SOCGame truthGame = OspServer.game(game.getName());
+        int state, acting;
+        boolean over, winnerNamed;
+        // The state the next move starts from (in the protocol's order of discards), and it with JSettlers' game state
+        Map<String, Object> position;
+        String situation;
+        List<Object> legal;
+        // The game's moves so far, and those the agent hasn't been sent
+        long moves;
+        List<Map<String, Object>> steps;
+        MoveLog log;
+    }
+
+    // Reads the true game under the server's locks, or null if there's no game to play yet
+    private Seen look()
+    {
+        final SOCGame truthGame = OspServer.game(game.getName());
         if (truthGame == null || truthGame.getGameState() < SOCGame.START1A || ourPlayerData == null)
-            return;
-        if (osp == null)
-            osp = new OspGame(truthGame);
+            return null;
+        // The game's move log, begun here if the seat moves first (before the server handled any request)
+        final MoveLog log = OspServer.logOf(truthGame);
+        return OspServer.read(truthGame, log, () ->
+        {
+            // JSettlers empties a game it destroys
+            if (truthGame.getPlayer(0) == null || truthGame.getBoard() == null)
+                return null;
+            if (osp == null)
+                osp = new OspGame(truthGame);
+            Seen seen = new Seen();
+            seen.log = log;
+            seen.over = osp.isOver();
+            seen.winnerNamed = truthGame.getPlayerWithWin() != null;
+            seen.state = truthGame.getGameState();
+            seen.position = log != null ? log.state() : osp.state(-1);
+            seen.situation = seen.state + "|" + Json.write(seen.position, true);
+            seen.acting = osp.acting();
+            int seat = osp.seatOf(ourPlayerNumber);
+            seen.legal = seen.acting == seat && ! seen.over ? osp.legal(seat) : null;
+            seen.moves = log != null ? log.size() : 0;
+            seen.steps = log != null ? log.stepsFrom(sent) : null;
+            return seen;
+        });
+    }
+
+    // Plays the seat's move if the true game waits for it
+    private void act(Seen seen) throws Exception
+    {
         int seat = osp.seatOf(ourPlayerNumber);
-        if (osp.isOver())
+        if (seen.over)
         {
             // JSettlers ends the game a moment before it names the winner: the line waits for the name (the next ping)
-            if (truthGame.getPlayerWithWin() != null)
+            if (seen.winnerNamed)
                 finish(seat);
             return;
         }
-        // The server's thread changes the game while this one reads it: the state, the situation and the legal moves are
-        // read together, and read again with the next message if the game moved in between
-        int state = truthGame.getGameState();
-        String situation = state + "|" + Json.write(osp.state(-1), true);
-        int acting = osp.acting();
-        List<Object> legal = acting == seat ? osp.legal(seat) : null;
-        if (truthGame.getGameState() != state || ! situation.equals(truthGame.getGameState() + "|" + Json.write(osp.state(-1), true)))
-            return;
+        int state = seen.state;
+        String situation = seen.situation;
+        int acting = seen.acting;
+        List<Object> legal = seen.legal;
 
         // The second step of a two-step move, once the server asks for it; until the server took the first step the game
         // stays in the state the first step was sent in (messages from before it still come in)
@@ -201,27 +244,27 @@ public class OspRobotBrain extends SOCRobotBrain
             return;
         decisions++;
         @SuppressWarnings("unchecked")
-        List<Object> move = (List<Object>) (legal.size() == 1 ? legal.get(0) : ask(seat, legal));
+        List<Object> move = (List<Object>) (legal.size() == 1 ? legal.get(0) : ask(seat, legal, seen));
         actedIn = situation;
-        n++;
         pendingFrom = state;
         pendingWaits = 0;
         firstStep(move, state);
     }
 
     // Asks the agent; the first legal move if it fails
-    private Object ask(int seat, List<Object> legal)
+    private Object ask(int seat, List<Object> legal, Seen seen)
     {
         asked++;
         long started = System.currentTimeMillis();
         try
         {
             if (agent == null && ! agentFailed)
-                start(seat);
+                start(seat, seen);
             if (agent == null)
                 return fallback(legal);
-            agent.send(Json.object("type", "decide", "game_id", game.getName(), "n", n, "seat", (long) seat,
-                "state", osp.state(truth ? -1 : seat), "legal", legal));
+            sendSteps(seat, seen.steps);
+            agent.send(Json.object("type", "decide", "game_id", game.getName(), "n", seen.moves, "seat", (long) seat,
+                "state", truth ? seen.position : OspGame.hide(seen.position, seat), "legal", legal));
             Map<String, Object> answer = agent.receive(ANSWER_MILLIS);
             Object chosen = answer.get("action");
             Set<String> listed = new TreeSet<>();
@@ -253,8 +296,37 @@ public class OspRobotBrain extends SOCRobotBrain
         return legal.get(0);
     }
 
+    // The moves the agent hasn't been sent, if it observes: as the referee knows them for an agent that needs the truth
+    // (with the state before each move), else as the seat sees them
+    @SuppressWarnings("unchecked")
+    private void sendSteps(int seat, List<Map<String, Object>> steps) throws Exception
+    {
+        if (steps == null)
+            return;
+        for (Map<String, Object> step : steps)
+        {
+            sent++;
+            if (! observe)
+                continue;
+            Map<String, Object> message = OspGame.copy(step);
+            if (! truth)
+            {
+                message.remove("state");
+                int mover = Json.integer(message.get("seat"));
+                List<Object> action = (List<Object>) message.get("action");
+                Map<String, Object> result = (Map<String, Object>) message.get("result");
+                if (action.get(0).equals("buy_development") && mover != seat)
+                    result.put("card", null);
+                if (action.get(0).equals("move_robber") && result != null && mover != seat
+                    && Json.integer(((Map<String, Object>) action.get(1)).get("victim")) != seat)
+                    result.put("stolen", "unknown");
+            }
+            agent.send(message);
+        }
+    }
+
     // Starts the agent and the game for it
-    private void start(int seat) throws Exception
+    private void start(int seat, Seen seen) throws Exception
     {
         String command = System.getProperty("osp.agent");
         if (command == null)
@@ -269,8 +341,13 @@ public class OspRobotBrain extends SOCRobotBrain
         truth = needs.equals("truth");
         if (needs.equals("world"))
             throw new IllegalStateException("The agent needs a world, which this robot can't draw");
+        // An observing agent follows the game from its start; one that doesn't starts from now
+        observe = Boolean.TRUE.equals(hello.get("observe")) && seen.log != null;
+        Map<String, Object> from = observe ? seen.log.start() : seen.position;
+        if (! observe)
+            sent = (int) seen.moves;
         agent.send(Json.object("type", "before", "game_id", game.getName(), "seat", (long) seat, "players", (long) game.maxPlayers,
-            "ruleset", RULESET, "board", osp.board.boardJson(), "state", osp.state(truth ? -1 : seat)));
+            "ruleset", RULESET, "board", osp.board.boardJson(), "state", truth ? from : OspGame.hide(from, seat)));
     }
 
     private static final boolean DEBUG = System.getProperty("osp.debug") != null;
@@ -407,7 +484,14 @@ public class OspRobotBrain extends SOCRobotBrain
         try
         {
             if (agent != null)
+            {
+                // The moves since the last decision, up to the end (read without the log's lock, which the server's thread
+                // may hold while it waits for this brain)
+                MoveLog log = OspServer.log(game.getName());
+                if (log != null)
+                    sendSteps(seat, log.stepsFrom(sent));
                 agent.send(Json.object("type", "after", "game_id", game.getName(), "winner", winner, "vp", vp, "truncated", winner == null));
+            }
         }
         catch (Exception e) {}
         System.err.println(Json.write(Json.object("type", "osp-robot", "game_id", game.getName(), "robot", client.getNickname(),

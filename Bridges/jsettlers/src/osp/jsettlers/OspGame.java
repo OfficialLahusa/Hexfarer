@@ -198,15 +198,14 @@ public final class OspGame
                 developmentSize += count;
                 development.put(cardName(type), (Long) development.get(cardName(type)) + count);
             }
-            boolean hidden = viewer >= 0 && viewer != seat;
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("seat", (long) seat);
             entry.put("hand_size", (long) hand.getTotal());
             entry.put("development_size", (long) developmentSize);
             entry.put("public_vp", (long) player.getPublicVP());
-            entry.put("vp", hidden ? null : (Object) (long) player.getTotalVP());
-            entry.put("hand", hidden ? null : cards(hand));
-            entry.put("development", hidden ? null : development);
+            entry.put("vp", (long) player.getTotalVP());
+            entry.put("hand", cards(hand));
+            entry.put("development", development);
             entry.put("played", Json.object("knight", (long) player.getNumKnights()));
             entry.put("longest_road", (long) player.getLongestRoadLength());
             entry.put("has_longest_road", longest == player);
@@ -232,7 +231,7 @@ public final class OspGame
         state.put("bank", bank);
         state.put("players", players);
         state.put("offer", null);
-        return state;
+        return viewer < 0 ? state : hide(state, viewer);
     }
 
     // Where the player may build a road now: every land edge JSettlers calls a potential road
@@ -298,7 +297,7 @@ public final class OspGame
                 legal.add(move("build_road", board.path(edge)));
             break;
         case "discard":
-            discards(player.getResources(), player.getCountToDiscard(), legal);
+            legal.addAll(discardMoves(seat));
             break;
         case "move_robber":
         {
@@ -381,6 +380,38 @@ public final class OspGame
         if (game.canPlayMonopoly(pn))
             for (int type : RESOURCES)
                 legal.add(move("play_monopoly", RESOURCE_NAMES[type]));
+    }
+
+    /** The discards of a seat that has to discard (JSettlers' players discard at the same time, whoever acts) */
+    public List<Object> discardMoves(int seat)
+    {
+        SOCPlayer player = game.getPlayer(playerOf(seat));
+        List<Object> legal = new ArrayList<>();
+        if (player.getNeedToDiscard())
+            discards(player.getResources(), player.getCountToDiscard(), legal);
+        return legal;
+    }
+
+    /** A state as a seat sees it: the other seats' hands, development cards and points with them hidden (null) */
+    @SuppressWarnings("unchecked")
+    public static Map<String, Object> hide(Map<String, Object> state, int viewer)
+    {
+        Map<String, Object> view = copy(state);
+        for (Object entry : (List<Object>) view.get("players"))
+        {
+            Map<String, Object> player = (Map<String, Object>) entry;
+            if (Json.integer(player.get("seat")) != viewer)
+                for (String field : new String[] {"vp", "hand", "development"})
+                    player.put(field, null);
+        }
+        return view;
+    }
+
+    /** A deep copy of a protocol value */
+    @SuppressWarnings("unchecked")
+    public static Map<String, Object> copy(Map<String, Object> value)
+    {
+        return (Map<String, Object>) Json.read(Json.write(value));
     }
 
     // Every card set of the count the hand can give up

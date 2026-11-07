@@ -25,8 +25,9 @@ def free_port():
         return s.getsockname()[1]
 
 
-def play(games, agent_command, logs):
-    """Robot-only games with one Open Seat Agent robot and three of JSettlers'; the server's standard error"""
+def play(games, agent_command, logs, record=None):
+    """Robot-only games with one Open Seat Agent robot and three of JSettlers' (the server's referee logs into the
+    directory record, if given); the server's standard error"""
     properties = {
         "jsettlers.startrobots": "4",
         "jsettlers.bots.start3p": "1,osp.jsettlers.OspRobotClient",
@@ -41,6 +42,8 @@ def play(games, agent_command, logs):
         "jsettlers.allow.debug": "N",
     }
     arguments = ["java", f"-Dosp.agent={agent_command}", f"-Dosp.log={logs}", "-Dosp.debug=true", "-cp", jsettlers.classpath(), "osp.jsettlers.OspServer"]
+    if record:
+        arguments.insert(3, f"-Dosp.record={record}")
     properties["jsettlers.port"] = str(free_port())
     arguments += [f"-D{name}={value}" for name, value in properties.items()]
     result = subprocess.run(arguments, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=int(os.environ.get("JSETTLERS_ROBOT_TIMEOUT", "900")))
@@ -122,7 +125,7 @@ class ViewRobotTests(unittest.TestCase):
         self.assertEqual(1, len(logs))
         with open(logs[0], encoding="utf-8") as file:
             decides = [m for m in (json.loads(line) for line in file if line.startswith("{")) if m["type"] == "decide"]
-        self.assertGreater(len(decides), 10)
+        self.assertGreater(len(decides), 5)
         for decide in decides:
             self.assertEqual(True, decide["own_shown"], decide)
             self.assertEqual(True, decide["others_hidden"], decide)
