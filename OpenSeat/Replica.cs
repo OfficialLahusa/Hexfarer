@@ -146,7 +146,8 @@ namespace OpenSeat
                 // Only the total of the dice counts for the game
                 RollAction => variants.Cast<RollAction>().FirstOrDefault(v => v.History!.RollResult.Total == result!["dice"]!.AsArray().Sum(d => d!.GetValue<int>())),
                 BuyDevelopmentCardAction => variants.Cast<BuyDevelopmentCardAction>().FirstOrDefault(v => OspCodec.CardNames[v.History!.DrawnType] == result!["card"]!.GetValue<string>()),
-                RobberAction => variants.Cast<RobberAction>().FirstOrDefault(v => (v.History!.StolenCard is ResourceCardType card ? OspCodec.ResourceNames[card] : null) == result!["stolen"]?.GetValue<string>()),
+                // A robbery without a victim has no result or a null card
+                RobberAction => variants.Cast<RobberAction>().FirstOrDefault(v => (v.History!.StolenCard is ResourceCardType card ? OspCodec.ResourceNames[card] : null) == result?["stolen"]?.GetValue<string>()),
                 _ => throw new NotSupportedException($"No forced outcome for {action.GetType().Name}."),
             };
         }

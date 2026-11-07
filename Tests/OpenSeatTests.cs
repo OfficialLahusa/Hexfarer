@@ -108,6 +108,20 @@ namespace Tests
         }
 
         [Fact]
+        public void ARobberMoveThatStealsNothingMayHaveNoResult()
+        {
+            // The protocol's result of a robber move without a victim is null (JSettlers' move log sends it so) or {"stolen":null}
+            List<JsonNode> game = Replay.Read(Fixture).TakeWhile(m => m["game_id"]!.GetValue<string>() == Replay.Read(Fixture).First()["game_id"]!.GetValue<string>()).ToList();
+            List<JsonNode> messages = game.TakeWhile(m => !At(m, "step", 48)).ToList();
+            JsonNode robbery = messages.Single(m => At(m, "step", 47));
+            Assert.Null(robbery["action"]![1]!["victim"]);
+            robbery.AsObject()["result"] = null;
+            Replay.Report report = new Replay().Run(messages.Select(m => JsonNode.Parse(m.ToJsonString())!));
+            Assert.Empty(report.Counts);
+            Assert.True(report.Moves > 47);
+        }
+
+        [Fact]
         public void ALogCutShortReadsUpToTheCut()
         {
             // A stopped writer leaves a gzip stream cut off, its last line half written: read up to there, no failure
@@ -416,6 +430,8 @@ namespace Tests
             JsonNode stats = JsonNode.Parse(log.ToString().Trim().Split('\n').Last())!;
             Assert.Equal((true, false, 0), (stats["fair"]!.GetValue<bool>(), stats["lost"]!.GetValue<bool>(), Int(stats["resyncs"])));
             Assert.True(Int(stats["searches"]) > 10);
+            // The game's CPU time, for comparisons at equal compute: its searches took some
+            Assert.InRange(stats["cpu_seconds"]!.GetValue<double>(), 0.001, 3600);
             Assert.NotNull(agent.Fair!.LastTree);
             Assert.False(agent.Fair.FullKnowledge);
         }

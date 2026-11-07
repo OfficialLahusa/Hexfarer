@@ -42,6 +42,9 @@ namespace OpenSeat
         // (whole batches) and the distinct positions among them, for comparisons with other engines at equal work
         private long _searches, _iterations, _distinctLeaves;
         private double _searchSeconds;
+        // The process's CPU time at the game's start (every thread: the search and the value net's), for comparisons with
+        // other engines at equal compute
+        private TimeSpan _cpuAtStart;
 
         public string Name => $"hexfarer-{(fair ? "ismcts-fair" : "mcts-open")}-{(iterations > 0 ? $"{iterations}it" : $"{seconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}s")}"
             + (leavesPerBatch != MCTSAgent.DefaultLeavesPerBatch ? $"-b{leavesPerBatch}" : "") + (parallelSelection ? "" : "-serial");
@@ -86,7 +89,8 @@ namespace OpenSeat
                     log.WriteLine(new JsonObject { ["type"] = "stats", ["game_id"] = _gameId, ["seat"] = _seat, ["decisions"] = _decisions, ["searched"] = _searched,
                         ["patches"] = _patches, ["fallbacks"] = _fallbacks, ["rebuilds"] = _rebuilds, ["lost"] = _lost,
                         ["searches"] = _searches, ["iterations"] = _iterations, ["distinct_leaves"] = _distinctLeaves, ["search_seconds"] = Math.Round(_searchSeconds, 3),
-                        ["fair"] = fair, ["resyncs"] = _resyncs }.ToJsonString());
+                        ["fair"] = fair, ["resyncs"] = _resyncs,
+                        ["cpu_seconds"] = Math.Round((System.Diagnostics.Process.GetCurrentProcess().TotalProcessorTime - _cpuAtStart).TotalSeconds, 3) }.ToJsonString());
                     log.Flush();
                     return null;
                 default:
@@ -102,6 +106,7 @@ namespace OpenSeat
             _patches = _fallbacks = _decisions = _searched = _rebuilds = 0;
             _searches = _iterations = _distinctLeaves = 0;
             _searchSeconds = 0;
+            _cpuAtStart = System.Diagnostics.Process.GetCurrentProcess().TotalProcessorTime;
             _resyncs = 0;
             _stale = false;
             _lost = !_replica.BoardMatches(before);
