@@ -42,7 +42,7 @@ def play(games, agent_command, logs):
     arguments = ["java", f"-Dosp.agent={agent_command}", f"-Dosp.log={logs}", "-cp", jsettlers.classpath(), "osp.jsettlers.OspServer"]
     properties["jsettlers.port"] = str(free_port())
     arguments += [f"-D{name}={value}" for name, value in properties.items()]
-    result = subprocess.run(arguments, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
+    result = subprocess.run(arguments, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=int(os.environ.get("JSETTLERS_ROBOT_TIMEOUT", "900")))
     return result.stdout + result.stderr
 
 
@@ -61,6 +61,10 @@ class RobotTests(unittest.TestCase):
         for stats in self.stats:
             self.assertIsNotNone(stats["winner"], stats)
             self.assertGreaterEqual(max(stats["vp"]), 10, stats)
+
+    def test_the_server_never_has_to_end_the_robots_turn(self):
+        # JSettlers ends a robot's turn when it stops answering, e.g. after a bought piece it doesn't place
+        self.assertNotIn("force end turn", self.output)
 
     def test_the_robot_decides_through_its_agent_without_fallbacks(self):
         for stats in self.stats:
