@@ -1,7 +1,7 @@
 # Bridges
 
 Adapters between Hexfarer and other CATAN engines, so that bots of either side can play under the other side's referee:
-[Catanatron](https://github.com/bcollazo/catanatron) first, [JSettlers](https://github.com/jdmonin/JSettlers2) later.
+[Catanatron](https://github.com/bcollazo/catanatron) and [JSettlers](https://github.com/jdmonin/JSettlers2).
 
 This folder is licensed under the GNU General Public License, version 3 or later (see `LICENSE`), since the adapters
 build on those GPL-licensed engines; the rest of the repository is not (see `../LICENSE`). To keep the two apart:
@@ -13,6 +13,7 @@ build on those GPL-licensed engines; the rest of the repository is not (see `../
 
 Pinned versions:
 - Catanatron: commit `ecf9311` (2026-09-08), the first with its protocol for bots in other languages.
+- JSettlers: release 2.6.10 (its full jar, which JSETTLERS_JAR names; a JDK 8 or newer builds the adapter against it).
 
 Contents:
 - `PROTOCOL.md`: the Open Seat Protocol.
@@ -23,4 +24,17 @@ Contents:
   (`osp_game.py`), and a recorder that plays Catanatron games and writes them as the referee's protocol messages
   (`record.py --bots AB:2,R,W,R --games 100 --out games.jsonl.gz`), the input of Hexfarer's replay harness. Setup and
   tests: `python -m venv .venv`, `.venv/Scripts/python -m pip install -r requirements.txt`,
-  `.venv/Scripts/python -m unittest test_osp_board test_osp_game`.
+  `.venv/Scripts/python -m unittest test_osp_board test_osp_game test_open_seat_agent test_drive`.
+  - `open_seat_agent.py --bot AB:2 [--needs world|truth]`: Catanatron's bots as an Open Seat Agent under another
+    referee (e.g. Hexfarer's Arena: `--baseline "AB2=command:python open_seat_agent.py --bot AB:2"`); each decision
+    rebuilds a Catanatron game from the referee's state, the bot picks among the referee's legal moves.
+  - `drive.py`: Hexfarer (or any Open Seat Agent) under Catanatron's referee.
+- `jsettlers/`: JSettlers in protocol terms (Java, built by `jsettlers.py` against JSettlers' jar into `build/`):
+  - `OspBoard`: its classic board in protocol keys, from its own adjacency; `OspGame`: states, legal moves by its own
+    rules and moves played through its game logic.
+  - `Recorder --games N --out games.jsonl.gz [--ruleset jsettlers]`: random games by JSettlers' rules as referee
+    messages, for Hexfarer's replay harness (the differences found are in PROTOCOL.md's ruleset table).
+  - `OspServer` with `OspRobotClient`: JSettlers' server whose robot seats include Open Seat Agents (-Dosp.agent=COMMAND,
+    started through jsettlers.bots.start3p); the robot runs inside the server and hands its agent the true state, so
+    agents that need their seat's view only, or every step, aren't served yet.
+  - Tests: `python -m unittest test_jsettlers_board test_jsettlers_game test_jsettlers_robot` (with JSETTLERS_JAR set).

@@ -26,7 +26,10 @@ version, its adapter disappears.
   the adapters in this folder make Catanatron's and JSettlers' bots Open Seat Agents, and Hexfarer's agents play as one
   under other engines' referees.
 - **Transport:** UTF-8 JSON objects, one per line, over the agent's standard input and output (or any line-based stream).
-  The referee speaks first. Nothing but protocol lines on standard output; logs go to standard error.
+  The referee speaks first. Nothing but protocol lines on standard output; logs go to standard error. A referee may start
+  an agent as a process per game and seat (Hexfarer's Arena does) or keep one for many games (Catanatron's driver does).
+- **Seats:** numbered in turn order, seat 0 is the player who starts. An engine that draws who starts (JSettlers) numbers
+  its players from that one.
 
 ## Messages
 
@@ -59,9 +62,14 @@ version, its adapter disappears.
     or `truth` (every hand, for open-hand agents).
   - A referee that can't serve a game the agent supports, or won't hand out what it needs, doesn't start the game. It
     labels every game with what each seat received.
-  - Under `world` and `truth`, every `step` also carries `state`: the state before the move, as the seat may see it.
-    An agent that keeps its own copy of the game can then check it before following each move, and take over the
-    referee's state where the two engines' rules differ (the referee decides the game).
+  - Under `truth`, every `step` also carries `state`: the state before the move, with every hand. An agent that keeps its
+    own copy of the game can then check it before following each move, and take over the referee's state where the two
+    engines' rules differ (the referee decides the game). Under `world` a step carries the seat's view: worlds are drawn
+    for decisions only.
+  - Under `truth` the results show everything (another seat's bought card, a steal between two others); otherwise as
+    the seat sees them.
+  - A referee that can't follow moves for an agent sends it no steps (JSettlers' robot): the agent then has to take the
+    game from each decision's state.
 - **`n`:** counts the moves of the game, so answers and steps can't be mixed up.
 - **`decide` answer:** a copy of one entry of `legal`. The referee matches it against its own list, as Catanatron's does,
   so an encoding that only looks right can't slip through.
@@ -124,21 +132,25 @@ the ruleset allows trading between players.
 
 ```
 {"prompt":"main",             // setup_settlement, setup_road, roll, main, road_building (placing the free roads of the
-                              // card), discard, move_robber, answer_offer, pick_partner
- "current":1, "turn":37, "dice":[3,4],
+                              // card), discard, move_robber, answer_offer, pick_partner; a finished game's is left open
+ "current":1, "on_turn":1,    // who acts now, and whose turn it is (a player discarding after a 7 acts on another's turn)
+ "turn":37, "dice":[3,4], "free_roads":0,
  "robber":[q,r],
  "buildings":{"settlements":[[seat,intersection],...],"cities":[[seat,intersection],...],"roads":[[seat,path],...]},
  "bank":{"brick":12,...,"development":11},
- "players":[{"seat":0,"public_vp":5,"hand_size":7,"development_size":2,
+ "players":[{"seat":0,"public_vp":5,"vp":6,"hand_size":7,"development_size":2,
              "played":{"knight":2,"road_building":0,"year_of_plenty":1,"monopoly":0},
              "longest_road":6,"has_longest_road":true,"has_largest_army":false,
              "pieces_left":{"roads":7,"settlements":2,"cities":3},
-             "hand":{"ore":2,...} or null, "development":["knight","victory_point"] or null},
+             "hand":{"brick":0,"ore":2,...} or null, "development":{"knight":1,"victory_point":1,...} or null},
             ...],
- "offer":{"from":1,"give":set,"get":set,"to":[0,2],"answers":{"0":"accept"}} or null}
+ "offer":{"from":1,"give":set,"get":set,"to":[0,2],"answers":{"0":"accept","2":"counter"},
+          "counters":{"2":{"give":set,"get":set}}} or null}   // answers: accept, decline, counter; counteroffers in
+                                                              // the offerer's terms
 ```
 
-- `hand` and `development` are null for other seats under `view`.
+- `hand`, `development` and `vp` (the points with victory point cards) are null for other seats under `view`; every
+  card type is listed, 0 included. `played` may count only knights (Hexfarer's engine keeps no other).
 - A `world` fills them with a game the referee drew from the seat's view and says so (`"drawn":true`).
 - Under `truth` they are the real ones.
 
@@ -147,19 +159,22 @@ the ruleset allows trading between players.
 The ruleset is a set of options; presets name common sets. `before` carries the preset and any options that differ from
 it.
 
-| Option | `standard` (the rulebook) | `catanatron` |
-|---|---|---|
-| `victory_points` | 10 | 10 |
-| `discard_limit` (hand size above which half is discarded) | 7 | 7 |
-| `player_trading` | `rulebook` (with the player on turn, after the roll) | `none` |
-| `counteroffers` | true | false |
-| `bank_shortage` | `rulebook` (nobody gets a short resource, unless a single player is owed it: they get the rest) | `nobody` |
-| `win_timing` | `own_turn` | `any_time` |
-| `robber_victims` | `adjacent` (any adjacent player, even without cards) | `with_cards` |
-| `bank_rates` | `all` (4:1 also with a harbor) | `best_only` |
-| `road_building` | `optional` (unplaced roads can be given up) | `forced` |
-| `turn_limit` (player turns, then a draw) | none | 1000 |
-| `decide_timeout_ms` | none | none |
+| Option | `standard` (the rulebook) | `catanatron` | JSettlers 2.6.10 (no preset yet) |
+|---|---|---|---|
+| `victory_points` | 10 | 10 | 10 |
+| `discard_limit` (hand size above which half is discarded) | 7 | 7 | 7 |
+| `player_trading` | `rulebook` (with the player on turn, after the roll) | `none` | `rulebook`, `none` with game option NT |
+| `counteroffers` | true | false | true |
+| `bank_shortage` | `rulebook` (nobody gets a short resource, unless a single player is owed it: they get the rest) | `nobody` | `unlimited` (no resource bank) |
+| `win_timing` | `own_turn` | `any_time` | `own_turn`, by Largest Army only after the robber moved |
+| `robber_victims` | `adjacent` (any adjacent player, even without cards) | `with_cards` | `with_cards` |
+| `bank_rates` | `all` (4:1 also with a harbor) | `best_only` | `best_only` |
+| `road_building` | `optional` (unplaced roads can be given up) | `forced` | `forced` |
+| `turn_limit` (player turns, then a draw) | none | 1000 | none |
+| `decide_timeout_ms` | none | none | the server's robot turn limit |
+
+The JSettlers column comes from replaying 100 random JSettlers games through Hexfarer's rules (Bridges/jsettlers,
+Recorder and OpenSeat replay); the values `unlimited` and the Largest Army timing are not options an agent can ask for.
 
 New options get a default that matches the rulebook, so older agents keep playing the `standard` preset. An engine
 that can't play an option value says so in `hello` by leaving the preset out.
