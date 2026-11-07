@@ -1,6 +1,7 @@
 using Agents;
 using Agents.Inference;
 using Agents.MCTS;
+using Agents.OpenSeat;
 using Common;
 
 namespace Simulation
@@ -34,7 +35,7 @@ namespace Simulation
 
     /// <summary>
     /// Search settings of the MCTS seats: the presets' thinking times, or one time or iteration budget for all, and the
-    /// opponent model
+    /// opponent model; and the Open Seat Agent of each seat of that kind, by name (null for the others)
     /// </summary>
     public sealed record AgentSettings(double? SecondsForAll, long IterationsForAll, OpponentModel OpponentModel, IReadOnlyList<string?>? OpenSeatAgents = null)
     {
@@ -42,7 +43,9 @@ namespace Simulation
     }
 
     /// <summary>
-    /// An Open Seat Agent a simulation can seat (stub)
+    /// An Open Seat Agent a simulation can seat (see Bridges/PROTOCOL.md): its name in the seat pickers and the command
+    /// that starts it. Each simulation has its own list, from its host's settings; a seat picks one by name (the
+    /// AgentSettings' OpenSeatAgents), never by a command from a client.
     /// </summary>
     public sealed record ExternalAgent(string Name, string Command);
 
@@ -76,6 +79,7 @@ namespace Simulation
             SeatKind.PimcEasy => "MCTS Easy",
             SeatKind.PimcMedium => "MCTS Medium",
             SeatKind.PimcHard => "MCTS Hard",
+            SeatKind.OpenSeatAgent => "Open Seat Agent",
             _ => kind.ToString()
         };
 
@@ -110,9 +114,44 @@ namespace Simulation
                 SeatKind.Simple => new SimpleAgent(seat),
                 SeatKind.Builder => new BuilderAgent(seat),
                 SeatKind.Greedy => new GreedyAgent(seat),
+                // An Open Seat Agent needs its simulation's list (see the overload below); without it the Builder plays
+                SeatKind.OpenSeatAgent => new BuilderAgent(seat),
                 _ when IsFair(kind) => new InformationSetMCTSAgent(Search(), state),
                 _ => Search()
             };
+        }
+
+        /// <summary>
+        /// How long an Open Seat Agent may take for an answer before its seat fails
+        /// </summary>
+        public static readonly TimeSpan OpenSeatAgentTimeout = TimeSpan.FromMinutes(5);
+
+        /// <summary>
+        /// The agent of a seat, an Open Seat Agent from the simulation's list among them (a process, its game named gameId,
+        /// knowing what beliefs says the seat knows): an unknown one, or one that doesn't start, leaves the seat to the
+        /// Builder and says why in error
+        /// </summary>
+        public static Agent CreateAgent(SeatKind kind, sbyte seat, GameState state, AgentSettings settings, bool valueNetAvailable,
+            IReadOnlyList<ExternalAgent> externalAgents, string gameId, BeliefTracker? beliefs, out string? error)
+        {
+            error = null;
+            if (kind != SeatKind.OpenSeatAgent) return CreateAgent(kind, seat, state, settings, valueNetAvailable);
+            string? name = settings.OpenSeatAgents is { } names && seat < names.Count ? names[seat] : null;
+            ExternalAgent? agent = name == null ? null : externalAgents.FirstOrDefault(a => a.Name == name);
+            if (agent == null)
+                error = name == null ? $"Seat {seat + 1} has no Open Seat Agent chosen; the Builder plays it." : $"No Open Seat Agent \"{name}\" is set up here; the Builder plays seat {seat + 1}.";
+            else
+            {
+                try
+                {
+                    return new OpenSeatAgentProxy(seat, state, OpenSeatAgentProcess.Start(agent.Command, OpenSeatAgentTimeout), gameId, beliefs: beliefs);
+                }
+                catch (OpenSeatException e)
+                {
+                    error = $"The Open Seat Agent \"{name}\" didn't start ({e.Message}); the Builder plays seat {seat + 1}.";
+                }
+            }
+            return new BuilderAgent(seat);
         }
 
         public static bool ValueNetAvailable => StateValueNet.IsDefaultModelAvailable;

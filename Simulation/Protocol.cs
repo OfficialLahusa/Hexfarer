@@ -107,10 +107,12 @@ namespace Simulation
         {
             ["seconds"] = a.SecondsForAll,
             ["iterations"] = a.IterationsForAll,
-            ["opponentModel"] = a.OpponentModel.ToString()
+            ["opponentModel"] = a.OpponentModel.ToString(),
+            ["openSeatAgents"] = a.OpenSeatAgents is { } names ? new JsonArray(names.Select(n => (JsonNode?)n).ToArray()) : null
         };
 
-        private static AgentSettings Agents(JsonNode? node) => new((double?)node!["seconds"], (long)node["iterations"]!, Named<OpponentModel>(node["opponentModel"]));
+        private static AgentSettings Agents(JsonNode? node) => new((double?)node!["seconds"], (long)node["iterations"]!, Named<OpponentModel>(node["opponentModel"]),
+            node["openSeatAgents"] is JsonArray names ? names.Select(n => (string?)n).ToArray() : null);
 
         private static JsonObject Session(SessionInfo s) => new()
         {
