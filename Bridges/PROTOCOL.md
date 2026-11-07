@@ -39,7 +39,7 @@ version, its adapter disappears.
 |---|---|---|---|
 | `handshake` | referee | `handshake` | protocol name and version; the answer says what the agent plays and wants |
 | `before` | referee | `ready` | a new game: seat, ruleset, budget, seed, board, the seat's state at the start |
-| `decide` | referee | `decide` or `resync` | the seat's state (or only its hash) and its legal moves |
+| `decide` | referee | `decide` or `resync` | the seat's state (or only its hash), its legal moves and the trades it may propose |
 | `step` | referee | none | a move someone made, with its result as the seat may see it (only to agents that observe) |
 | `after` | referee | none | the end of a game, with its result record |
 | `failure` | either | none | what went wrong; ends the game for the agent |
@@ -112,7 +112,7 @@ Every message that is answered may also be answered with `failure`.
 ### `decide`, lean decisions and `resync`
 
 - `decide` carries `game_id`, `n`, `seat`, `legal`, `hash`, and `state` unless the agent is lean; with a game clock
-  also `clock_ms`.
+  also `clock_ms`; where the seat may propose a trade, `trades` (see trades between players).
 - `hash`: the first 16 hex digits (lowercase) of the SHA-256 of the state's canonical JSON: keys sorted, no whitespace,
   UTF-8. The state holds only integers, booleans, null, lists, objects and strings of ASCII letters, digits and
   underscores, so its canonical form is unique. It is the hash of the state the agent would get: its view under `view`,
@@ -126,7 +126,8 @@ Every message that is answered may also be answered with `failure`.
 - The referee may send `state` in any decision on its own (a forced resync), for example after a change no step
   explains. An agent that isn't lean gets `state` every time.
 - The answer: `{"type":"decide","game_id":"g17","n":144,"action":...}`, a copy of one entry of `legal`. The referee
-  matches it against its own list, as Catanatron's does, so an encoding that only looks right can't slip through.
+  matches it against its own list, as Catanatron's does, so an encoding that only looks right can't slip through. The
+  one exception is a trade from `trades`, whose terms the agent writes; the referee checks those by the rules below.
 - `n` counts the moves of the game, so answers and steps can't be mixed up.
 
 ### `after` and the result record
@@ -176,6 +177,18 @@ Where the ruleset allows them (`player_trading` `rulebook`), trades are decision
 2. Each seat the offer goes to then gets a decision with the prompt `answer_offer`, one after another starting from the
    offerer's left: `respond` (`{"accept":true or false}`) or, with `counteroffers`, `counter` in the offerer's terms.
    The state's `offer` shows the answers so far.
+
+Offers and counteroffers can be any cards, so `legal` can't list them. A decision names them in `trades` instead,
+only where the seat may propose one now: `{"offer":{"to":[1,2,3],"left":2}}` (the seats it may address, and the offers
+it has left this turn, null without a limit), and `{"counter":{}}` while it answers an offer and counteroffers are
+allowed. The answer is then a copy of an entry of `legal` or such a trade with its terms:
+`["offer",{"give":{"wool":2},"get":{"ore":1},"to":[1,3]}]` or `["counter",{"give":{"ore":1},"get":{"grain":1}}]`.
+The referee takes it if its terms are valid, and answers anything else with `illegal`:
+- `give` and `get` are card sets of resources, each with at least one card, and no resource is on both sides.
+- An offer's `give` is within the seat's hand, and `to` names at least one seat, each listed in `trades` and once.
+- A counteroffer is in the offerer's terms, so its `get` (what the offerer would get) is within the seat's hand.
+
+An agent that doesn't know `trades` ignores it, plays only what `legal` lists, and never proposes a trade.
 3. When all have answered, the offerer gets the prompt `pick_partner`: `confirm` (`{"partner":seat}`) with a seat that
    accepted (on the offer's terms) or countered (on the counteroffer's terms), or `cancel`.
 4. Every answer is a decision with the game's budget, and the steps tell observers each one.

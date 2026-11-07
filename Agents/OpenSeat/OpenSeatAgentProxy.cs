@@ -202,6 +202,7 @@ namespace Agents.OpenSeat
         {
             List<Action> legal = LegalActionProvider.GetActionsForState(state, PlayerIndex);
             JsonArray moves = new(legal.Select(action => (JsonNode)_codec.Move(action)).ToArray());
+            JsonObject? trades = Trades(state);
             JsonObject seatState = StateFor(state);
             string hash = OSPCodec.Hash(seatState);
             // A lean agent gets only the hash, unless it asks for the state (resync)
@@ -210,6 +211,7 @@ namespace Agents.OpenSeat
                 JsonObject decide = new() { ["type"] = "decide", ["game_id"] = _gameId, ["n"] = _moves, ["seat"] = (int)PlayerIndex, ["hash"] = hash };
                 if (withState || !Handshake.Lean) decide["state"] = seatState.DeepClone();
                 decide["legal"] = moves.DeepClone();
+                if (trades != null) decide["trades"] = trades.DeepClone();
                 return decide;
             }
             Stopwatch answering = Stopwatch.StartNew();
@@ -267,8 +269,49 @@ namespace Agents.OpenSeat
                     Record.Decided(answering.ElapsedMilliseconds);
                     return legal[i];
                 }
-                Fail(OpenSeatFailure.Illegal, $"The Open Seat Agent {Handshake.Name} answered {wanted}, which is not one of the legal moves.", _moves);
+                // Or a trade the decision named, with terms of the agent's own that the rules allow
+                if (TradeOf(answer["action"], trades, state) is Action trade)
+                {
+                    Record.Decided(answering.ElapsedMilliseconds);
+                    return trade;
+                }
+                Fail(OpenSeatFailure.Illegal, $"The Open Seat Agent {Handshake.Name} answered {wanted}, which is neither one of the legal moves nor a trade with valid terms.", _moves);
             }
+        }
+
+        /// <summary>
+        /// The trades the seat may propose now with terms of its own, which no legal list can hold (see PROTOCOL.md): an
+        /// offer on its turn after the roll (the other seats, the offers left this turn), a counteroffer while it answers an
+        /// offer; null if none
+        /// </summary>
+        internal static JsonObject? Trades(GameState state, sbyte seat)
+        {
+            JsonObject trades = [];
+            if (OfferTradeAction.IsTurnValid(state, seat))
+                trades["offer"] = new JsonObject
+                {
+                    ["to"] = new JsonArray(Enumerable.Range(0, state.Players.Length).Where(other => other != seat).Select(other => (JsonNode)other).ToArray()),
+                    ["left"] = state.Settings.TradeOfferLimit - state.Turn.TradeOffersThisTurn,
+                };
+            if (RespondToTradeAction.IsTurnValid(state.Turn, seat))
+                trades["counter"] = new JsonObject();
+            return trades.Count > 0 ? trades : null;
+        }
+
+        private JsonObject? Trades(GameState state) => Trades(state, PlayerIndex);
+
+        // The agent's trade if the decision named its kind (an offer only to seats it named) and the rules allow its terms
+        private Action? TradeOf(JsonNode? move, JsonObject? trades, GameState state)
+        {
+            if (trades == null || OSPCodec.TradeAction(move, PlayerIndex) is not Action trade) return null;
+            bool named = trade switch
+            {
+                OfferTradeAction offer => trades["offer"]?["to"] is JsonArray to
+                    && (offer.Recipients & ~to.Aggregate(0, (seats, seat) => seats | 1 << seat!.GetValue<int>())) == 0,
+                CounterTradeAction => trades["counter"] != null,
+                _ => false,
+            };
+            return named && trade.IsValidFor(state) ? trade : null;
         }
 
         public override void HandleAction(Action action)

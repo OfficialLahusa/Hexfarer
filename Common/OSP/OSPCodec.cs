@@ -180,7 +180,8 @@ namespace Common.OSP
                     byte recipients = 0;
                     foreach (JsonNode? recipient in to)
                     {
-                        if (recipient is not JsonValue value || !value.TryGetValue(out int number) || number is < 0 or > 7) return null;
+                        // Each seat once
+                        if (recipient is not JsonValue value || !value.TryGetValue(out int number) || number is < 0 or > 7 || (recipients & 1 << number) != 0) return null;
                         recipients |= (byte)(1 << number);
                     }
                     return new OfferTradeAction(seat, give, get, recipients);

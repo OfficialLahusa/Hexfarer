@@ -177,8 +177,7 @@ namespace OpenSeat
             _agent = new MCTSAgent(_seat, _replica.State, timeLimitSeconds: seconds > 0 ? Math.Min(seconds, budgetSeconds) : seconds, valueNet: net,
                 iterationLimit: iterations, leavesPerBatch: leavesPerBatch, parallelSelection: parallelSelection);
             _fair = fair ? new InformationSetMCTSAgent(_agent, _replica.State) : null;
-            // A referee's legal moves hold no offers or counteroffers (their cards can be any), so the agent makes neither
-            // and answers an offer with what the list holds
+            // Offers and counteroffers only where a decision names them (in trades, since their cards can be any)
             _agent.Offers.Enabled = false;
             _agent.Offers.Counters = false;
         }
@@ -280,6 +279,31 @@ namespace OpenSeat
         }
 
         /// <summary>
+        /// Which trades a decision names (see PROTOCOL.md): an offer (with offers left this turn, or no limit), a
+        /// counteroffer
+        /// </summary>
+        internal static (bool offers, bool counters) TradesNamed(JsonNode? trades)
+        {
+            bool offers = trades?["offer"] is JsonObject offer
+                && (offer["left"] is not JsonValue left || !left.TryGetValue(out int count) || count > 0);
+            return (offers, trades?["counter"] is JsonObject);
+        }
+
+        /// <summary>
+        /// Whether a trade of the agent's is one the decision names: an offer only to seats it named, a counteroffer
+        /// </summary>
+        internal static bool Proposable(Action trade, JsonNode? trades) => trade switch
+        {
+            OfferTradeAction offer => TradesNamed(trades).offers && trades!["offer"]!["to"] is JsonArray to && (offer.Recipients & ~SeatsOf(to)) == 0,
+            CounterTradeAction => TradesNamed(trades).counters,
+            _ => false,
+        };
+
+        // The seats a decision's trades name, as a bit set (anything that isn't a seat number left out)
+        private static int SeatsOf(JsonArray to) =>
+            to.Aggregate(0, (seats, seat) => seat is JsonValue value && value.TryGetValue(out int number) && number is >= 0 and < 8 ? seats | 1 << number : seats);
+
+        /// <summary>
         /// Where two states differ, as paths with both values (ours, then the referee's), at most max of them
         /// </summary>
         internal static List<string> Differences(JsonNode? ours, JsonNode? theirs, string path, int max)
@@ -343,8 +367,9 @@ namespace OpenSeat
             }
             if (_lost || _replica!.Acting() != _seat) return Answer(legal[0]!);
 
-            // A single legal move needs no search
-            if (legal.Count == 1) return Answer(legal[0]!);
+            // A single legal move needs no search, unless the decision names trades the agent may propose instead
+            JsonNode? trades = decide["trades"];
+            if (legal.Count == 1 && trades == null) return Answer(legal[0]!);
             // A copy without a legal move (it would have to be lost) can't search
             if (!_replica.Legal().Any())
             {
@@ -355,6 +380,7 @@ namespace OpenSeat
 
             // The fair agent searches worlds drawn from its beliefs, not the true state it is given
             SearchStatistics? previous = _agent!.LastSearch;
+            (_agent.Offers.Enabled, _agent.Offers.Counters) = TradesNamed(trades);
             Action chosen = Player.Act(_replica.State);
             _searched++;
             // A new statistics object means a search ran for this decision (the last one stays when Act needs none)
@@ -374,9 +400,12 @@ namespace OpenSeat
                 if (Allowed(root.Move) is JsonNode fallback) return Answer(fallback);
             return Answer(legal[0]!);
 
-            // The protocol's move of one of Hexfarer's actions, as the referee's legal moves write it, or null if it isn't one
+            // The protocol's move of one of Hexfarer's actions, as the referee's legal moves write it (or a trade the decision
+            // named, with its terms), or null if it isn't one
             JsonNode? Allowed(Action action)
             {
+                if (action is OfferTradeAction or CounterTradeAction)
+                    return Proposable(action, trades) ? _replica!.Codec.Move(action) : null;
                 string wanted = OSPCodec.Canonical(_replica!.Codec.Move(action));
                 foreach ((Action legalAction, JsonArray encoded) in _replica.Legal())
                 {

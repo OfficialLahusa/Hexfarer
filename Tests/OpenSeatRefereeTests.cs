@@ -1,5 +1,6 @@
 using Agents;
 using Agents.Inference;
+using Agents.MCTS;
 using Agents.OpenSeat;
 using Common;
 using Common.Actions;
@@ -341,7 +342,7 @@ namespace Tests
         {
             ScriptedAgent agent = new(choose: _ => JsonNode.Parse("""["build_city",[[9,9],[9,9],[9,9]]]""")!);
             OpenSeatException error = Assert.Throws<OpenSeatException>(() => PlayWithProxy(agent, seed: 3));
-            Assert.Contains("not one of the legal moves", error.Message);
+            Assert.Contains("neither one of the legal moves nor a trade with valid terms", error.Message);
             Assert.Equal(OpenSeatFailure.Illegal, error.Code);
             JsonNode failure = agent.OfType("failure").Single();
             Assert.Equal("illegal", failure["code"]!.GetValue<string>());
@@ -808,22 +809,155 @@ namespace Tests
                 Assert.Null(OSPCodec.TradeAction(JsonNode.Parse(move), 0));
         }
 
+        // Passes everything to Hexfarer's agent; after each decision it searched (more than one move to choose from, a trade
+        // named among them), what its search could propose. With a margin its search proposes any trade that gains more
+        // (set once its game began)
+        private sealed class WatchingAgent(SeatAgent seatAgent, IOpenSeatChannel inner, float? margin = null) : IOpenSeatChannel
+        {
+            public readonly List<(JsonNode? trades, bool offers, bool counters)> Seen = [];
+            public void Send(JsonNode message)
+            {
+                inner.Send(message);
+                if (margin is float gain && message["type"]!.GetValue<string>() == "before") seatAgent.Search!.Offers.Margin = gain;
+                if (message["type"]!.GetValue<string>() == "decide" && message["legal"]!.AsArray().Count + (message["trades"] == null ? 0 : 1) > 1
+                    && seatAgent.Search is MCTSAgent search)
+                    Seen.Add((message["trades"]?.DeepClone(), search.Offers.Enabled, search.Offers.Counters));
+            }
+            public JsonNode Receive(CancellationToken cancellation = default) => inner.Receive(cancellation);
+            public void Dispose() => inner.Dispose();
+        }
+
+        // The answer to a decision with a move of the agent's own
+        private static JsonObject Answering(JsonNode decide, string move) => new()
+        {
+            ["type"] = "decide", ["game_id"] = decide["game_id"]!.DeepClone(), ["n"] = decide["n"]!.DeepClone(), ["action"] = JsonNode.Parse(move),
+        };
+
+        [Fact]
+        public void ADecisionNamesTheTradesTheSeatMayProposeAndTheRefereeTakesValidOnes()
+        {
+            // Seat 1 offers a card it holds for another at its first chance of a turn, and counters every offer it can
+            List<JsonNode> decides = [];
+            ScriptedAgent agent = new(needs: "truth", answer: decide =>
+            {
+                decides.Add(decide.DeepClone());
+                JsonObject hand = decide["state"]!["players"]![1]!["hand"]!.AsObject();
+                string? held = hand.Where(card => Int(card.Value) > 0).Select(card => card.Key).FirstOrDefault();
+                if (held == null) return null;
+                string other = held == "ore" ? "grain" : "ore";
+                if (decide["trades"]?["offer"] is JsonObject offer && Int(offer["left"]) == 10)
+                    return Answering(decide, "[\"offer\",{\"give\":{\"" + held + "\":1},\"get\":{\"" + other + "\":1},\"to\":" + offer["to"]!.ToJsonString() + "}]");
+                if (decide["trades"]?["counter"] is JsonObject)
+                    return Answering(decide, "[\"counter\",{\"give\":{\"" + other + "\":1},\"get\":{\"" + held + "\":1}}]");
+                return null;
+            });
+            PlayWithProxy(agent, seed: 25, seat: 1, setup: state => state.Settings.FreeTrade = true, others: seat => new OfferingAgent(seat), maxMoves: 1500);
+            Assert.Empty(agent.OfType("failure"));
+            // An offer names the other seats and the turn's offers left; a counteroffer only where the seat answers an offer
+            Assert.Contains(decides, decide => decide["trades"]?["offer"] is JsonNode offer && OSPCodec.Canonical(offer) == """{"left":10,"to":[0,2,3]}""");
+            List<JsonNode> answering = decides.Where(decide => decide["trades"]?["counter"] != null).ToList();
+            Assert.NotEmpty(answering);
+            Assert.All(answering, decide => Assert.Equal("{}", decide["trades"]!["counter"]!.ToJsonString()));
+            Assert.All(answering, decide => Assert.Equal("answer_offer", decide["state"]!["prompt"]!.GetValue<string>()));
+            Assert.All(decides.Where(decide => decide["state"]!["prompt"]!.GetValue<string>() is "setup_settlement" or "setup_road" or "roll"),
+                decide => Assert.Null(decide["trades"]));
+            // The referee took them: they come back as steps of seat 1
+            List<string> own = agent.OfType("step").Where(step => Int(step["seat"]) == 1).Select(step => step["action"]![0]!.GetValue<string>()).ToList();
+            Assert.Contains("offer", own);
+            Assert.Contains("counter", own);
+        }
+
+        [Theory]
+        [InlineData("""["offer",{"give":{"brick":1},"get":{"wool":1},"to":[0,2]}]""", true)]
+        [InlineData("""["offer",{"give":{"brick":30},"get":{"wool":1},"to":[0]}]""", false)]
+        [InlineData("""["offer",{"give":{"brick":1},"get":{"brick":1},"to":[0]}]""", false)]
+        [InlineData("""["offer",{"give":{"brick":1},"get":{"wool":1},"to":[1]}]""", false)]
+        [InlineData("""["offer",{"give":{"brick":1},"get":{"wool":1},"to":[0,0]}]""", false)]
+        [InlineData("""["offer",{"give":{"brick":1},"get":{"wool":1},"to":[]}]""", false)]
+        [InlineData("""["offer",{"give":{},"get":{"wool":1},"to":[0]}]""", false)]
+        [InlineData("""["offer",{"give":{"brick":1},"get":{"wool":1}}]""", false)]
+        [InlineData("""["counter",{"give":{"wool":1},"get":{"brick":1}}]""", false)]
+        public void ATradeTheDecisionDoesntNameOrWithInvalidTermsIsIllegal(string move, bool valid)
+        {
+            // Seat 1 holds bricks and ore (and discards none after a 7); at its first decision that names an offer it answers
+            // the move (a counteroffer there isn't named)
+            bool answered = false;
+            ScriptedAgent agent = new(needs: "truth", answer: decide =>
+            {
+                if (answered || decide["trades"]?["offer"] == null) return null;
+                answered = true;
+                return Answering(decide, move);
+            });
+            void Play() => PlayWithProxy(agent, seed: 26, seat: 1, maxMoves: 600, setup: state =>
+            {
+                state.Settings.FreeTrade = true;
+                state.Settings.RobberCardLimit = 50;
+                state.Players[1].ResourceCards.Add(ResourceCardType.Brick, 3);
+                state.Players[1].ResourceCards.Add(ResourceCardType.Ore, 3);
+            });
+            if (valid)
+            {
+                Play();
+                Assert.Contains(agent.OfType("step"), step => Int(step["seat"]) == 1 && OSPCodec.Canonical(step["action"]) == OSPCodec.Canonical(JsonNode.Parse(move)));
+                return;
+            }
+            OpenSeatException error = Assert.Throws<OpenSeatException>(Play);
+            Assert.Equal(OpenSeatFailure.Illegal, error.Code);
+            Assert.Equal("illegal", agent.Received[^1]["code"]!.GetValue<string>());
+        }
+
+        [Fact]
+        public void HexfarersAgentProposesOnlyTheTradesADecisionNames()
+        {
+            JsonNode? Trades(string trades) => JsonNode.Parse($$"""{"type":"decide","trades":{{trades}}}""")!["trades"];
+            Assert.Equal((true, false), SeatAgent.TradesNamed(Trades("""{"offer":{"to":[0,2],"left":3}}""")));
+            Assert.Equal((false, true), SeatAgent.TradesNamed(Trades("""{"counter":{}}""")));
+            Assert.Equal((false, false), SeatAgent.TradesNamed(Trades("""{"offer":{"to":[0,2],"left":0}}""")));
+            Assert.Equal((false, false), SeatAgent.TradesNamed(null));
+            CardSet<ResourceCardType> brick = new(), ore = new();
+            brick.Add(ResourceCardType.Brick, 1);
+            ore.Add(ResourceCardType.Ore, 1);
+            OfferTradeAction toSeats0And2 = new(1, brick, ore, 0b0101), toSeat3 = new(1, brick, ore, 0b1000);
+            CounterTradeAction counter = new(1, brick, ore);
+            JsonNode? offering = Trades("""{"offer":{"to":[0,2],"left":3}}"""), unlimited = Trades("""{"offer":{"to":[0,2],"left":null}}"""), countering = Trades("""{"counter":{}}""");
+            // An offer only to seats the decision names, a counteroffer only where it names one
+            Assert.True(SeatAgent.Proposable(toSeats0And2, offering));
+            Assert.True(SeatAgent.Proposable(toSeats0And2, unlimited));
+            Assert.False(SeatAgent.Proposable(toSeat3, offering));
+            Assert.False(SeatAgent.Proposable(toSeats0And2, countering));
+            Assert.True(SeatAgent.Proposable(counter, countering));
+            Assert.False(SeatAgent.Proposable(counter, offering));
+            Assert.False(SeatAgent.Proposable(counter, null));
+            // Seats that aren't numbers name nobody, rather than failing the agent
+            Assert.False(SeatAgent.Proposable(toSeats0And2, Trades("""{"offer":{"to":["0",2,null,99],"left":3}}""")));
+            Assert.True(SeatAgent.Proposable(toSeats0And2, Trades("""{"offer":{"to":["x",0,2],"left":3}}""")));
+        }
+
         [Fact]
         public void HexfarersLeanAgentFollowsOffersAndCountersWithoutAResync()
         {
-            // The other seats offer and counter, which the copy has to follow from the steps alone
+            // The other seats offer and counter, which the copy has to follow from the steps alone; the agent proposes any
+            // trade it can (its tiny net would rarely find one worth it)
             StringWriter log = new();
             SeatAgent seatAgent = new(new StateValueNet(TinyNet, provider: InferenceProvider.CPU), iterations: 16, seconds: 0, log, leavesPerBatch: 16, lean: true);
-            RecordingAgent agent = new(new InProcessAgent(seatAgent));
+            WatchingAgent watch = new(seatAgent, new InProcessAgent(seatAgent), margin: -1);
+            RecordingAgent agent = new(watch);
             PlayWithProxy(agent, seed: 23, seat: 2, setup: state => state.Settings.FreeTrade = true, others: seat => new OfferingAgent(seat));
             List<string> moves = agent.Sent.Where(m => m["type"]!.GetValue<string>() == "step").Select(m => m["action"]![0]!.GetValue<string>()).ToList();
             Assert.Contains("offer", moves);
             Assert.Contains("counter", moves);
             Assert.Contains(agent.Sent, m => m["type"]!.GetValue<string>() == "decide" && m["legal"]!.AsArray().Any(move => move![0]!.GetValue<string>() == "respond"));
             JsonNode stats = JsonNode.Parse(log.ToString().Split('\n').Last(line => line.Contains("\"stats\"")))!;
-            // Its answers are moves the referee listed: no offer or counteroffer of its own, which no list holds
+            // Every answer was one the referee took: a listed move, or a trade the decision named; the agent proposed some
             Assert.Equal((0, 0, 0), (Int(stats["resyncs_asked"]), Int(stats["rebuilds"]), Int(stats["fallbacks"])));
-            Assert.Equal((false, false), (seatAgent.Search!.Offers.Enabled, seatAgent.Search.Offers.Counters));
+            List<string> own = agent.Sent.Where(m => m["type"]!.GetValue<string>() == "step" && Int(m["seat"]) == 2).Select(m => m["action"]![0]!.GetValue<string>()).ToList();
+            Assert.True(own.Contains("offer") && own.Contains("counter"), $"the agent's own moves: {string.Join(" ", own.Distinct())}");
+            // At every decision it searched, it could propose exactly the trades the decision named
+            Assert.All(watch.Seen, seen => Assert.Equal(SeatAgent.TradesNamed(seen.trades), (seen.offers, seen.counters)));
+            string seenText = $"{watch.Seen.Count} searched, {watch.Seen.Count(seen => seen.trades?["offer"] != null)} with an offer named, {watch.Seen.Count(seen => seen.trades?["counter"] != null)} with a counteroffer named";
+            Assert.True(watch.Seen.Any(seen => seen.offers), seenText);
+            Assert.True(watch.Seen.Any(seen => seen.counters), seenText);
+            Assert.DoesNotContain(agent.Sent, m => m["type"]!.GetValue<string>() == "failure");
         }
 
         [Theory]
