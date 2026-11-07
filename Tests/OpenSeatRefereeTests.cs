@@ -734,6 +734,15 @@ namespace Tests
         }
 
         [Fact]
+        public void OnlyAJsonObjectIsAnAnswer()
+        {
+            // An agent's other output (its logging, a library's warning) may happen to be JSON too: only an object answers
+            Assert.Equal("hello", OpenSeatAgentProcess.AnswerOf("""{"type":"hello","protocol":"osp"}""")!["type"]!.GetValue<string>());
+            foreach (string line in new[] { "42", "[1, 2]", "\"ready\"", "null", "true", "loading the net", "{\"type\":", "" })
+                Assert.Null(OpenSeatAgentProcess.AnswerOf(line));
+        }
+
+        [Fact]
         public void LinesThatArentTheProtocolsAreSkippedAndKeptForTheErrorMessage()
         {
             // The help goes to standard output, as text, and the program ends

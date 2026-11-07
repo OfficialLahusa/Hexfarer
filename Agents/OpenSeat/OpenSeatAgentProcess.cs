@@ -166,13 +166,25 @@ namespace Agents.OpenSeat
                     throw new OpenSeatException($"The Open Seat Agent \"{_command}\" ended without an answer{Ended()}{Said()}");
                 }
                 if (line.Trim().Length == 0) continue;
-                try
-                {
-                    if (JsonNode.Parse(line) is JsonObject answer) return answer;
-                }
-                catch (JsonException) { }
+                if (AnswerOf(line) is JsonObject answer) return answer;
                 // Not a protocol line: kept for the error message
                 Remember(line);
+            }
+        }
+
+        /// <summary>
+        /// The protocol message a line of the agent's output holds: a JSON object, or null for anything else (its logging,
+        /// even if that happens to be JSON)
+        /// </summary>
+        public static JsonObject? AnswerOf(string line)
+        {
+            try
+            {
+                return JsonNode.Parse(line) as JsonObject;
+            }
+            catch (JsonException)
+            {
+                return null;
             }
         }
 
