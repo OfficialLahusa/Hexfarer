@@ -95,5 +95,28 @@ class RobotTests(unittest.TestCase):
             self.assertEqual(numbers, sorted(numbers))
 
 
+
+@unittest.skipUnless(jsettlers.available(), "needs a JDK and JSettlers' jar in JSETTLERS_JAR")
+class ViewRobotTests(unittest.TestCase):
+    """A robot whose agent asks for its seat's view only (needs: view)"""
+
+    @classmethod
+    def setUpClass(cls):
+        jsettlers.build()
+        cls.logs = tempfile.mkdtemp()
+        agent = f'"{sys.executable}" "{os.path.join(HERE, "first_move_agent.py")}" --needs view'
+        cls.output = play(1, agent, cls.logs)
+
+    def test_a_view_shows_the_seats_own_cards_and_no_others(self):
+        logs = [os.path.join(self.logs, name) for name in os.listdir(self.logs)]
+        self.assertEqual(1, len(logs))
+        with open(logs[0], encoding="utf-8") as file:
+            decides = [m for m in (json.loads(line) for line in file if line.startswith("{")) if m["type"] == "decide"]
+        self.assertGreater(len(decides), 10)
+        for decide in decides:
+            self.assertEqual(True, decide["own_shown"], decide)
+            self.assertEqual(True, decide["others_hidden"], decide)
+
+
 if __name__ == "__main__":
     unittest.main()
