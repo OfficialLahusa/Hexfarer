@@ -1,11 +1,11 @@
 """
-Plays Catanatron games under Catanatron's referee with some seats played by Open Seat Agents (OSAs, see ../PROTOCOL.md):
+Plays Catanatron games under Catanatron's referee with some seats played by Open Seat Agents (see ../PROTOCOL.md):
 external processes that get every message of their seat (before, decide, step, after) over standard input and output
 and answer the decisions. The other seats are Catanatron's bots. Every map is played once per rotation of the lineup
 (4 rotations: each lineup entry sits in each seat once), all rotations of a map with the same Catanatron seed (the same
 dice and development cards as long as the games run alike). One result line per game, with each side's time per decision.
 
-Usage: python drive.py --boards boards.jsonl --lineup osa,AB:2,AB:2,AB:2 --osa "dotnet OpenSeat.dll agent --iterations 5000"
+Usage: python drive.py --boards boards.jsonl --lineup open-seat-agent,AB:2,AB:2,AB:2 --open-seat-agent "dotnet OpenSeat.dll agent --iterations 5000"
                        --maps 0:25 --out results.jsonl [--log games.jsonl.gz]
 """
 
@@ -31,14 +31,14 @@ from osp_game import Encoder, card_set
 COLORS = [Color.RED, Color.BLUE, Color.ORANGE, Color.WHITE]
 
 
-class OsaSeat(Player):
+class OpenSeatAgentSeat(Player):
     """A seat whose decisions an Open Seat Agent makes (the driver asks it; Catanatron never calls decide)"""
 
     def decide(self, game, playable_actions):
         raise RuntimeError("The driver decides for Open Seat Agent seats")
 
 
-class Osa:
+class OpenSeatAgent:
     """An Open Seat Agent process: one JSON object per line each way"""
 
     def __init__(self, command, stderr):
@@ -48,7 +48,7 @@ class Osa:
         hello = self.ask({"type": "hello", "protocol": "osp", "version": 1})
         if hello.get("protocol") != "osp" or hello.get("version") != 1:
             raise RuntimeError(f"The agent speaks {hello}")
-        self.name = hello.get("name", "osa")
+        self.name = hello.get("name", "open-seat-agent")
 
     def send(self, message):
         self.process.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
@@ -78,8 +78,8 @@ def seated_game(players, seed, catan_map):
     return game
 
 
-def play(game, osas, write, game_id, codes):
-    """Plays the game; osas maps seats to Open Seat Agents. Returns the result line."""
+def play(game, open_seat_agents, write, game_id, codes):
+    """Plays the game; open_seat_agents maps seats to Open Seat Agents. Returns the result line."""
     encoder = Encoder(game)
     state = game.state
     times = {seat: [0.0, 0] for seat in range(4)}
@@ -87,15 +87,15 @@ def play(game, osas, write, game_id, codes):
     def tell(message, before=None):
         # The log has the state before each move in its decide; the agents (which need the full state) get it with the step
         write(message)
-        for osa in osas.values():
-            osa.send(message if before is None else {**message, "state": before})
+        for agent in open_seat_agents.values():
+            agent.send(message if before is None else {**message, "state": before})
 
     board = osp_board.board(state.board.map, state.board.robber_coordinate)
     full = encoder.state()
     write({"type": "before", "game_id": game_id, "seed": game.seed, "players": 4, "ruleset": {"preset": "catanatron"},
            "bots": codes, "board": board, "state": full})
-    for seat, osa in osas.items():
-        osa.send({"type": "before", "game_id": game_id, "seat": seat, "players": 4, "ruleset": {"preset": "catanatron"},
+    for seat, agent in open_seat_agents.items():
+        agent.send({"type": "before", "game_id": game_id, "seat": seat, "players": 4, "ruleset": {"preset": "catanatron"},
                   "board": board, "state": full})
 
     n = 0
@@ -106,8 +106,8 @@ def play(game, osas, write, game_id, codes):
         decide = {"type": "decide", "game_id": game_id, "n": n, "seat": seat, "state": encoder.state(), "legal": legal}
         write(decide)
         start = time.perf_counter()
-        if seat in osas:
-            move = osas[seat].ask(decide)["action"]
+        if seat in open_seat_agents:
+            move = open_seat_agents[seat].ask(decide)["action"]
             if move not in legal:
                 raise RuntimeError(f"{game_id} move {n}: the agent's {move} is not legal")
         else:
@@ -147,8 +147,8 @@ def play(game, osas, write, game_id, codes):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Play Catanatron games with Open Seat Agents in some seats")
     parser.add_argument("--boards", required=True, help="protocol boards, one per line ({seed, board}), e.g. from OpenSeat boards")
-    parser.add_argument("--lineup", default="osa,AB:2,AB:2,AB:2", help="four seats: 'osa' for an Open Seat Agent or a Catanatron bot code")
-    parser.add_argument("--osa", required=True, help="the command that starts an Open Seat Agent (one process per osa seat)")
+    parser.add_argument("--lineup", default="open-seat-agent,AB:2,AB:2,AB:2", help="four seats: 'open-seat-agent' for an Open Seat Agent or a Catanatron bot code")
+    parser.add_argument("--open-seat-agent", required=True, help="the command that starts an Open Seat Agent (one process per such entry of the lineup)")
     parser.add_argument("--maps", default="0:10", help="the boards to play, FIRST:END (line numbers, END exclusive), several comma-separated")
     parser.add_argument("--out", required=True, help="result lines, appended")
     parser.add_argument("--log", help="every game's referee messages, gzipped (for OpenSeat replay)")
@@ -163,8 +163,8 @@ def main(argv=None):
     # Ranges FIRST:END, comma-separated (e.g. the maps a stopped run didn't finish, see resume.py)
     boards = [board for part in args.maps.split(",") for board in all_boards[slice(*(int(x) for x in part.split(":")))]]
     agent_log = open(args.agent_log, "a", encoding="utf-8") if args.agent_log else subprocess.DEVNULL
-    # One agent process per osa entry of the lineup, kept for all games (it follows the entry from seat to seat)
-    agents = [Osa(args.osa, agent_log) if code == "osa" else None for code in lineup]
+    # One agent process per Open Seat Agent entry of the lineup, kept for all games (it follows the entry from seat to seat)
+    agents = [OpenSeatAgent(args.open_seat_agent, agent_log) if code == "open-seat-agent" else None for code in lineup]
     log = gzip.open(args.log, "at", encoding="utf-8") if args.log else None
     write = (lambda m: log.write(json.dumps(m, separators=(",", ":")) + "\n")) if log else (lambda m: None)
 
@@ -172,17 +172,17 @@ def main(argv=None):
         for entry in boards:
             for rotation in range(4):
                 # Entry i of the lineup sits in seat (i + rotation) % 4
-                codes, osas, players = [None] * 4, {}, [None] * 4
+                codes, open_seat_agents, players = [None] * 4, {}, [None] * 4
                 for i, code in enumerate(lineup):
                     seat = (i + rotation) % 4
                     codes[seat] = agents[i].name if agents[i] else code
-                    players[seat] = OsaSeat(COLORS[seat]) if agents[i] else REGISTRY.build(code, COLORS[seat])
+                    players[seat] = OpenSeatAgentSeat(COLORS[seat]) if agents[i] else REGISTRY.build(code, COLORS[seat])
                     if agents[i]:
-                        osas[seat] = agents[i]
+                        open_seat_agents[seat] = agents[i]
                 random.seed(entry["seed"] * 4 + rotation)
                 game = seated_game(players, entry["seed"], osp_board.catan_map(entry["board"]))
                 game_id = f"map{entry['seed']}-r{rotation}"
-                result = play(game, osas, write, game_id, codes)
+                result = play(game, open_seat_agents, write, game_id, codes)
                 result.update({"map_seed": entry["seed"], "rotation": rotation, "lineup": lineup})
                 out.write(json.dumps(result) + "\n")
                 out.flush()

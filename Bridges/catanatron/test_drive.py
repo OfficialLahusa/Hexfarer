@@ -111,8 +111,8 @@ class DriveTests(unittest.TestCase):
                 for seed in (5, 6):
                     file.write(json.dumps({"seed": 900 + seed, "board": random_board(seed)[0]}) + "\n")
             seen, out, log = (os.path.join(directory, name) for name in ("seen.jsonl", "results.jsonl", "games.jsonl.gz"))
-            agent = f'"{sys.executable}" "{os.path.join(HERE, "fake_osa.py").replace(os.sep, "/")}" "{seen.replace(os.sep, "/")}"'
-            drive.main(["--boards", boards, "--lineup", "osa,R,W,R", "--osa", agent, "--maps", "0:2", "--out", out, "--log", log])
+            agent = f'"{sys.executable}" "{os.path.join(HERE, "fake_open_seat_agent.py").replace(os.sep, "/")}" "{seen.replace(os.sep, "/")}"'
+            drive.main(["--boards", boards, "--lineup", "open-seat-agent,R,W,R", "--open-seat-agent", agent, "--maps", "0:2", "--out", out, "--log", log])
 
             with open(out, encoding="utf-8") as file:
                 results = [json.loads(line) for line in file]

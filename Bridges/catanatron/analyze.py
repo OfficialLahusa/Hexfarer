@@ -92,7 +92,8 @@ def main(argv=None):
         if args.json or not s["games"]:
             print(json.dumps(s))
             continue
-        print(f"{s['run']}: {s['agent']} in {s['lineup'].count('osa')} of 4 seats, {s['games']} games on {s['maps']} maps")
+        # Runs before the bridge night wrote the Open Seat Agent's lineup entry as "osa"
+        print(f"{s['run']}: {s['agent']} in {sum(seat in ('open-seat-agent', 'osa') for seat in s['lineup'])} of 4 seats, {s['games']} games on {s['maps']} maps")
         print(f"   our wins {s['win_rate']:.1%} [{s['interval'][0]:.1%}, {s['interval'][1]:.1%}] (equal strength {s['equal_strength']:.0%}), "
               f"VP ours {s['vp_ours']} theirs {s['vp_theirs']}, {s['turns']} turns, {s['truncated']} truncated")
         print(f"   ms per decision {s['ms_per_decision']}; agent: {s['agent_games_with_patches']} of {s['agent_stats_games']} agent-games took over "
