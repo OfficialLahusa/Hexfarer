@@ -350,9 +350,7 @@ namespace Simulation
                             return;
                         }
                         _seats[seat.Seat] = seat.Kind;
-                        Close(_agents[seat.Seat]);
-                        _agents[seat.Seat] = CreateAgentLocked(seat.Seat);
-                        ResetAgentLocked(_agents[seat.Seat]);
+                        ReplaceAgentLocked(seat.Seat);
                         Publish(new SeatsEvent((SeatKind[])_seats.Clone()));
                         positionChanged = true;
                         break;
@@ -371,9 +369,7 @@ namespace Simulation
                             for (int s = 0; s < _seats.Length; s++)
                                 if (_seats[s] == SeatKind.OpenSeatAgent && OpenSeatAgentOf(previous, s) != OpenSeatAgentOf(AgentSettings, s))
                                 {
-                                    Close(_agents[s]);
-                                    _agents[s] = CreateAgentLocked(s);
-                                    ResetAgentLocked(_agents[s]);
+                                    ReplaceAgentLocked(s);
                                 }
                         }
                         foreach (Agent agent in _agents)
@@ -477,6 +473,15 @@ namespace Simulation
                 $"match-{++_agentGames}-seat{seat + 1}", _beliefs.For(seat), out string? error);
             if (error != null) Publish(new ErrorEvent(error));
             return agent;
+        }
+
+        // A seat's agent goes and a new one takes over the position; an Open Seat Agent starts its game there with what the
+        // seat knows, so it needs no reset (which would end that game and start another)
+        private void ReplaceAgentLocked(int seat)
+        {
+            Close(_agents[seat]);
+            _agents[seat] = CreateAgentLocked(seat);
+            if (_agents[seat] is not OpenSeatAgentProxy) ResetAgentLocked(_agents[seat]);
         }
 
         private static string? OpenSeatAgentOf(AgentSettings settings, int seat) =>

@@ -49,6 +49,11 @@ namespace Simulation
     /// </summary>
     public sealed record ExternalAgent(string Name, string Command);
 
+    /// <summary>
+    /// One entry of a seat picker: a seat kind, and for an Open Seat Agent which one (by name), with the text shown
+    /// </summary>
+    public sealed record SeatChoice(SeatKind Kind, string? Agent, string Label);
+
     public static class Seats
     {
         /// <summary>
@@ -65,6 +70,23 @@ namespace Simulation
         /// The bot a new game gets by default: the hard MCTS preset, or the builder without the value net
         /// </summary>
         public static SeatKind DefaultBot(bool valueNetAvailable) => valueNetAvailable ? SeatKind.PimcHard : SeatKind.Builder;
+
+        /// <summary>
+        /// What a seat picker offers: the ordered kinds, then each Open Seat Agent the simulation has set up
+        /// </summary>
+        public static IReadOnlyList<SeatChoice> Choices(IReadOnlyList<ExternalAgent> externalAgents) =>
+            Ordered.Select(kind => new SeatChoice(kind, null, Name(kind)))
+                .Concat(externalAgents.Select(a => new SeatChoice(SeatKind.OpenSeatAgent, a.Name, $"{a.Name} (Open Seat Agent)"))).ToArray();
+
+        /// <summary>
+        /// Where a seat's kind (and its Open Seat Agent's name) stands in the choices; -1 if nowhere
+        /// </summary>
+        public static int ChoiceIndex(IReadOnlyList<SeatChoice> choices, SeatKind kind, string? agent)
+        {
+            for (int i = 0; i < choices.Count; i++)
+                if (choices[i].Kind == kind && (kind != SeatKind.OpenSeatAgent || choices[i].Agent == agent)) return i;
+            return -1;
+        }
 
         public static string Name(SeatKind kind) => kind switch
         {

@@ -38,6 +38,7 @@ namespace Client
 
         private bool _openSaveModal, _openLoadModal, _endScreenDismissed;
         private readonly SeatKind[] _newGameSeats = new SeatKind[PLAYER_COUNT];
+        private readonly string?[] _newGameAgents = new string?[PLAYER_COUNT];
 
         private Vector2 Display => ImGui.GetIO().DisplaySize;
 
@@ -159,6 +160,7 @@ namespace Client
             if (ImGui.MenuItem("New game...", "", false, IsAdmin))
             {
                 Array.Copy(Seats, _newGameSeats, PLAYER_COUNT);
+                Array.Copy(_seatAgents, _newGameAgents, PLAYER_COUNT);
                 _dialog = Dialog.NewGame;
             }
             if (ImGui.MenuItem("Save game...")) _openSaveModal = true;
@@ -212,7 +214,7 @@ namespace Client
                 // Name, who plays it and what it is doing
                 string name = viewer == seat ? "You" : Theme.PlayerName(seat);
                 Theme.DrawText(dl, Theme.Bold22, min + new Vector2(80, 10), Theme.Text, name);
-                string who = viewer == seat ? $"{Theme.PlayerName(seat)}, human" : Simulation.Seats.Name(Seats[seat]);
+                string who = viewer == seat ? $"{Theme.PlayerName(seat)}, human" : SeatName(seat);
                 if (_mode == InteractionMode.Spectate && IsHuman(seat)) who = "Human (stand-in agent)";
                 Theme.DrawText(dl, Theme.Regular15, min + new Vector2(80, 41), Theme.TextMuted, who);
 
@@ -455,7 +457,7 @@ namespace Client
             else if (_sim.Game.ThinkingSeat is int thinkingSeat)
             {
                 headline = $"{Theme.PlayerName(thinkingSeat)} is thinking";
-                string agent = Simulation.Seats.Name(Seats[thinkingSeat] == SeatKind.Human ? SeatKind.MctsMedium : Seats[thinkingSeat]);
+                string agent = Seats[thinkingSeat] == SeatKind.Human ? Simulation.Seats.Name(SeatKind.MctsMedium) : SeatName(thinkingSeat);
                 long iterations = CurrentSearch is SearchEvent search && search.Seat == thinkingSeat ? search.Iterations : 0;
                 detail = _mode == InteractionMode.Spectate && iterations > 0 ? $" ({agent}, {iterations / 1000.0:0.#}k iterations)" : $" ({agent})";
                 chip = $"{_thinkingClock.Elapsed.TotalSeconds:0.0} s";
@@ -1165,7 +1167,6 @@ namespace Client
         private void DrawNewGameDialog()
         {
             ImDrawListPtr dl = BeginDialog("##newgame", new Vector2(520, 436), "New game", "Who plays each seat (seat 1 starts).", null, out Vector2 min);
-            string[] kinds = Simulation.Seats.Ordered.Select(Simulation.Seats.Name).ToArray();
             for (int seat = 0; seat < PLAYER_COUNT; seat++)
             {
                 Vector2 pos = min + new Vector2(24, 92 + seat * 52);
@@ -1173,12 +1174,13 @@ namespace Client
                 Theme.TextCentered(dl, Theme.Bold15, pos + new Vector2(16, 16), Theme.TextOnPlayer(seat), (seat + 1).ToString());
                 Theme.DrawText(dl, Theme.Bold17, pos + new Vector2(42, 5), Theme.Text, Theme.PlayerName(seat));
                 ImGui.SetCursorScreenPos(pos + new Vector2(150, 2));
-                ImGui.SetNextItemWidth(300);
-                int kind = Array.IndexOf(Simulation.Seats.Ordered, _newGameSeats[seat]);
-                if (ImGui.Combo($"##seatkind{seat}", ref kind, kinds, kinds.Length))
+                SeatKind kind = _newGameSeats[seat];
+                string? agent = _newGameAgents[seat];
+                if (SeatPicker($"##seatkind{seat}", 300, _sim is not RemoteSimulation, ref kind, ref agent)
+                    && (kind == SeatKind.Human || !Simulation.Seats.NeedsValueNet(kind) || _valueNetAvailable))
                 {
-                    SeatKind chosen = Simulation.Seats.Ordered[kind];
-                    if (chosen == SeatKind.Human || !Simulation.Seats.NeedsValueNet(chosen) || _valueNetAvailable) _newGameSeats[seat] = chosen;
+                    _newGameSeats[seat] = kind;
+                    _newGameAgents[seat] = agent;
                 }
             }
             ImGui.SetCursorScreenPos(min + new Vector2(24, 304));
@@ -1192,6 +1194,12 @@ namespace Client
             {
                 _dialog = Dialog.None;
                 SetMode(InteractionMode.Play);
+                if (_sim is not RemoteSimulation)
+                {
+                    // The seats' Open Seat Agents first, so the new game starts them
+                    Array.Copy(_newGameAgents, _seatAgents, PLAYER_COUNT);
+                    Send(new ConfigureAgents(AgentSettingsFromTools));
+                }
                 Send(new Simulation.NewGame((SeatKind[])_newGameSeats.Clone(), _centerDesert, FreeTrade: _freeTrade, ShowTrackedCards: _showTrackedCards));
                 _endScreenDismissed = false;
             }
@@ -1208,7 +1216,7 @@ namespace Client
 
             int winner = State.Turn.PlayerIndex;
             ImDrawListPtr dl = BeginDialog("##endscreen", new Vector2(620, 380), $"{Theme.PlayerName(winner)} wins!",
-                $"after {State.Turn.RoundCounter} rounds, played by {(IsHuman(winner) ? "a human" : Simulation.Seats.Name(Seats[winner]))}", winner, out Vector2 min);
+                $"after {State.Turn.RoundCounter} rounds, played by {(IsHuman(winner) ? "a human" : SeatName(winner))}", winner, out Vector2 min);
 
             string[] headers = ["", "VP", "Settl.", "Cities", "VP cards", "Road", "Army"];
             float[] columns = [24, 190, 250, 320, 390, 480, 545];
@@ -1323,15 +1331,14 @@ namespace Client
 
             if (ImGui.CollapsingHeader("Agents"))
             {
-                string[] kinds = Simulation.Seats.Ordered.Select(Simulation.Seats.Name).ToArray();
                 for (int seat = 0; seat < PLAYER_COUNT; seat++)
                 {
                     using (new ImGuiTextColor(Theme.PlayerTextColor(seat)))
                         ImGui.Text($"{Theme.PlayerName(seat)}:");
                     ImGui.SameLine(90);
-                    ImGui.SetNextItemWidth(240);
-                    int kind = Array.IndexOf(Simulation.Seats.Ordered, Seats[seat]);
-                    if (ImGui.Combo($"##devseat{seat}", ref kind, kinds, kinds.Length)) SetSeat(seat, Simulation.Seats.Ordered[kind]);
+                    SeatKind kind = Seats[seat];
+                    string? agent = _seatAgents[seat];
+                    if (SeatPicker($"##devseat{seat}", 240, _sim is not RemoteSimulation, ref kind, ref agent)) SetSeat(seat, kind, agent);
                 }
 
                 ImGui.Separator();

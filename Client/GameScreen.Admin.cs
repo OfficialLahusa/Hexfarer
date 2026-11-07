@@ -158,6 +158,7 @@ namespace Client
             if (ImGui.Button("New game...", new Vector2(140, 0)))
             {
                 Array.Copy(Seats, _newGameSeats, PLAYER_COUNT);
+                Array.Copy(_seatAgents, _newGameAgents, PLAYER_COUNT);
                 _dialog = Dialog.NewGame;
             }
             ImGui.SameLine();

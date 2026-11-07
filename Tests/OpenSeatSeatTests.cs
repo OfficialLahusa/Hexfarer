@@ -96,6 +96,40 @@ namespace Tests
         }
 
         [Fact]
+        public void TheSeatPickersListTheConfiguredAgentsAfterTheBuiltInKinds()
+        {
+            ExternalAgent other = new("Catanatron AB:2", "python open_seat_agent.py");
+            IReadOnlyList<SeatChoice> choices = Simulation.Seats.Choices([Hexfarer, other]);
+            // The built-in kinds first, in their order, then each agent by its name
+            Assert.Equal(Simulation.Seats.Ordered, choices.Take(Simulation.Seats.Ordered.Length).Select(c => c.Kind));
+            Assert.All(choices.Take(Simulation.Seats.Ordered.Length), c => Assert.Null(c.Agent));
+            Assert.Equal([Hexfarer.Name, other.Name], choices.Skip(Simulation.Seats.Ordered.Length).Select(c => c.Agent));
+            Assert.All(choices.Skip(Simulation.Seats.Ordered.Length), c => Assert.Equal(SeatKind.OpenSeatAgent, c.Kind));
+            Assert.Contains(other.Name, choices[^1].Label);
+            // A seat finds its choice by kind and, for an agent, its name; an agent no longer set up finds none
+            Assert.Equal(Array.IndexOf(Simulation.Seats.Ordered, SeatKind.Random), Simulation.Seats.ChoiceIndex(choices, SeatKind.Random, null));
+            Assert.Equal(choices.Count - 1, Simulation.Seats.ChoiceIndex(choices, SeatKind.OpenSeatAgent, other.Name));
+            Assert.Equal(choices.Count - 2, Simulation.Seats.ChoiceIndex(choices, SeatKind.OpenSeatAgent, Hexfarer.Name));
+            Assert.Equal(-1, Simulation.Seats.ChoiceIndex(choices, SeatKind.OpenSeatAgent, "gone"));
+            // Without agents the pickers are the built-in kinds
+            Assert.Equal(Simulation.Seats.Ordered.Length, Simulation.Seats.Choices([]).Count);
+        }
+
+        [Fact]
+        public void ASeatThatGetsAnAgentStartsOneGameOfIt()
+        {
+            using Match match = NewMatch([SeatKind.Random, SeatKind.Random, SeatKind.Random, SeatKind.Random], Hexfarer);
+            using LocalSimulation admin = new(match);
+            admin.Send(new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = [null, Hexfarer.Name, null, null] }));
+            admin.Send(new SetSeat(1, SeatKind.OpenSeatAgent));
+            Assert.True(WaitFor(() => match.AgentOf(1) is OpenSeatAgentProxy, 30000));
+            // A new agent isn't reset right away, which would end its first game and start another
+            OpenSeatAgentProxy proxy = (OpenSeatAgentProxy)match.AgentOf(1);
+            Assert.EndsWith("-seat2", proxy.GameId);
+            Assert.Empty(admin.ProcessEvents().OfType<ErrorEvent>());
+        }
+
+        [Fact]
         public void AnUndoStartsTheAgentsGameAgainAndItPlaysOn()
         {
             using Match match = NewMatch([SeatKind.OpenSeatAgent, SeatKind.Random, SeatKind.Random, SeatKind.Random], Hexfarer);

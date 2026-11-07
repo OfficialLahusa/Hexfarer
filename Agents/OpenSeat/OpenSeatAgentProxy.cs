@@ -37,6 +37,11 @@ namespace Agents.OpenSeat
         public OpenSeatHello Hello { get; }
 
         /// <summary>
+        /// The id of the agent's current game (a new one after each reset)
+        /// </summary>
+        public string GameId => _gameId;
+
+        /// <summary>
         /// Greets the agent on the channel and starts the game; the channel is the proxy's from now on (disposed with it).
         /// seed draws the worlds reproducibly; beliefs are what the seat knows if the game is under way (else it starts).
         /// </summary>
