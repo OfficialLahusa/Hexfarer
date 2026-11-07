@@ -17,6 +17,7 @@ Pinned versions:
 
 Contents:
 - `PROTOCOL.md`: the Open Seat Protocol.
+- `RULESET.md`: its ruleset options, their values and which engine plays what.
 - `osp/classic-board.json`: the protocol's reference shape of the classic board (hexes, intersections, paths, harbors
   in protocol keys). Hexfarer's test `TheClassicBoardHasTheOpenSeatProtocolsReferenceShape` writes it
   (`HEXFARER_UPDATE_FIXTURES=1`) and checks against it; every adapter is tested against it too.

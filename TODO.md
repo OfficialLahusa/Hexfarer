@@ -21,6 +21,7 @@
 	- Der C#-Client bleibt die Obermenge (Analyse, Eval-Bar, Playouts), der Web-Client deckt Spielen, Zuschauen und Edit ab; Spielsitz ggf. als Open Seat Agent (dann auch unter fremden Schiedsrichtern), Lobby/Zuschauen/Edit im eigenen Protokoll
 	- Web-Client auch als Discord Activity (Embedded App SDK im iframe, z.B. im Voice-Channel): ein Spielraum pro Activity-Instanz, Spieler per Discord-OAuth, leere Sitze übernehmen Agents; Server per HTTPS erreichbar (URL-Mapping über Discords Proxy, für privates Spielen reicht ein Tunnel zum lokalen Server); dafür relative URLs, alles mitgeliefert (CSP), Layout fürs Handy
 - Early Return in weitere Action Validation Checks einbauen, um so früh wie möglich zu failen
+- Kommentarsprache vereinheitlichen: nur TODO.md ist deutsch, alles andere (v. a. Code-Kommentare) englisch
 - Hidden Information (bisher sahen Agents alle Hände, VP-Karten und die Dev Bank, die Nets sind darauf trainiert)
 	- Verdeckt sind nur gestohlene Karten (für Unbeteiligte), gezogene Dev Cards (außer für den Käufer) und VP-Karten bis Spielende, Monopoly macht eine Ressource öffentlich => kleine Information Sets, Determinisierung funktioniert gut (Long et al.)
 	- 1. Umgesetzt: BeliefTracker in Common (sichere Karten, Obergrenzen pro Typ und Unknowns pro Hand, verdeckte Dev Cards als Ganzes, Propagation über Ausgaben, Monopoly und die öffentliche Bank), StateView, Determinisierung; Tests zuerst: jede Regel pro Beobachter, Support des wahren States in Zufallsspielen, kein Leck (gleiche Sicht und Determinisierung bei anderem verdecktem Ausgang)

@@ -55,7 +55,7 @@ version, its adapter disappears.
 ```
 
 - **`hello` answer:**
-  - `rulesets`: the presets the agent can play.
+  - `rulesets`: the presets the agent can play (see `RULESET.md`).
   - `options`: optionally, the values of single options it supports beyond them.
   - `observe`: whether it wants `step`.
   - `needs`: `view` (default; only what its seat sees), `world` (a full game drawn by the referee from the seat's view)
@@ -160,28 +160,9 @@ the ruleset allows trading between players.
 
 ## Ruleset
 
-The ruleset is a set of options; presets name common sets. `before` carries the preset and any options that differ from
-it.
-
-| Option | `standard` (the rulebook) | `catanatron` | JSettlers 2.6.10 (no preset yet) |
-|---|---|---|---|
-| `victory_points` | 10 | 10 | 10 |
-| `discard_limit` (hand size above which half is discarded) | 7 | 7 | 7 |
-| `player_trading` | `rulebook` (with the player on turn, after the roll) | `none` | `rulebook`, `none` with game option NT |
-| `counteroffers` | true | false | true |
-| `bank_shortage` | `rulebook` (nobody gets a short resource, unless a single player is owed it: they get the rest) | `nobody` | `unlimited` (no resource bank) |
-| `win_timing` | `own_turn` | `any_time` | `own_turn`, by Largest Army only after the robber moved |
-| `robber_victims` | `adjacent` (any adjacent player, even without cards) | `with_cards` | `with_cards` |
-| `bank_rates` | `all` (4:1 also with a harbor) | `best_only` | `best_only` |
-| `road_building` | `optional` (unplaced roads can be given up) | `forced` | `forced` |
-| `turn_limit` (player turns, then a draw) | none | 1000 | none |
-| `decide_timeout_ms` | none | none | the server's robot turn limit |
-
-The JSettlers column comes from replaying 100 random JSettlers games through Hexfarer's rules (Bridges/jsettlers,
-Recorder and OpenSeat replay); the values `unlimited` and the Largest Army timing are not options an agent can ask for.
-
-New options get a default that matches the rulebook, so older agents keep playing the `standard` preset. An engine
-that can't play an option value says so in `hello` by leaving the preset out.
+The ruleset is a set of options; presets name common sets (`standard`, the rulebook, and `catanatron`). `before`
+carries the preset and every option that differs from it. New options default to the rulebook, so older agents keep
+playing `standard`. Every option, its values and which engine plays what: `RULESET.md`.
 
 ## Versions
 
