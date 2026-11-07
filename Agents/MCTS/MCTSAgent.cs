@@ -32,6 +32,8 @@ namespace Agents.MCTS
         protected double _timeLimitSeconds;
         protected long _iterationLimit;
         protected Random _random = Random.Shared;
+        // With a seed and selection on one thread: the source of each new tree's own random source, so a search repeats exactly
+        private readonly Random? _seeds;
 
         // The default net is shared by all agents that aren't given another one, and loaded on first use
         private static readonly Lazy<StateValueNet> DefaultValueNet = new(() => new StateValueNet(StateValueNet.DefaultModelFile));
@@ -230,9 +232,18 @@ namespace Agents.MCTS
 
         public MCTSAgent(sbyte playerIndex, GameState initialState, double explorationParameter = 1.414, double timeLimitSeconds = TIME_LIMIT_SECONDS,
             StateValueNet? valueNet = null, IStateVectorizer? vectorizer = null, double placementWeight = 0, OpponentModel opponentModel = OpponentModel.MaxN,
-            long iterationLimit = 0, int leavesPerBatch = DefaultLeavesPerBatch, bool parallelSelection = true, ILeafEvaluator? evaluator = null)
+            long iterationLimit = 0, int leavesPerBatch = DefaultLeavesPerBatch, bool parallelSelection = true, ILeafEvaluator? evaluator = null,
+            int? seed = null)
             : base(playerIndex)
         {
+            // A seed makes a search with selection on one thread repeat exactly: each new tree (and the agent itself) gets a random
+            // source of its own, drawn from it. On all cores they keep the shared thread-safe source (the threads' order decides
+            // there anyway, and an unlocked source would break under many threads).
+            if (seed is int s && !parallelSelection)
+            {
+                _seeds = new Random(s);
+                _random = new Random(_seeds.Next());
+            }
             _explorationParameter = explorationParameter;
             _timeLimitSeconds = timeLimitSeconds;
             IterationLimit = iterationLimit;
@@ -242,7 +253,7 @@ namespace Agents.MCTS
             // that merges the batches of games played at once), which has to run the same model
             if (evaluator != null && (evaluator.HasPlacements != _stateValueNet.HasPlacements || (evaluator.Policy == null) != (_stateValueNet.Policy == null)))
                 throw new ArgumentException("The evaluator has to run the value net's model.", nameof(evaluator));
-            // Selection on one thread repeats a search exactly (for tests), on all cores it is faster
+            // Selection on one thread repeats a search exactly from a seed, on all cores it is faster
             _search = new MCTSSearch(evaluator ?? new DirectEvaluator(_stateValueNet), _stateVectorizer, leavesPerBatch, parallelSelection);
             PlacementWeight = placementWeight;
             _opponentModel = opponentModel;
@@ -280,7 +291,8 @@ namespace Agents.MCTS
             // Otherwise (first move, missed or manual actions, undo, another opponent model) start over on a private copy of the state.
             if (_tree == null || _tree.Model != _opponentModel || !_tree.RootState.Equals(state))
             {
-                _tree = new MCTSTree(new GameState(state), PlayerIndex, _explorationParameter, NormalizeValues, _opponentModel);
+                _tree = new MCTSTree(new GameState(state), PlayerIndex, _explorationParameter, NormalizeValues, _opponentModel,
+                    random: _seeds != null ? new Random(_seeds.Next()) : null);
             }
             _tree.FirstPlayReduction = FirstPlayReduction;
             _tree.EvaluateNewLeaves = EvaluateNewLeaves;
@@ -315,6 +327,11 @@ namespace Agents.MCTS
             replay.Apply(nextState);
             _tree.ReRoot(nextRoot, nextState);
         }
+
+        /// <summary>
+        /// The current tree (for tests)
+        /// </summary>
+        internal MCTSTree? Tree => _tree;
 
         public override void ResetToState(GameState state)
         {

@@ -89,7 +89,9 @@ Every message that is answered may also be answered with `failure`.
 - `before` starts a game: `game_id`, `seat`, `players`, `ruleset`, `budget`, `seed`, `board` and `state`, the seat's
   state at the start as `needs` says.
 - `seed`: a number from 0 to 2^31 - 1 for the agent's own randomness (drawn worlds, tie breaks). An agent that seeds
-  from it plays the same game the same way, and the referee logs it, so every game replays exactly.
+  from it plays the same game the same way, and the referee logs it, so every game replays exactly, as far as the
+  agent's search depends on nothing else: a search with a time budget, or on several threads at once, also depends on
+  timing (Hexfarer's agent replays exactly with an iteration budget and `--serial`).
 - The agent takes the game with `{"type":"ready","game_id":"g17"}`, or turns it down with a `failure` (`unsupported`)
   whose `detail` names what it can't play: `{"preset":"catanatron"}` or `{"option":"road_building","value":"optional"}`.
   A referee sends only games of a preset the agent named, but an option can still be one it doesn't play.

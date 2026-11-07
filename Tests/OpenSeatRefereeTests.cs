@@ -247,13 +247,13 @@ namespace Tests
         /// then every agent told); the states before each move, in order
         /// </summary>
         private static List<GameState> PlayWithProxy(IOpenSeatChannel agent, int seed, sbyte seat = 0, Action<GameState>? setup = null, int maxMoves = 3000,
-            Func<sbyte, Agent>? others = null)
+            Func<sbyte, Agent>? others = null, int? agentSeed = null)
         {
             TestUtil.Seed(seed);
             GameState state = TestUtil.NewGame();
             setup?.Invoke(state);
             Agent[] agents = others == null ? TestUtil.RandomAgents() : Enumerable.Range(0, state.Players.Length).Select(s => others((sbyte)s)).ToArray();
-            using OpenSeatAgentProxy proxy = new(seat, state, agent, $"g{seed}", seed: seed);
+            using OpenSeatAgentProxy proxy = new(seat, state, agent, $"g{seed}", seed: agentSeed ?? seed);
             agents[seat] = proxy;
             List<GameState> befores = [];
             for (int moves = 0; !state.HasEnded && moves < maxMoves; moves++)
@@ -981,6 +981,25 @@ namespace Tests
                 Assert.Matches(@"g19: resync at move \d+: \.\w", log.ToString());
             }
             Assert.Equal(asked, agent.Sent.Count(m => m["type"]!.GetValue<string>() == "decide" && m["state"] != null));
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void HexfarersSerialAgentPlaysTheSameGameFromTheSameSeed(bool fair)
+        {
+            // The game's seed (before) seeds the agent's search: selecting on one thread, it plays the game again move by move
+            List<string> Play(int agentSeed)
+            {
+                SeatAgent seatAgent = new(new StateValueNet(TinyNet, provider: InferenceProvider.CPU), iterations: 48, seconds: 0, new StringWriter(), leavesPerBatch: 16,
+                    parallelSelection: false, fair: fair);
+                RecordingAgent agent = new(new InProcessAgent(seatAgent));
+                PlayWithProxy(agent, seed: 27, seat: 1, maxMoves: 400, agentSeed: agentSeed);
+                return agent.Sent.Where(m => m["type"]!.GetValue<string>() == "step").Select(m => $"{m["seat"]} {OSPCodec.Canonical(m["action"])} {OSPCodec.Canonical(m["result"])}").ToList();
+            }
+            List<string> first = Play(41);
+            Assert.Equal(400, first.Count);
+            Assert.Equal(first, Play(41));
         }
 
         [Fact]

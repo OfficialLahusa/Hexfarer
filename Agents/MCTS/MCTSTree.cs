@@ -36,7 +36,14 @@ namespace Agents.MCTS
         public MCTSNode RootNode;
         protected sbyte _ownerIdx;
         protected double _explorationParameter;
-        protected Random _random = Random.Shared;
+        // Tie breaks, the opponents' random moves and the outcomes of random moves; shared and thread-safe unless the tree
+        // was given a source of its own (one thread selecting at a time, see the constructor)
+        protected Random _random;
+
+        /// <summary>
+        /// The tree's random source (for tests)
+        /// </summary>
+        internal Random Random => _random;
 
         // Running value range of the tree, used to normalize Q values during selection (null disables normalization)
         public MinMaxStats? ValueBounds { get; private set; }
@@ -65,8 +72,15 @@ namespace Agents.MCTS
         /// </summary>
         public bool EvaluateNewLeaves { get; set; } = true;
 
-        public MCTSTree(GameState rootState, sbyte ownerIdx, double explorationParameter, bool normalizeValues = true, OpponentModel model = OpponentModel.Random)
+        /// <summary>
+        /// A tree on the state for its owner. random is the tree's own random source, for a search that repeats exactly from
+        /// a seed: it isn't locked, so only one thread may select at a time; without one the tree draws from the shared,
+        /// thread-safe source.
+        /// </summary>
+        public MCTSTree(GameState rootState, sbyte ownerIdx, double explorationParameter, bool normalizeValues = true, OpponentModel model = OpponentModel.Random,
+            Random? random = null)
         {
+            _random = random ?? Random.Shared;
             RefuseOpenTrade(rootState);
             RootState = rootState;
             RootNode = new MCTSNode((sbyte)rootState.Turn.PlayerIndex, null, null, false);

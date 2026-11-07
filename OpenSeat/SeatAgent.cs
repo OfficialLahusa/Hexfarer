@@ -170,13 +170,16 @@ namespace OpenSeat
             _stale = false;
             _lost = !_replica.BoardMatches(before);
             if (_lost) log.WriteLine($"{_gameId}: the board doesn't write back as sent");
-            // The game's seed seeds the agent's randomness, so it plays the same game the same way
-            if (before["seed"] is JsonValue seed && seed.TryGetValue(out int value)) Utils.Random.SeedCurrentThread(value);
+            // The game's seed seeds the agent's randomness, its search included: with an iteration budget and selection on one
+            // thread (--serial) it plays the same game the same way; on all cores or with a time budget the timing decides too
+            int? gameSeed = before["seed"] is JsonValue seed && seed.TryGetValue(out int value) ? value : null;
+            if (gameSeed is int seeded) Utils.Random.SeedCurrentThread(seeded);
             // A time-based search keeps within the budget's time per decision, with a fifth of it to spare
             double budgetSeconds = before["budget"]?["decide_ms"] is JsonValue ms && ms.TryGetValue(out int decideMs) ? decideMs * 0.8 / 1000 : double.MaxValue;
             _agent = new MCTSAgent(_seat, _replica.State, timeLimitSeconds: seconds > 0 ? Math.Min(seconds, budgetSeconds) : seconds, valueNet: net,
-                iterationLimit: iterations, leavesPerBatch: leavesPerBatch, parallelSelection: parallelSelection);
-            _fair = fair ? new InformationSetMCTSAgent(_agent, _replica.State) : null;
+                iterationLimit: iterations, leavesPerBatch: leavesPerBatch, parallelSelection: parallelSelection, seed: gameSeed);
+            // The fair agent's worlds and trees draw from a stream of their own, also from the game's seed
+            _fair = fair ? new InformationSetMCTSAgent(_agent, _replica.State, seed: gameSeed is int fairSeed ? fairSeed ^ 0x2545F491 : null) : null;
             // Offers and counteroffers only where a decision names them (in trades, since their cards can be any)
             _agent.Offers.Enabled = false;
             _agent.Offers.Counters = false;

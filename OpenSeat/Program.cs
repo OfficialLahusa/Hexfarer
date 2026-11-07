@@ -46,6 +46,7 @@ namespace OpenSeat
             search's leaf evaluations and the distinct positions among them. --threads sets the value net's threads per
             evaluation (default half the logical cores), --serial selects each batch on one thread instead of all cores:
             both for an agent pinned to few cores, e.g. at equal thinking time on one core against another engine's bot.
+            With --serial and an iteration budget the agent plays a game again exactly from its seed (before).
             --fair plays like Hexfarer's fair agents (Information Set MCTS over what the seat knows) instead of open-hand.
 
             boards: writes the boards of the map seeds S to S+N-1 as the Arena generates them, one protocol board per line.
