@@ -36,5 +36,12 @@ Contents:
     messages, for Hexfarer's replay harness (the differences found are in PROTOCOL.md's ruleset table).
   - `OspServer` with `OspRobotClient`: JSettlers' server whose robot seats include Open Seat Agents (-Dosp.agent=COMMAND,
     started through jsettlers.bots.start3p); the robot runs inside the server and hands its agent the true state, so
-    agents that need their seat's view only, or every step, aren't served yet.
+    agents that need their seat's view only, or every step, aren't served yet. -Dosp.log=DIR keeps each agent's
+    standard error, -Dosp.debug=true prints the robot's steps.
   - Tests: `python -m unittest test_jsettlers_board test_jsettlers_game test_jsettlers_robot` (with JSETTLERS_JAR set).
+
+On Hexfarer's side, outside this folder: `OpenSeat replay LOG` plays a referee's log through Hexfarer's rules and lists
+the differences, `OpenSeat relay LOG --save DIR` writes its games as save files for the client (a new part where the
+rules part), and `OpenSeat agent` is Hexfarer's own Open Seat Agent. The Arena seats any agent as `NAME=command:COMMAND`,
+and the client's local games seat those listed in `%AppData%\Hexfarer\settings.json` under `OpenSeatAgents`
+(`[{"Name": "...", "Command": "..."}]`).
