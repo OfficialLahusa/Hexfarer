@@ -10,7 +10,7 @@ namespace Simulation
     /// information sets (see InformationSetMCTSAgent); the Mcts kinds are the open-hand presets, which see every hand. The
     /// names stay as they were for saved seats.
     /// </summary>
-    public enum SeatKind { Human, MctsEasy, MctsMedium, MctsHard, Greedy, Builder, Simple, Random, PimcEasy, PimcMedium, PimcHard }
+    public enum SeatKind { Human, MctsEasy, MctsMedium, MctsHard, Greedy, Builder, Simple, Random, PimcEasy, PimcMedium, PimcHard, OpenSeatAgent }
 
     /// <summary>
     /// What a connection may do: an admin controls the match (seats, undo, edits, playback), a player and an agent (bridge)
@@ -36,10 +36,15 @@ namespace Simulation
     /// Search settings of the MCTS seats: the presets' thinking times, or one time or iteration budget for all, and the
     /// opponent model
     /// </summary>
-    public sealed record AgentSettings(double? SecondsForAll, long IterationsForAll, OpponentModel OpponentModel)
+    public sealed record AgentSettings(double? SecondsForAll, long IterationsForAll, OpponentModel OpponentModel, IReadOnlyList<string?>? OpenSeatAgents = null)
     {
         public static readonly AgentSettings Default = new(null, 0, OpponentModel.MaxN);
     }
+
+    /// <summary>
+    /// An Open Seat Agent a simulation can seat (stub)
+    /// </summary>
+    public sealed record ExternalAgent(string Name, string Command);
 
     public static class Seats
     {

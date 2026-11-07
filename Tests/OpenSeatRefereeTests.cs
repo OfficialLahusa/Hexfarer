@@ -405,6 +405,32 @@ namespace Tests
         }
 
         [Fact]
+        public void AResetStartsTheAgentsGameAgainFromTheNewPosition()
+        {
+            // An undo or an edit in the simulator: the agent's game ends, cut short, and a new one starts where the game is now
+            ScriptedAgent agent = new(needs: "truth");
+            TestUtil.Seed(15);
+            GameState state = TestUtil.NewGame();
+            using OpenSeatAgentProxy proxy = new(0, state, agent, "g15");
+            GameState elsewhere = new(state);
+            Agent[] others = TestUtil.RandomAgents();
+            for (int i = 0; i < 30; i++) others[TestUtil.ActingPlayer(elsewhere)].Act(elsewhere).Apply(elsewhere);
+            proxy.ResetToState(elsewhere);
+            Assert.Equal(["hello", "before", "after", "before"], agent.Received.Select(m => m["type"]!.GetValue<string>()));
+            Assert.True(agent.Received[2]["truncated"]!.GetValue<bool>());
+            JsonNode before = agent.Received[3];
+            Assert.NotEqual("g15", before["game_id"]!.GetValue<string>());
+            Assert.Equal(OspCodec.Canonical(new OspCodec(state.Board).State(elsewhere)), OspCodec.Canonical(before["state"]));
+            // The new game counts its moves from 0
+            if (TestUtil.ActingPlayer(elsewhere) == 0)
+            {
+                proxy.Act(elsewhere);
+                Assert.Equal(0, Int(agent.OfType("decide").Last()["n"]));
+                Assert.Equal(before["game_id"]!.GetValue<string>(), agent.OfType("decide").Last()["game_id"]!.GetValue<string>());
+            }
+        }
+
+        [Fact]
         public void AnAgentThatDoesntObserveGetsNoSteps()
         {
             ScriptedAgent agent = new(observe: false);

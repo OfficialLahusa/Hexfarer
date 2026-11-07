@@ -85,7 +85,7 @@ namespace Simulation
         /// </summary>
         public static bool SeesView(SessionInfo session) => session.Role is Role.Player or Role.Agent && session.Seat != null;
 
-        public Match(GameState state, SeatKind[] seats, bool? valueNetAvailable = null)
+        public Match(GameState state, SeatKind[] seats, bool? valueNetAvailable = null, IReadOnlyList<ExternalAgent>? externalAgents = null)
         {
             if (seats.Length != state.Players.Length) throw new ArgumentException("One seat kind per player is needed.", nameof(seats));
             _valueNetAvailable = valueNetAvailable ?? Simulation.Seats.ValueNetAvailable;
