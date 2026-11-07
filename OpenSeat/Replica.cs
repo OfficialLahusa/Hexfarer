@@ -162,11 +162,12 @@ namespace OpenSeat
                 HashSet<string> a = theirs["buildings"]![kind]!.AsArray().Select(OspCodec.Canonical).ToHashSet(), b = ours["buildings"]![kind]!.AsArray().Select(OspCodec.Canonical).ToHashSet();
                 if (!a.SetEquals(b)) return ($"state: {kind}", $"{at}: only the referee {string.Join(" ", a.Except(b))}; only Hexfarer {string.Join(" ", b.Except(a))}");
             }
-            if (!Same(theirs["bank"], ours["bank"]))
+            JsonNode bank = Bank(theirs);
+            if (!Same(bank, ours["bank"]))
             {
                 // Explained after a roll if Hexfarer emptied what the referee kept: the rulebook gives a single player owed a
                 // short resource the rest, Catanatron gives nobody anything
-                string[] differing = OspCodec.ResourceNames.Values.Where(n => !Same(theirs["bank"]![n], ours["bank"]![n])).ToArray();
+                string[] differing = OspCodec.ResourceNames.Values.Where(n => !Same(bank[n], ours["bank"]![n])).ToArray();
                 bool shortage = LastMove == "roll" && differing.Length > 0 && differing.All(n => int.Parse(ours["bank"]![n]!.ToJsonString()) == 0);
                 return (shortage ? "state: bank (known: Catanatron gives nobody a short resource, even a single player owed it)" : "state: bank",
                     $"{at}: referee {theirs["bank"]!.ToJsonString()}, Hexfarer {ours["bank"]!.ToJsonString()}");
@@ -203,11 +204,11 @@ namespace OpenSeat
         /// </summary>
         public bool Patch(JsonNode theirs)
         {
+            JsonNode bank = Bank(theirs);
             foreach ((ResourceCardType type, string name) in OspCodec.ResourceNames)
             {
-                uint bank = uint.Parse(theirs["bank"]![name]!.ToJsonString());
                 State.ResourceBank.Remove(type, State.ResourceBank.Get(type));
-                State.ResourceBank.Add(type, bank);
+                State.ResourceBank.Add(type, uint.Parse(bank[name]!.ToJsonString()));
             }
             for (int seat = 0; seat < State.Players.Length; seat++)
             {
@@ -260,6 +261,16 @@ namespace OpenSeat
         }
 
         public static bool Same(JsonNode? a, JsonNode? b) => OspCodec.Canonical(a) == OspCodec.Canonical(b);
+
+        // The referee's bank as Hexfarer holds one: an unlimited bank's count below 0 (the hands hold more than 19, as in
+        // JSettlers) is an empty bank
+        private static JsonNode Bank(JsonNode theirs)
+        {
+            JsonObject bank = theirs["bank"]!.DeepClone().AsObject();
+            foreach (string name in OspCodec.ResourceNames.Values)
+                if (bank[name] is JsonNode count && int.Parse(count.ToJsonString()) < 0) bank[name] = 0;
+            return bank;
+        }
 
         public static string MoveType(string move) => JsonNode.Parse(move)![0]!.GetValue<string>();
     }

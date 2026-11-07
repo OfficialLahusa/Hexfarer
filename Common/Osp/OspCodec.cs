@@ -482,10 +482,11 @@ namespace Common.Osp
                     if (!listed.Contains(move) && mine.DevelopmentCards.Get(type) > 0)
                         mine.NewDevelopmentCards.Add(type, mine.DevelopmentCards.Get(type));
 
-            // The banks: the resources the state names; the development cards nobody holds or played, cut to its count
+            // The banks: the resources the state names (an unlimited bank's count below 0, the hands holding more than 19, as
+            // empty); the development cards nobody holds or played, cut to its count
             game.ResourceBank = new CardSet<ResourceCardType>();
             foreach ((ResourceCardType type, string name) in ResourceNames)
-                game.ResourceBank.Add(type, (uint)Number(state["bank"]![name]));
+                game.ResourceBank.Add(type, (uint)Math.Max(0, Number(state["bank"]![name])));
             uint knightsPlayed = (uint)game.Players.Sum(p => (long)p.PlayedKnights);
             List<DevelopmentCardType> deck = [];
             foreach ((DevelopmentCardType type, uint total) in DevelopmentDeck)

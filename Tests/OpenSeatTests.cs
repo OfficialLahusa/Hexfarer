@@ -430,6 +430,38 @@ namespace Tests
         }
 
         [Fact]
+        public void ABankBelowZeroReadsAsEmpty()
+        {
+            // JSettlers keeps no resource bank: its count is 19 less what the hands hold, below 0 once they hold more
+            GameState game = RandomGames(games: 1).Skip(150).First();
+            OspCodec codec = new(OspCodec.BuildBoard(new OspCodec(game.Board).BoardJson()));
+            JsonNode state = codec.State(game);
+            int bank = Int(state["bank"]!["ore"]);
+            JsonNode player = state["players"]![0]!;
+            player["hand"]!["ore"] = Int(player["hand"]!["ore"]) + bank + 2;
+            player["hand_size"] = Int(player["hand_size"]) + bank + 2;
+            state["bank"]!["ore"] = -2;
+            // As a message comes, through text
+            state = JsonNode.Parse(state.ToJsonString())!;
+            sbyte acting = TestUtil.ActingPlayer(game);
+            JsonArray legal = new(LegalActionProvider.GetActionsForState(game, acting).Select(a => (JsonNode)codec.Move(a)).ToArray());
+
+            // Rebuilt, the bank has no ore and the hand all of it
+            GameState rebuilt = codec.BuildState(state, legal);
+            Assert.Equal(0u, rebuilt.ResourceBank.Get(ResourceCardType.Ore));
+            Assert.Equal((uint)Int(player["hand"]!["ore"]), rebuilt.Players[0].ResourceCards.Get(ResourceCardType.Ore));
+
+            // A copy that follows the game takes such a bank over and then agrees with the referee
+            JsonObject before = new() { ["type"] = "before", ["game_id"] = "bank", ["seat"] = 0, ["players"] = 4,
+                ["ruleset"] = new JsonObject { ["preset"] = "standard" }, ["board"] = codec.BoardJson(), ["state"] = codec.State(game) };
+            Replica replica = new(before);
+            replica.Rebuild(codec.State(game), legal);
+            Assert.True(replica.Patch(state));
+            Assert.Equal(0u, replica.State.ResourceBank.Get(ResourceCardType.Ore));
+            Assert.Null(replica.FirstDifference(state, "bank"));
+        }
+
+        [Fact]
         public void TheAgentTakesOverAHandAndBankTheRefereeHoldsDifferently()
         {
             // A referee that gave seat 2 an ore from the bank Hexfarer's rules wouldn't have (as Catanatron's bank shortage
