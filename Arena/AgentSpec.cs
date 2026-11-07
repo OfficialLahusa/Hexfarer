@@ -343,15 +343,28 @@ namespace Arena
     {
         private readonly HashSet<string> _named = [];
 
-        public static Agent[] Create(int seats, Func<int, Agent> create)
+        /// <summary>
+        /// The game's agents seat by seat; if an Open Seat Agent fails while being seated (its handshake refused, the game
+        /// turned down), the game's result record names the failure in the log (seed: the seed its agents get), and the
+        /// agents made are closed
+        /// </summary>
+        public static Agent[] Create(int seats, Func<int, Agent> create, int seed, Action<string> write)
         {
             List<Agent> agents = [];
             try
             {
                 for (int seat = 0; seat < seats; seat++) agents.Add(create(seat));
             }
-            catch
+            catch (Exception e)
             {
+                if (e is OpenSeatException failure)
+                {
+                    int failed = agents.Count;
+                    OpenSeatSeatRecord record = new(failed, failure.Handshake);
+                    record.Failed(null, failure.Code, failure.FromAgent, failure.Message);
+                    write($"result {OpenSeatSeatRecord.Result(seed, 0, 0, Enumerable.Range(0, seats).Select(seat =>
+                        seat == failed ? record : agents.ElementAtOrDefault(seat) is OpenSeatAgentProxy proxy ? proxy.Record : new OpenSeatSeatRecord(seat))).ToJsonString()}");
+                }
                 Close(agents);
                 throw;
             }

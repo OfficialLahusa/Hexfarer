@@ -153,11 +153,13 @@ class ProtocolTests(unittest.TestCase):
             return [json.loads(a) for a in open_seat_agent.run([json.dumps(m) for m in messages], bot="W")]
         self.assertEqual("version", answers({"type": "handshake", "protocol": "osp", "version": 1})[0]["code"])
         for ruleset in ({"preset": "jsettlers"}, {"preset": "standard", "dice": "balanced"}, {"preset": "standard", "bank_rates": "none"},
-                        {"preset": "standard", "victory_points": "ten"}):
+                        {"preset": "standard", "victory_points": "ten"}, {"preset": "standard", "counteroffers": 1},
+                        {"preset": "standard", "player_trading": True}, {"preset": "standard", "turn_limit": True}):
             refused = answers({"type": "before", "game_id": "g2", "ruleset": ruleset})[0]
             self.assertEqual(("failure", "unsupported", "g2"), (refused["type"], refused["code"], refused["game_id"]), ruleset)
             self.assertIsNotNone(refused["detail"])
-        self.assertEqual("ready", answers({"type": "before", "game_id": "g3", "ruleset": {"preset": "standard", "victory_points": 12, "offer_limit": 4}})[0]["type"])
+        self.assertEqual("ready", answers({"type": "before", "game_id": "g3", "ruleset": {"preset": "standard", "victory_points": 12, "offer_limit": 4,
+                                                                                          "counteroffers": False}})[0]["type"])
         # It rebuilds from every decision's state, so a decision without one gets a resync
         self.assertEqual({"type": "resync", "game_id": "g3", "n": 4},
                          answers({"type": "decide", "game_id": "g3", "n": 4, "seat": 0, "hash": "0", "legal": [["roll"]]})[0])

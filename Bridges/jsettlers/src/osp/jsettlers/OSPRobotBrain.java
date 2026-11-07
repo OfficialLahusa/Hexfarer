@@ -46,7 +46,8 @@ public class OSPRobotBrain extends SOCRobotBrain
         "bank_rates", "best_only", "robber_victims", "with_cards", "road_building", "forced");
     // The game's budget: how long the agent may think about one decision; the handshake and ready get a minute
     private static final long DECIDE_MILLIS = 120_000, HANDSHAKE_MILLIS = 60_000;
-    static final Map<String, Object> BUDGET = Json.object("decide_ms", DECIDE_MILLIS, "game_ms", null, "threads", null, "gpu", false);
+    // Any threads and a GPU allowed, as at every referee unless the game says otherwise
+    static final Map<String, Object> BUDGET = Json.object("decide_ms", DECIDE_MILLIS, "game_ms", null, "threads", null, "gpu", true);
 
     private OSPGame osp;
     private AgentProcess agent;
@@ -175,6 +176,8 @@ public class OSPRobotBrain extends SOCRobotBrain
     {
         int state, acting;
         boolean over, winnerNamed;
+        // A free road of a Road Building card to place without a place for it (see OSPGame.strandedFreeRoad)
+        boolean stranded;
         // The state the next move starts from (in the protocol's order of discards)
         Map<String, Object> position;
         List<Object> legal;
@@ -208,6 +211,7 @@ public class OSPRobotBrain extends SOCRobotBrain
             seen.acting = osp.acting();
             int seat = osp.seatOf(ourPlayerNumber);
             seen.legal = seen.acting == seat && ! seen.over ? osp.legal(seat) : null;
+            seen.stranded = seen.acting == seat && ! seen.over && osp.strandedFreeRoad();
             seen.moves = log != null ? log.size() : 0;
             seen.progress = log != null ? log.size() + log.gaps() : 0;
             seen.gaps = log != null ? log.gaps() : 0;
@@ -246,6 +250,15 @@ public class OSPRobotBrain extends SOCRobotBrain
                 return;
             // The server went elsewhere (the move needed no second step, or it refused the first): choose anew
             pending = null;
+        }
+        // A free road without a place: given up, as the protocol's rules have it, instead of waiting for the server to end
+        // the turn; no step follows, so it stays pending (and isn't sent again) until the server left the state
+        if (acting == seat && seen.stranded)
+        {
+            pending = Json.array("give_up_free_road", null);
+            pendingFrom = state;
+            client.cancelBuildRequest(game, SOCPlayingPiece.ROAD);
+            return;
         }
         if (acting != seat || seen.progress == actedAt || legal.isEmpty())
             return;

@@ -102,10 +102,12 @@ Every message that is answered may also be answered with `failure`.
 - `game_ms` (or null): a clock for the whole game; each `decide` then carries `clock_ms`, the time the agent has left.
 - `threads` (or null for no limit): the CPU threads the agent may use, for equal compute. A referee that pins the agent
   to cores enforces it; the others state it.
-- `gpu`: whether the agent may use a GPU.
+- `gpu` (true unless the game says otherwise): whether the agent may use a GPU.
+- An agent that can't keep the budget (fewer threads than it uses, no GPU while its net runs on one) turns the game
+  down instead of answering ready.
 - The answers to `handshake` and `before` have 60 s, for starting a process and loading a net.
 - Defaults, where whoever starts the game sets none: Hexfarer's referee 300 000 ms, Catanatron's driver 300 000 ms,
-  JSettlers' robot 120 000 ms (its server also ends a robot's turn after its own limit).
+  JSettlers' robot 120 000 ms (its server also ends a robot's turn after its own limit); any threads, a GPU allowed.
 
 ### `decide`, lean decisions and `resync`
 
@@ -137,6 +139,7 @@ record into its log, the one result line of every referee:
 ```
 
 - `agent` is null for a seat the referee's own players play; their counts are the referee's own, where it has them.
+- `turns`: the player turns after the setup, also those the server ended on its own.
 - `time_ms` and `max_ms`: the total and the longest time of the seat's decisions, as the referee measured them.
 - `fallbacks`: moves the referee chose for the seat after a failure, where it keeps a seat going.
 - `failures`: each as `{"n":144,"code":"timeout","by":"referee","message":"..."}`.

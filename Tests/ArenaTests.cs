@@ -583,6 +583,31 @@ namespace Tests
         }
 
         [Fact]
+        public void AnOpenSeatAgentThatFailsWhileSeatedStillGetsTheGamesResultRecord()
+        {
+            // Seat 2's agent turns the game down after its handshake: the seats made before are closed, and the result record
+            // names the failure with the agent
+            List<string> lines = [];
+            List<Agent> made = [];
+            OpenSeatHandshake handshake = new("refuser", ["standard"], false, OpenSeatNeeds.View);
+            OpenSeatException error = Assert.Throws<OpenSeatException>(() => Seating.Create(4, seat =>
+            {
+                if (seat == 2) throw new OpenSeatException("The agent reported a failure (unsupported): no", OpenSeatFailure.Unsupported, fromAgent: true) { Handshake = handshake };
+                Agent agent = new RandomAgent((sbyte)seat);
+                made.Add(agent);
+                return agent;
+            }, seed: 77, write: lines.Add));
+            Assert.Equal(2, made.Count);
+            JsonNode record = JsonNode.Parse(Assert.Single(lines, line => line.StartsWith("result "))["result ".Length..])!;
+            Assert.Equal(77, (int)record["seed"]!);
+            JsonNode seat2 = record["seats"]![2]!;
+            Assert.Equal("refuser", (string)seat2["agent"]!);
+            JsonNode failure = seat2["failures"]![0]!;
+            Assert.Equal(("unsupported", "agent"), ((string)failure["code"]!, (string)failure["by"]!));
+            Assert.All(new[] { 0, 1, 3 }, seat => Assert.Null(record["seats"]![seat]!["agent"]));
+        }
+
+        [Fact]
         public void ATableCanDoWithoutTradesBetweenPlayers()
         {
             Assert.True(CommandLine.Parse(["table", "--challenger", "C=c.onnx", "--baseline", "B=b.onnx"]).Settings!.FreeTrade);

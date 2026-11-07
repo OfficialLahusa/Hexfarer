@@ -3,7 +3,8 @@ A stand-in Open Seat Agent for tests: takes every game, answers every decision w
 message it gets to the file named by its first argument (one JSON object per line). The second argument, if given, is
 what it needs (default truth); the third a way to misbehave: lean (decisions with only the hash; it asks for the state
 at every fifth move of the game), illegal (answers its third decision of a game with a move that isn't listed), slow
-(takes 2 s for its second), refuse (turns every game down), blind (doesn't observe).
+(takes 2 s for its second), refuse (turns every game down), blind (doesn't observe), noisy (writes a line that isn't
+a message before each answer).
 """
 
 import json
@@ -15,6 +16,8 @@ MODE = sys.argv[3] if len(sys.argv) > 3 else ""
 
 
 def answer(message):
+    if MODE == "noisy":
+        print("loading the bot's tables", flush=True)
     return json.dumps(message)
 
 

@@ -128,6 +128,17 @@ public final class OSPGame
         }
     }
 
+    /**
+     * Whether the player on turn has a free road of a Road Building card to place but no place for it, which JSettlers
+     * leaves to the player to give up (road_building forced places it only if there is room)
+     */
+    public boolean strandedFreeRoad()
+    {
+        int state = game.getGameState();
+        return (state == SOCGame.PLACING_FREE_ROAD1 || state == SOCGame.PLACING_FREE_ROAD2)
+            && roadSites(game.getPlayer(game.getCurrentPlayerNumber())).isEmpty();
+    }
+
     // The free roads of a Road Building card still to place, as many as the player has roads and places for
     private int freeRoads()
     {
@@ -398,7 +409,8 @@ public final class OSPGame
     {
         if (game.canPlayKnight(pn))
             legal.add(move("play_knight", null));
-        if (game.canPlayRoadBuilding(pn))
+        // As road_building forced has it: only with a road left (JSettlers checks that) and a place for it (it doesn't)
+        if (game.canPlayRoadBuilding(pn) && ! roadSites(game.getPlayer(pn)).isEmpty())
             legal.add(move("play_road_building", null));
         if (game.canPlayDiscovery(pn))
             for (int i = 0; i < RESOURCES.length; i++)
@@ -504,6 +516,9 @@ public final class OSPGame
             if (! initial && state != SOCGame.PLACING_FREE_ROAD1 && state != SOCGame.PLACING_FREE_ROAD2)
                 game.buyRoad(pn);
             game.putPiece(new SOCRoad(player, edge, b));
+            // A first free road that leaves no place for the second gives the second up (JSettlers would wait for it)
+            if (strandedFreeRoad())
+                game.cancelBuildRoad(pn);
             return null;
         }
         case "build_city":

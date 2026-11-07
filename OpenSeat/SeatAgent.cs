@@ -1,6 +1,7 @@
 using Agents;
 using Agents.Inference;
 using Agents.MCTS;
+using Agents.OpenSeat;
 using Common;
 using Common.Actions;
 using Common.OSP;
@@ -22,7 +23,7 @@ namespace OpenSeat
     /// MCTS over worlds drawn from what its seat knows (BeliefTracker), which takes in every move as the seat sees it.
     /// </summary>
     internal sealed class SeatAgent(StateValueNet net, long iterations, double seconds, TextWriter log, int leavesPerBatch = MCTSAgent.DefaultLeavesPerBatch,
-        bool parallelSelection = true, bool fair = false, bool lean = false)
+        bool parallelSelection = true, bool fair = false, bool lean = false, int threads = 0)
     {
         private Replica? _replica;
         private MCTSAgent? _agent;
@@ -52,39 +53,58 @@ namespace OpenSeat
 
         /// <summary>
         /// Answers the referee's messages until its input ends; a message it can't handle is answered with a failure
-        /// (internal) for its game
+        /// (internal) for its game, and a line it can't read with a failure without a game (malformed), which ends the
+        /// connection
         /// </summary>
         public void Run(TextReader input, TextWriter output)
         {
+            void Write(JsonNode answer)
+            {
+                output.WriteLine(answer.ToJsonString());
+                output.Flush();
+            }
             while (input.ReadLine() is string line)
             {
                 if (line.Length == 0) continue;
+                if (OpenSeatAgentProcess.AnswerOf(line) is not JsonObject message)
+                {
+                    log.WriteLine($"{_gameId}: can't read the referee's line: {line}");
+                    Write(OpenSeatFailure.Message(null, null, OpenSeatFailure.Malformed, $"This agent can't read the line {line[..Math.Min(line.Length, 200)]}"));
+                    return;
+                }
                 JsonNode? answer;
-                JsonNode? message = null;
                 try
                 {
-                    message = JsonNode.Parse(line)!;
                     answer = Handle(message);
                 }
                 catch (Exception e)
                 {
                     log.WriteLine($"{_gameId}: failed: {e}");
-                    answer = Failure(message?["game_id"]?.DeepClone(), message?["n"]?.DeepClone(), "internal", e.Message);
+                    answer = Failure(message, OpenSeatFailure.Internal, e.Message);
                     _lost = true;
                 }
-                if (answer != null)
-                {
-                    output.WriteLine(answer.ToJsonString());
-                    output.Flush();
-                }
+                if (answer != null) Write(answer);
             }
         }
 
-        private static JsonObject Failure(JsonNode? gameId, JsonNode? n, string code, string message, JsonNode? detail = null)
+        // The failure for a message's game and decision
+        private static JsonObject Failure(JsonNode message, string code, string why, JsonNode? detail = null) =>
+            OpenSeatFailure.Message(OpenSeatHandshake.Text(message["game_id"]), message["n"] is JsonValue n && n.TryGetValue(out int at) ? at : null, code, why, detail);
+
+        /// <summary>
+        /// What of a game's budget this agent can't keep, as a failure's detail, or null: no GPU while its net runs on one,
+        /// or fewer CPU threads than it uses (the net's threads, all cores when not set, or the search's: one when serial,
+        /// all cores otherwise); cores is the machine's (Environment.ProcessorCount if not given)
+        /// </summary>
+        internal static JsonObject? UnkeptBudget(JsonNode? budget, InferenceProvider provider, int threads, bool parallelSelection, int cores = 0)
         {
-            JsonObject failure = new() { ["type"] = "failure", ["game_id"] = gameId, ["n"] = n, ["code"] = code, ["message"] = message };
-            if (detail != null) failure["detail"] = detail;
-            return failure;
+            if (budget?["gpu"] is JsonValue gpu && gpu.TryGetValue(out bool allowed) && !allowed && provider != InferenceProvider.CPU)
+                return new JsonObject { ["budget"] = "gpu", ["value"] = false };
+            if (cores <= 0) cores = Environment.ProcessorCount;
+            int used = Math.Max(parallelSelection ? cores : 1, threads > 0 ? threads : cores);
+            if (budget?["threads"] is JsonValue limit && limit.TryGetValue(out int most) && used > most)
+                return new JsonObject { ["budget"] = "threads", ["value"] = most };
+            return null;
         }
 
         /// <summary>
@@ -96,13 +116,15 @@ namespace OpenSeat
             {
                 case "handshake":
                     if (message["protocol"]?.ToJsonString() != "\"osp\"" || message["version"]?.ToJsonString() != "2")
-                        return Failure(null, null, "version", $"This agent speaks protocol osp version 2, not {message.ToJsonString()}.");
+                        return OpenSeatFailure.Message(null, null, OpenSeatFailure.Version, $"This agent speaks protocol osp version 2, not {message.ToJsonString()}.");
                     return new JsonObject { ["type"] = "handshake", ["protocol"] = "osp", ["version"] = 2, ["name"] = Name,
                         ["rulesets"] = new JsonArray("standard", "catanatron"), ["observe"] = true, ["needs"] = "truth", ["lean"] = lean };
                 case "before":
-                    // A ruleset the copy can't play is turned down
+                    // A ruleset the copy can't play, or a budget the agent can't keep, is turned down
                     if (Replica.Unsupported(message["ruleset"]) is JsonObject unsupported)
-                        return Failure(message["game_id"]?.DeepClone(), null, "unsupported", $"This agent can't play {unsupported.ToJsonString()}.", unsupported);
+                        return Failure(message, OpenSeatFailure.Unsupported, $"This agent can't play {unsupported.ToJsonString()}.", unsupported);
+                    if (UnkeptBudget(message["budget"], net.Provider, threads, parallelSelection) is JsonObject unkept)
+                        return Failure(message, OpenSeatFailure.Unsupported, $"This agent can't keep the budget {unkept.ToJsonString()}.", unkept);
                     Before(message);
                     return new JsonObject { ["type"] = "ready", ["game_id"] = message["game_id"]!.DeepClone() };
                 case "failure":

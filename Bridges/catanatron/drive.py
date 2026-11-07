@@ -96,6 +96,7 @@ class OpenSeatAgent:
                                         stderr=stderr, text=True, encoding="utf-8", bufsize=1)
         # Its lines arrive on a thread of their own, so an answer can be waited for with a time limit
         self.lines = queue.Queue()
+        self.said = []
         threading.Thread(target=self._read, daemon=True).start()
         try:
             self._handshake()
@@ -138,21 +139,29 @@ class OpenSeatAgent:
             raise AgentFailure("ended", f"The agent ended before it read its messages ({error})")
 
     def receive(self, seconds):
-        """The agent's next message within the time; a timeout, an end of its output or a line that isn't JSON fails"""
-        try:
-            line = self.lines.get(timeout=max(0.0, seconds))
-        except queue.Empty:
-            raise AgentFailure("timeout", f"The agent gave no answer within {seconds:.1f} s")
-        if line is None:
-            self.lines.put(None)
-            raise AgentFailure("ended", "The agent ended without an answer")
-        try:
-            message = json.loads(line)
-        except json.JSONDecodeError:
-            message = None
-        if not isinstance(message, dict):
-            raise AgentFailure("malformed", f"The agent wrote a line that isn't a protocol message: {line.strip()[:200]}")
-        return message
+        """The agent's next message within the time; a timeout or an end of its output fails. Lines that aren't a JSON
+        object (an agent's or a library's logging) are skipped, as Hexfarer's and JSettlers' referees skip them, and the
+        last few are kept for the failure's message."""
+        deadline = time.perf_counter() + seconds
+        while True:
+            try:
+                line = self.lines.get(timeout=max(0.0, deadline - time.perf_counter()))
+            except queue.Empty:
+                raise AgentFailure("timeout", f"The agent gave no answer within {seconds:.1f} s{self._said()}")
+            if line is None:
+                self.lines.put(None)
+                raise AgentFailure("ended", f"The agent ended without an answer{self._said()}")
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                message = None
+            if isinstance(message, dict):
+                return message
+            if line.strip():
+                self.said = (self.said + [line.strip()[:200]])[-5:]
+
+    def _said(self):
+        return f"; it said last: {' | '.join(self.said)}" if self.said else ""
 
     def fail(self, game_id, n, code, message, detail=None):
         """Tells the agent what failed (if it still listens) and returns the failure"""
@@ -249,7 +258,8 @@ def play(game, open_seat_agents, write, game_id, codes, budget_ms=DEFAULT_DECIDE
     times = {seat: [0.0, 0] for seat in range(4)}
     records = [seat_record(seat, open_seat_agents.get(seat)) for seat in range(4)]
     playing = dict(open_seat_agents)
-    budget = {"decide_ms": budget_ms, "game_ms": None, "threads": None, "gpu": False}
+    # Any threads and a GPU allowed, as at every referee unless the run says otherwise
+    budget = {"decide_ms": budget_ms, "game_ms": None, "threads": None, "gpu": True}
 
     def seat_state(seat, full):
         return full if playing[seat].needs == "truth" else view(full, seat)

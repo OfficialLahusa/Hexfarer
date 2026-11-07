@@ -311,7 +311,9 @@ def unsupported(ruleset):
             return {"option": name, "value": value}
         values = OPTIONS[name]
         number = isinstance(value, int) and not isinstance(value, bool) and value >= 0
-        if values is None and not (value is None or number) or values is not None and value not in values:
+        # A value of the option's type: a number (or none), a boolean, or one of its strings (Python takes 1 for True)
+        typed = values is not None and all(type(value) is type(v) for v in values[:1])
+        if values is None and not (value is None or number) or values is not None and not (typed and value in values):
             return {"option": name, "value": value}
     return None
 

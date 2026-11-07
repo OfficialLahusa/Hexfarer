@@ -104,16 +104,17 @@ namespace Agents.OpenSeat
             }
             Record = new OpenSeatSeatRecord(seat, Handshake);
             // Hexfarer's referee plays the rulebook; its options (no trades between players, other limits) go with the game
+            // No game has started yet, so the failure names none
             if (!Handshake.Rulesets.Contains("standard"))
                 Fail(OpenSeatFailure.Unsupported, $"The Open Seat Agent {Handshake.Name} doesn't play the standard rules (it plays {string.Join(", ", Handshake.Rulesets)}).",
-                    detail: new JsonObject { ["preset"] = "standard" });
+                    detail: new JsonObject { ["preset"] = "standard" }, inGame: false);
             if (Handshake.Needs == OpenSeatNeeds.World) _beliefs = beliefs != null ? new BeliefTracker(beliefs) : new BeliefTracker(seat, start);
-            SendBefore(start);
 
-            // The agent takes the game or turns it down
+            // The agent takes the game or turns it down (or has ended since its handshake)
             JsonNode answer;
             try
             {
+                SendBefore(start);
                 answer = OpenSeatHandshake.ReceiveWithin(channel, OpenSeatHandshake.AnswerTime, cancellation);
             }
             catch (OpenSeatException e) when (e.Code == OpenSeatFailure.Timeout)
@@ -124,7 +125,7 @@ namespace Agents.OpenSeat
             catch (OpenSeatException e)
             {
                 Lost(e, null);
-                throw;
+                throw new OpenSeatException(e.Message, e.Code, e.FromAgent, e) { Handshake = Handshake };
             }
             catch (OperationCanceledException)
             {
@@ -324,14 +325,15 @@ namespace Agents.OpenSeat
             _channel.Dispose();
         }
 
-        // The referee's failure: told to the agent (if it still listens), recorded, and the seat ends with it
-        private void Fail(string code, string message, int? n = null, JsonNode? detail = null)
+        // The referee's failure: told to the agent (if it still listens; for its game, if one started), recorded, and the
+        // seat ends with it
+        private void Fail(string code, string message, int? n = null, JsonNode? detail = null, bool inGame = true)
         {
-            try { _channel.Send(OpenSeatFailure.Message(_gameId, n, code, message, detail)); }
+            try { _channel.Send(OpenSeatFailure.Message(inGame ? _gameId : null, n, code, message, detail)); }
             catch (OpenSeatException) { }
             Record?.Failed(n, code, byAgent: false, message);
             Close(message);
-            throw new OpenSeatException(message, code);
+            throw new OpenSeatException(message, code) { Handshake = Handshake };
         }
 
         // The agent can't be told any more (its process ended): recorded, and the seat ends
@@ -345,7 +347,7 @@ namespace Agents.OpenSeat
         // The agent's own failure: recorded, and the seat ends without an answer
         private OpenSeatException AgentFailed(JsonNode failure, int? n)
         {
-            OpenSeatException e = OpenSeatHandshake.AgentFailure(failure);
+            OpenSeatException e = OpenSeatHandshake.AgentFailure(failure, Handshake);
             Record.Failed(n, e.Code, byAgent: true, e.Message);
             Close(e.Message);
             return e;

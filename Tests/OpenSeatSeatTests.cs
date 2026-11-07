@@ -138,7 +138,10 @@ namespace Tests
             Assert.True(WaitFor(() => match.AgentOf(0) is OpenSeatAgentProxy, 30000), "the seat should get the agent");
             match.Start();
             Assert.True(WaitFor(() => match.IsAgentThinking, 30000), "the agent should think about its first move");
+            // The agent doesn't read its input while it searches: closing it takes seconds, which the seat change doesn't wait for
+            Stopwatch replacing = Stopwatch.StartNew();
             admin.Send(new SetSeat(0, SeatKind.Random));
+            Assert.True(replacing.Elapsed < TimeSpan.FromSeconds(2), $"the seat change took {replacing.Elapsed.TotalSeconds:0.0} s");
             // Its search ends with the closed agent: no error, no pause, and the game goes on
             Assert.True(WaitFor(() => match.Record.History.Count > 8, 30000), "the game should go on");
             Assert.False(match.Playback.Paused);

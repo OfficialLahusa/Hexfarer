@@ -288,6 +288,16 @@ class LockTests(unittest.TestCase):
 
 
 @unittest.skipUnless(jsettlers.available(), "needs a JDK and JSettlers' jar in JSETTLERS_JAR")
+class RoadBuildingTests(unittest.TestCase):
+    """road_building forced: the card only with a place for a road, and a free road without a place is given up, where
+    JSettlers would wait for it (RoadBuildingCheck.java)"""
+
+    def test_the_card_needs_a_place_and_a_free_road_without_one_is_given_up(self):
+        jsettlers.build()
+        self.assertIn("road building checked", jsettlers.run("osp.jsettlers.RoadBuildingCheck"))
+
+
+@unittest.skipUnless(jsettlers.available(), "needs a JDK and JSettlers' jar in JSETTLERS_JAR")
 class BankTests(unittest.TestCase):
     """JSettlers has no resource bank: with more than 19 of a resource in the hands its count stops at 0 (BankCheck.java)"""
 

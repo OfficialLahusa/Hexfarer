@@ -151,7 +151,7 @@ namespace OpenSeat
                         bool fair = args.Contains("--fair");
                         // Decisions with only the state's hash, checked against its own copy of the game
                         bool lean = args.Contains("--lean");
-                        new SeatAgent(net, iterations, seconds, Console.Error, leavesPerBatch, parallelSelection: !serial, fair: fair, lean: lean).Run(Console.In, protocol);
+                        new SeatAgent(net, iterations, seconds, Console.Error, leavesPerBatch, parallelSelection: !serial, fair: fair, lean: lean, threads: threads).Run(Console.In, protocol);
                         return 0;
                     }
                 case "boards":

@@ -161,7 +161,7 @@ namespace Arena
             state.Settings.FreeTrade = settings.FreeTrade;
             GameState start = state;
             Agent[] agents = Seating.Create(4, seat => seats[seat].Create((sbyte)seat, start, nets[seats[seat]].Net, settings.Iterations, settings.Seconds, nets[seats[seat]].Leaves,
-                $"{game + 1}", settings.SeedBase + game));
+                $"{game + 1}", settings.SeedBase + game), settings.SeedBase + game, Write);
             for (int seat = 0; seat < 4; seat++)
                 if (_seating.Name(seats[seat].Name, agents[seat]) is string line) Write(line);
             try

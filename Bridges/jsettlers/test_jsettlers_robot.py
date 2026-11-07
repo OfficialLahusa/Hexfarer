@@ -26,7 +26,7 @@ def free_port():
         return s.getsockname()[1]
 
 
-def play(games, agent_command, logs, record=None):
+def play(games, agent_command, logs, record=None, turn_seconds=60):
     """Robot-only games with one Open Seat Agent robot and three of JSettlers' (the server's referee logs into the
     directory record, if given); the server's standard error"""
     properties = {
@@ -38,7 +38,7 @@ def play(games, agent_command, logs, record=None):
         "jsettlers.bots.botgames.shutdown": "Y",
         "jsettlers.bots.botgames.wait_sec": "3",
         "jsettlers.bots.fast_pause_percent": "1",
-        "jsettlers.bots.timeout.turn": "60",
+        "jsettlers.bots.timeout.turn": str(turn_seconds),
         "jsettlers.gameopt.NT": "t",
         "jsettlers.allow.debug": "N",
     }
@@ -189,6 +189,8 @@ class LeanTests(unittest.TestCase):
         self.assertEqual(1, len(lines), output[-3000:])
         with open(os.path.join(logs, os.listdir(logs)[0]), encoding="utf-8") as file:
             messages = [json.loads(line) for line in file if line.startswith("{")]
+        # The robot's budget: 120 s per decision, any threads, a GPU allowed
+        self.assertEqual({"decide_ms": 120000, "game_ms": None, "threads": None, "gpu": True}, next(m for m in messages if m["type"] == "before")["budget"])
         decides = [m for m in messages if m["type"] == "decide"]
         lean = [d for d in decides if "state" not in d]
         full = [d for d in decides if "state" in d]
@@ -199,6 +201,33 @@ class LeanTests(unittest.TestCase):
         # Every lean decision was asked again, and the result counts the resyncs
         self.assertEqual(len(lean), seats[0]["resyncs"])
         self.assertEqual((True, []), (seats[0]["lean"], seats[0]["failures"]))
+
+
+@unittest.skipUnless(jsettlers.available(), "needs a JDK and JSettlers' jar in JSETTLERS_JAR")
+class StallTests(unittest.TestCase):
+    """A lean agent that stalls past the server's turn limit: the server ends the robot's turn, a change no step explains,
+    so the agent's next decision comes with the full state although it didn't ask, and the result counts that turn too"""
+
+    def test_a_turn_the_server_ends_sends_the_state_and_counts(self):
+        jsettlers.build()
+        logs, records = tempfile.mkdtemp(), tempfile.mkdtemp()
+        # A turn limit under 8 s leaves the server's own: it ends a robot's turn after 8 s without an action, checked every
+        # 4.4 s, so at most 12.4 s into the stall
+        output = play(1, agent_command("--lean", "--observe", "--full", "--stall", "20"), logs, record=records, turn_seconds=5)
+        lines, seats = results(output)
+        self.assertEqual(1, len(lines), output[-3000:])
+        self.assertGreater(lines[0]["gaps"], 0, "the server should have ended the stalled turn")
+        with open(os.path.join(logs, os.listdir(logs)[0]), encoding="utf-8") as file:
+            decides = [m for m in (json.loads(line) for line in file if line.startswith("{")) if m["type"] == "decide"]
+        asked = {d["n"] for d in decides if "state" not in d}
+        self.assertTrue([d for d in decides if "state" in d and d["n"] not in asked], "a decision after the gap should bring the state unasked")
+        # The turns after the setup, also the one the server ended: each moves the player on turn on by one seat. The record
+        # has only decisions that made a move, none of a turn the server ended before the seat moved, so the seats passed
+        # between two decisions count (the setup's last placement is the first player's, whose turn comes next)
+        with open(os.path.join(records, os.listdir(records)[0]), encoding="utf-8") as file:
+            states = [m["state"] for m in (json.loads(line) for line in file) if m["type"] == "decide"]
+        turns = sum((b["on_turn"] - a["on_turn"]) % 4 for a, b in zip(states, states[1:]) if b["prompt"] not in ("setup_settlement", "setup_road"))
+        self.assertEqual(turns, lines[0]["result"]["turns"])
 
 
 @unittest.skipUnless(jsettlers.available(), "needs a JDK and JSettlers' jar in JSETTLERS_JAR")

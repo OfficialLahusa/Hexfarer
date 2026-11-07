@@ -33,15 +33,22 @@ def ours(code):
     return code.startswith("hexfarer")
 
 
+def failed(game):
+    """Whether the game ended at a failure (drive.py's result record names it): it says nothing about strength"""
+    return any(seat.get("failures") for seat in (game.get("result") or {}).get("seats", []))
+
+
 def summarize(run_dir, reps=2000, seed=1):
     results, stats = load(run_dir)
     by_map = defaultdict(list)
     for r in results:
         by_map[r["map_seed"]].append(r)
-    maps = {m: games for m, games in by_map.items() if sorted(g["rotation"] for g in games) == [0, 1, 2, 3]}
+    # A map counts with its four rotations, none of them ended at a failure (resume.py plays such a map again)
+    maps = {m: games for m, games in by_map.items() if sorted(g["rotation"] for g in games) == [0, 1, 2, 3] and not any(failed(g) for g in games)}
+    failed_games = sum(1 for r in results if failed(r))
     games = [g for gs in maps.values() for g in gs]
     if not games:
-        return {"run": os.path.basename(run_dir), "games": 0}
+        return {"run": os.path.basename(run_dir), "games": 0, "failed_games": failed_games}
     seats_ours = sum(ours(c) for c in games[0]["seats"])
     expected = seats_ours / 4
 
@@ -71,7 +78,7 @@ def summarize(run_dir, reps=2000, seed=1):
         "agent": next(c for c in games[0]["seats"] if ours(c)),
         "maps": len(maps), "games": len(games),
         "win_rate": round(rate, 4), "interval": [round(low, 4), round(high, 4)], "equal_strength": expected,
-        "truncated": sum(g["truncated"] for g in games),
+        "truncated": sum(g["truncated"] for g in games), "failed_games": failed_games,
         "vp_ours": round(sum(vp_ours) / len(vp_ours), 2), "vp_theirs": round(sum(vp_theirs) / len(vp_theirs), 2),
         "turns": round(sum(g["turns"] for g in games) / len(games), 1),
         "ms_per_decision": {k: round(v[0] / v[1] * 1000, 1) for k, v in time_side.items() if v[1]},
@@ -95,7 +102,8 @@ def main(argv=None):
         # Runs before the bridge night wrote the Open Seat Agent's lineup entry as "osa"
         print(f"{s['run']}: {s['agent']} in {sum(seat in ('open-seat-agent', 'osa') for seat in s['lineup'])} of 4 seats, {s['games']} games on {s['maps']} maps")
         print(f"   our wins {s['win_rate']:.1%} [{s['interval'][0]:.1%}, {s['interval'][1]:.1%}] (equal strength {s['equal_strength']:.0%}), "
-              f"VP ours {s['vp_ours']} theirs {s['vp_theirs']}, {s['turns']} turns, {s['truncated']} truncated")
+              f"VP ours {s['vp_ours']} theirs {s['vp_theirs']}, {s['turns']} turns, {s['truncated']} truncated, "
+              f"{s['failed_games']} failed (their maps left out)")
         print(f"   ms per decision {s['ms_per_decision']}; agent: {s['agent_games_with_patches']} of {s['agent_stats_games']} agent-games took over "
               f"the referee's state, {s['agent_fallbacks']} moves replaced, {s['agent_lost']} lost")
 

@@ -20,6 +20,7 @@ from catanatron.models.player import RandomPlayer
 import contextlib
 import io
 
+import analyze
 import drive
 import osp_board
 import resume
@@ -58,6 +59,38 @@ class ResumeTests(unittest.TestCase):
             self.assertEqual(["2:10"], printed.getvalue().split())
             with open(os.path.join(directory, "results-0.jsonl"), encoding="utf-8") as file:
                 self.assertEqual({501}, {json.loads(line)["map_seed"] for line in file})
+
+    def test_a_map_with_a_failed_game_is_played_again(self):
+        with tempfile.TemporaryDirectory() as directory:
+            boards = os.path.join(directory, "boards.jsonl")
+            with open(boards, "w", encoding="utf-8") as file:
+                file.writelines(json.dumps({"seed": 500 + i, "board": None}) + "\n" for i in range(4))
+            # Maps 501 and 502 have all four rotations, but a game of 502 ended at a failure
+            def line(seed, rotation, failures=()):
+                return json.dumps({"map_seed": seed, "rotation": rotation, "result": {"seats": [{"seat": 0, "failures": list(failures)}]}}) + "\n"
+            with open(os.path.join(directory, "results-0.jsonl"), "w", encoding="utf-8") as file:
+                file.writelines([line(501, r) for r in range(4)] + [line(502, r, [{"code": "timeout"}] if r == 2 else []) for r in range(4)])
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed):
+                resume.main([directory, "1", "4", "1", "--boards", boards])
+            self.assertEqual(["2:4"], printed.getvalue().split())
+
+
+class AnalyzeTests(unittest.TestCase):
+    def test_a_failed_game_leaves_its_map_out_of_the_win_rate_and_is_counted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            def game(seed, rotation, winner, failures=()):
+                seats = ["hexfarer-mcts", "AB:2", "AB:2", "AB:2"]
+                return {"game_id": f"map{seed}-r{rotation}", "map_seed": seed, "rotation": rotation, "lineup": ["open-seat-agent", "AB:2", "AB:2", "AB:2"],
+                        "seats": seats, "winner": winner, "vp": [10 if s == winner else 5 for s in range(4)], "truncated": winner is None,
+                        "turns": 50, "seconds": [1.0] * 4, "decisions": [10] * 4,
+                        "result": {"seats": [{"seat": s, "failures": list(failures) if s == 0 else []} for s in range(4)]}}
+            # Map 1: our agent wins every rotation; map 2: it wins three, the fourth game ended at its failure
+            games = [game(1, r, 0) for r in range(4)] + [game(2, r, 0) for r in range(3)] + [game(2, 3, None, [{"code": "timeout"}])]
+            with open(os.path.join(directory, "results-0.jsonl"), "w", encoding="utf-8") as file:
+                file.writelines(json.dumps(g) + "\n" for g in games)
+            summary = analyze.summarize(directory)
+            self.assertEqual((1, 4, 1.0, 1), (summary["maps"], summary["games"], summary["win_rate"], summary["failed_games"]))
 
 
 def as_sets(board):
@@ -131,11 +164,16 @@ class DriveTests(unittest.TestCase):
 
     def test_a_view_agent_sees_only_its_seat_and_a_world_agent_is_refused(self):
         messages, results, logged = self.drive(needs="view")
+        truths = {(m["game_id"], m["n"]): m["state"] for m in logged if m["type"] == "decide"}
         for message in messages:
             if message["type"] in ("before", "decide"):
                 for player in message["state"]["players"]:
                     if player["seat"] != message["seat"]:
                         self.assertEqual((None, None, None), (player["hand"], player["development"], player["vp"]))
+            if message["type"] == "decide":
+                # The counts of every hand stay, as the rules show them
+                for player, true in zip(message["state"]["players"], truths[(message["game_id"], message["n"])]["players"]):
+                    self.assertEqual((sum(true["hand"].values()), sum(true["development"].values())), (player["hand_size"], player["development_size"]))
             if message["type"] == "step":
                 # No state with a step under view, and another's bought card stays unknown
                 self.assertNotIn("state", message)
@@ -143,6 +181,9 @@ class DriveTests(unittest.TestCase):
                 if message["action"][0] == "buy_development" and message["seat"] != seat:
                     self.assertEqual({"card": None}, message["result"])
         self.assertTrue(all(r["result"]["seats"][r["rotation"]]["needs"] == "view" for r in results))
+        # The budget allows any threads and a GPU unless the run says otherwise
+        self.assertTrue(all(m["budget"] == {"decide_ms": drive.DEFAULT_DECIDE_MS, "game_ms": None, "threads": None, "gpu": True}
+                            for m in messages if m["type"] == "before"))
 
         with tempfile.TemporaryDirectory() as directory:
             seen = os.path.join(directory, "seen.jsonl")
@@ -156,6 +197,12 @@ class DriveTests(unittest.TestCase):
         self.assertEqual([], [m for m in messages if m["type"] == "step"])
         self.assertTrue(any(m["type"] == "decide" for m in messages))
         self.assertTrue(all(r["result"]["seats"][r["rotation"]]["observe"] is False for r in results))
+
+    def test_lines_that_arent_protocol_messages_are_skipped(self):
+        messages, results, logged = self.drive(mode="noisy")
+        self.assertEqual(4, len(results))
+        self.assertTrue(all(not seat["failures"] for r in results for seat in r["result"]["seats"]))
+        self.assertEqual(0, sum(1 for m in logged if m["type"] == "failure"))
 
     def test_a_lean_agent_gets_the_hash_and_the_state_when_it_asks(self):
         messages, results, logged = self.drive(mode="lean")

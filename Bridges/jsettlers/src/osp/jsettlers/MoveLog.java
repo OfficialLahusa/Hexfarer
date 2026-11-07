@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -330,6 +331,18 @@ final class MoveLog
         try
         {
             Map<String, Object> after = osp.state(-1);
+            // Something changed the game since the last request, which no request made (the server ended a slow player's
+            // turn): a gap, which loses what was pending, and a turn if the player on turn changed; found at any request,
+            // also one that changes nothing
+            if (! request.before.equals(last))
+            {
+                gaps++;
+                pendingKind = null;
+                discardStart = null;
+                discarded.clear();
+                if (! setup(last) && ! Objects.equals(last.get("on_turn"), request.before.get("on_turn")))
+                    turns++;
+            }
             if (request.seat >= 0)
                 handled(request.message, request.seat, request.before, after, request.legal, request.mustDiscard);
             last = after;
@@ -365,6 +378,13 @@ final class MoveLog
         closer.start();
     }
 
+    // Whether a state is in the setup, whose placements aren't player turns
+    private static boolean setup(Map<String, Object> state)
+    {
+        Object prompt = state.get("prompt");
+        return "setup_settlement".equals(prompt) || "setup_road".equals(prompt);
+    }
+
     // Turns a handled request into its step, if it made one
     private void handled(SOCMessageForGame message, int seat, Map<String, Object> before, Map<String, Object> after, List<Object> legal,
         List<Integer> mustDiscard)
@@ -372,14 +392,6 @@ final class MoveLog
         // The states are maps, lists and values as OSPGame writes them, so they compare as their JSON would
         if (before.equals(after))
             return;
-        // Something changed the game since the last request: the server's own move (a turn it ended); what was pending is lost
-        if (! before.equals(last))
-        {
-            gaps++;
-            pendingKind = null;
-            discardStart = null;
-            discarded.clear();
-        }
         switch (message.getType())
         {
         case SOCMessage.ROLLDICE:

@@ -126,7 +126,8 @@ namespace Arena
             GameState start = state;
             Agent[] agents = Seating.Create(Seats, seat => seat == challengerSeat
                 ? settings.Challenger.Create((sbyte)seat, start, challengerNets.Net, settings.Iterations, settings.Seconds, challengerNets.Leaves, $"{game + 1}", Seed(game))
-                : settings.Baseline.Create((sbyte)seat, start, baselineNets.Net, settings.Iterations, settings.Seconds, baselineNets.Leaves, $"{game + 1}", Seed(game)));
+                : settings.Baseline.Create((sbyte)seat, start, baselineNets.Net, settings.Iterations, settings.Seconds, baselineNets.Leaves, $"{game + 1}", Seed(game)),
+                Seed(game), Write);
             for (int seat = 0; seat < Seats; seat++)
                 if (_seating.Name(seat == challengerSeat ? settings.Challenger.Name : settings.Baseline.Name, agents[seat]) is string line) Write(line);
             try

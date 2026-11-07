@@ -192,7 +192,8 @@ namespace Tests
         /// says so, and answer may answer in its place); one that ends at a step can't be sent it
         /// </summary>
         private sealed class ScriptedAgent(string needs = "view", bool observe = true, Func<JsonNode, JsonNode>? choose = null, string[]? rulesets = null,
-            bool endsAtStep = false, bool lean = false, JsonObject? refuse = null, Func<JsonNode, bool>? resync = null, Func<JsonNode, JsonNode?>? answer = null)
+            bool endsAtStep = false, bool lean = false, JsonObject? refuse = null, Func<JsonNode, bool>? resync = null, Func<JsonNode, JsonNode?>? answer = null,
+            bool endsAtBefore = false)
             : IOpenSeatChannel
         {
             public readonly List<JsonNode> Received = [];
@@ -202,6 +203,7 @@ namespace Tests
             public void Send(JsonNode message)
             {
                 if (endsAtStep && message["type"]!.GetValue<string>() == "step") throw new OpenSeatException("The scripted agent ended.");
+                if (endsAtBefore && message["type"]!.GetValue<string>() == "before") throw new OpenSeatException("The scripted agent ended.", OpenSeatFailure.Ended);
                 Received.Add(message.DeepClone());
                 switch (message["type"]!.GetValue<string>())
                 {
@@ -279,7 +281,7 @@ namespace Tests
             Assert.Equal("""{"protocol":"osp","type":"handshake","version":2}""", OSPCodec.Canonical(agent.Received[0]));
             JsonNode before = agent.Received[1];
             // The game's budget and the agent's seed come with it
-            Assert.Equal("""{"decide_ms":300000,"game_ms":null,"gpu":false,"threads":null}""", OSPCodec.Canonical(before["budget"]));
+            Assert.Equal("""{"decide_ms":300000,"game_ms":null,"gpu":true,"threads":null}""", OSPCodec.Canonical(before["budget"]));
             Assert.True(before["seed"] is JsonValue seed && seed.TryGetValue(out int _));
             OSPCodec codec = new(start.Board);
             Assert.Equal("g5", before["game_id"]!.GetValue<string>());
@@ -427,8 +429,21 @@ namespace Tests
             OpenSeatException error = Assert.Throws<OpenSeatException>(() => new OpenSeatAgentProxy(0, TestUtil.NewGame(), agent, "g1"));
             Assert.Equal(OpenSeatFailure.Unsupported, error.Code);
             Assert.True(error.FromAgent);
+            Assert.Equal("scripted", error.Handshake?.Name);
             Assert.True(agent.Disposed);
             Assert.Equal(["handshake", "before"], agent.Received.Select(m => m["type"]!.GetValue<string>()));
+        }
+
+        [Fact]
+        public void AnAgentThatEndsAfterItsHandshakeEndsTheSeatWithItsHandshake()
+        {
+            ScriptedAgent agent = new(endsAtBefore: true);
+            TestUtil.Seed(1);
+            OpenSeatException error = Assert.Throws<OpenSeatException>(() => new OpenSeatAgentProxy(0, TestUtil.NewGame(), agent, "g1"));
+            Assert.Equal(OpenSeatFailure.Ended, error.Code);
+            // The result record of the game it never started still names the agent
+            Assert.Equal("scripted", error.Handshake?.Name);
+            Assert.True(agent.Disposed);
         }
 
         [Fact]
@@ -524,6 +539,9 @@ namespace Tests
             Assert.Contains("standard", error.Message);
             Assert.Equal("failure", agent.Received[^1]["type"]!.GetValue<string>());
             Assert.Equal("unsupported", agent.Received[^1]["code"]!.GetValue<string>());
+            // No game has started, so the failure names none
+            Assert.Null(agent.Received[^1]["game_id"]);
+            Assert.Equal("scripted", error.Handshake?.Name);
             Assert.True(agent.Disposed);
         }
 
@@ -763,6 +781,44 @@ namespace Tests
             Assert.True(replica.State.Settings.FreeTrade);
             Assert.Equal(4, replica.State.Settings.TradeOfferLimit);
             Assert.False(new Replica(Before(JsonNode.Parse("""{"preset":"catanatron"}""")!.AsObject())).State.Settings.FreeTrade);
+
+            // An option's value has the option's type: a string where it takes a boolean, a boolean or number where it takes a
+            // string, isn't one it plays
+            foreach (string ruleset in new[] { """{"counteroffers":"true"}""", """{"counteroffers":1}""", """{"player_trading":true}""", """{"victory_points":"12"}""" })
+                Assert.NotNull(Replica.Unsupported(JsonNode.Parse(ruleset)));
+            Assert.Null(Replica.Unsupported(JsonNode.Parse("""{"counteroffers":false,"player_trading":"none","turn_limit":null}""")));
+
+            // The budget: no GPU while its net runs on one, or fewer threads than it uses, is turned down; its CPU net keeps it
+            JsonObject Budget(string json) => JsonNode.Parse(json)!.AsObject();
+            Assert.NotNull(SeatAgent.UnkeptBudget(Budget("""{"decide_ms":1000,"gpu":false}"""), InferenceProvider.DirectML, threads: 1, parallelSelection: false));
+            Assert.Null(SeatAgent.UnkeptBudget(Budget("""{"decide_ms":1000,"gpu":false}"""), InferenceProvider.CPU, threads: 1, parallelSelection: false));
+            Assert.Null(SeatAgent.UnkeptBudget(Budget("""{"decide_ms":1000,"gpu":true}"""), InferenceProvider.DirectML, threads: 0, parallelSelection: true));
+            Assert.NotNull(SeatAgent.UnkeptBudget(Budget("""{"decide_ms":1000,"threads":1}"""), InferenceProvider.CPU, threads: 0, parallelSelection: false, cores: 16));
+            Assert.NotNull(SeatAgent.UnkeptBudget(Budget("""{"decide_ms":1000,"threads":2}"""), InferenceProvider.CPU, threads: 1, parallelSelection: true, cores: 16));
+            Assert.Null(SeatAgent.UnkeptBudget(Budget("""{"decide_ms":1000,"threads":2}"""), InferenceProvider.CPU, threads: 2, parallelSelection: false, cores: 16));
+            Assert.NotNull(SeatAgent.UnkeptBudget(Budget("""{"decide_ms":1000,"threads":2}"""), InferenceProvider.CPU, threads: 3, parallelSelection: false, cores: 16));
+            // A limit of the machine's cores or more is kept, also by the parallel search and a net on all cores
+            Assert.Null(SeatAgent.UnkeptBudget(Budget("""{"decide_ms":1000,"threads":16}"""), InferenceProvider.CPU, threads: 0, parallelSelection: true, cores: 16));
+            Assert.Null(SeatAgent.UnkeptBudget(Budget("""{"decide_ms":1000,"threads":64}"""), InferenceProvider.CPU, threads: 8, parallelSelection: true, cores: 16));
+            Assert.NotNull(SeatAgent.UnkeptBudget(Budget("""{"decide_ms":1000,"threads":15}"""), InferenceProvider.CPU, threads: 8, parallelSelection: true, cores: 16));
+            Assert.NotNull(SeatAgent.UnkeptBudget(Budget("""{"decide_ms":1000,"threads":15}"""), InferenceProvider.CPU, threads: 0, parallelSelection: false, cores: 16));
+            JsonObject strict = Before(JsonNode.Parse("""{"preset":"standard"}""")!.AsObject());
+            strict["budget"] = Budget("""{"decide_ms":1000,"game_ms":null,"threads":1,"gpu":false}""");
+            JsonNode refused = seatAgent.Handle(strict)!;
+            Assert.Equal(("failure", "unsupported", "threads"), (refused["type"]!.GetValue<string>(), refused["code"]!.GetValue<string>(), refused["detail"]!["budget"]!.GetValue<string>()));
+        }
+
+        [Fact]
+        public void HexfarersAgentEndsTheConnectionAtALineItCantRead()
+        {
+            SeatAgent seatAgent = new(new StateValueNet(TinyNet, provider: InferenceProvider.CPU), iterations: 16, seconds: 0, new StringWriter(), leavesPerBatch: 16);
+            StringWriter output = new();
+            seatAgent.Run(new StringReader(string.Join("\n", """{"type":"handshake","protocol":"osp","version":2}""", "{\"type\":\"before\",", """{"type":"handshake","protocol":"osp","version":2}""")), output);
+            List<JsonNode> answers = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => JsonNode.Parse(line)!).ToList();
+            // The handshake, then the failure without a game, and nothing after it
+            Assert.Equal(["handshake", "failure"], answers.Select(a => a["type"]!.GetValue<string>()));
+            Assert.Equal("malformed", answers[1]["code"]!.GetValue<string>());
+            Assert.Null(answers[1]["game_id"]);
         }
 
         /// <summary>

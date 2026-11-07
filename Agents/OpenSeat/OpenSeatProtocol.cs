@@ -42,23 +42,25 @@ namespace Agents.OpenSeat
 
     /// <summary>
     /// A failure of an Open Seat Agent's seat: it broke the protocol, quit, didn't answer in time, turned a game down or
-    /// reported a failure itself (FromAgent). Code is one of OpenSeatFailure's.
+    /// reported a failure itself (FromAgent). Code is one of OpenSeatFailure's; Handshake is the agent's, if the failure
+    /// came after it (for the result record of a game the agent never started).
     /// </summary>
     public sealed class OpenSeatException(string message, string code = OpenSeatFailure.Internal, bool fromAgent = false, Exception? inner = null)
         : Exception(message, inner)
     {
         public string Code { get; } = code;
         public bool FromAgent { get; } = fromAgent;
+        public OpenSeatHandshake? Handshake { get; init; }
     }
 
     /// <summary>
     /// A game's time budget (see Bridges/PROTOCOL.md): the time per decision, an optional clock for the whole game, the
-    /// CPU threads the agent may use (null: no limit) and whether it may use a GPU
+    /// CPU threads the agent may use (null: no limit) and whether it may use a GPU (by default it may)
     /// </summary>
-    public sealed record OpenSeatBudget(int DecideMs, int? GameMs = null, int? Threads = null, bool Gpu = false)
+    public sealed record OpenSeatBudget(int DecideMs, int? GameMs = null, int? Threads = null, bool Gpu = true)
     {
         /// <summary>
-        /// Hexfarer's referee when whoever starts the game sets none: 5 minutes per decision
+        /// Hexfarer's referee when whoever starts the game sets none: 5 minutes per decision, any threads, a GPU allowed
         /// </summary>
         public static readonly OpenSeatBudget Default = new(300_000);
 
@@ -142,11 +144,11 @@ namespace Agents.OpenSeat
         }
 
         /// <summary>
-        /// The failure an agent reported, as the exception for it
+        /// The failure an agent reported, as the exception for it (with the agent's handshake, if known)
         /// </summary>
-        public static OpenSeatException AgentFailure(JsonNode failure) =>
+        public static OpenSeatException AgentFailure(JsonNode failure, OpenSeatHandshake? handshake = null) =>
             new($"The agent reported a failure ({Text(failure["code"]) ?? "no code"}): {Text(failure["message"]) ?? failure.ToJsonString()}",
-                Text(failure["code"]) ?? OpenSeatFailure.Internal, fromAgent: true);
+                Text(failure["code"]) ?? OpenSeatFailure.Internal, fromAgent: true) { Handshake = handshake };
 
         // Tells the agent why the handshake failed, if it still listens, and returns the exception for it
         private static OpenSeatException Refuse(IOpenSeatChannel channel, string code, string message)

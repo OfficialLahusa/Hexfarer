@@ -147,6 +147,9 @@ class Encoder:
                 "vp": ps[f"{key}_ACTUAL_VICTORY_POINTS"],
                 "hand": {RESOURCE_NAMES[r]: ps[f"{key}_{r}_IN_HAND"] for r in RESOURCES},
                 "development": {CARD_NAMES[c]: ps[f"{key}_{c}_IN_HAND"] for c in DEVELOPMENT_CARDS},
+                # The counts every seat sees, also where a view hides the cards
+                "hand_size": sum(ps[f"{key}_{r}_IN_HAND"] for r in RESOURCES),
+                "development_size": sum(ps[f"{key}_{c}_IN_HAND"] for c in DEVELOPMENT_CARDS),
                 "played": {CARD_NAMES[c]: ps[f"{key}_PLAYED_{c}"] for c in DEVELOPMENT_CARDS if c != VICTORY_POINT},
                 "longest_road": ps[f"{key}_LONGEST_ROAD_LENGTH"],
                 "has_longest_road": ps[f"{key}_HAS_ROAD"],

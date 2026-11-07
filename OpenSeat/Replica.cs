@@ -1,6 +1,7 @@
 using Common;
 using Common.Actions;
 using Common.OSP;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Action = Common.Actions.Action;
 
@@ -52,14 +53,15 @@ namespace OpenSeat
             State.Settings.MaxTradeOffersPerTurn = ruleset?["offer_limit"]?.GetValue<int>() ?? int.MaxValue;
         }
 
-        // Every option of RULESET.md with the values it takes (null: a number), and the presets
+        // Every option of RULESET.md with the strings it takes (null: a number or none), and the boolean ones
         private static readonly Dictionary<string, string[]?> Options = new()
         {
             ["victory_points"] = null, ["discard_limit"] = null, ["turn_limit"] = null, ["offer_limit"] = null,
-            ["player_trading"] = ["rulebook", "none"], ["counteroffers"] = ["true", "false"], ["bank_shortage"] = ["rulebook", "nobody", "unlimited"],
+            ["player_trading"] = ["rulebook", "none"], ["bank_shortage"] = ["rulebook", "nobody", "unlimited"],
             ["win_timing"] = ["own_turn", "any_time"], ["robber_victims"] = ["adjacent", "with_cards"], ["bank_rates"] = ["all", "best_only"],
             ["road_building"] = ["optional", "forced"],
         };
+        private static readonly HashSet<string> Flags = ["counteroffers"];
 
         /// <summary>
         /// What of a ruleset the copy can't play, as a failure's detail ({"preset": ...} or {"option": ..., "value": ...}),
@@ -76,13 +78,12 @@ namespace OpenSeat
                     if (value?.ToJsonString() is not ("\"standard\"" or "\"catanatron\"")) return new JsonObject { ["preset"] = value?.DeepClone() };
                     continue;
                 }
-                bool known = Options.TryGetValue(name, out string[]? values) && value switch
-                {
-                    null => values == null,
-                    JsonValue number when values == null => number.TryGetValue(out int count) && count >= 0,
-                    JsonValue text => values != null && values.Contains(text.ToJsonString().Trim('"')),
-                    _ => false,
-                };
+                // A value of the option's type: a boolean, a number (or none), or one of its strings
+                JsonValueKind kind = value?.GetValueKind() ?? JsonValueKind.Null;
+                bool known = Flags.Contains(name) ? kind is JsonValueKind.True or JsonValueKind.False
+                    : Options.TryGetValue(name, out string[]? values) && (values == null
+                        ? kind == JsonValueKind.Null || kind == JsonValueKind.Number && value!.AsValue().TryGetValue(out int count) && count >= 0
+                        : kind == JsonValueKind.String && values.Contains(value!.GetValue<string>()));
                 if (!known) return new JsonObject { ["option"] = name, ["value"] = value?.DeepClone() };
             }
             return null;

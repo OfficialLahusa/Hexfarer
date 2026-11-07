@@ -480,7 +480,7 @@ namespace Simulation
         private Agent[] CreateAgents()
         {
             if (_agents != null)
-                foreach (Agent old in _agents) Close(old);
+                foreach (Agent old in _agents) CloseLater(old);
             Agent[] agents = Enumerable.Range(0, _seats.Length)
                 .Select(CreateAgentLocked).ToArray();
             foreach (Agent agent in agents) ResetAgentLocked(agent);
@@ -552,7 +552,7 @@ namespace Simulation
         // seat knows, so it needs no reset (which would end that game and start another)
         private void ReplaceAgentLocked(int seat)
         {
-            Close(_agents[seat]);
+            CloseLater(_agents[seat]);
             _agents[seat] = CreateAgentLocked(seat);
             if (_agents[seat] is not OpenSeatAgentProxy) ResetAgentLocked(_agents[seat]);
         }
@@ -562,6 +562,13 @@ namespace Simulation
 
         // An agent that holds a process (an Open Seat Agent) is closed when its seat gets another
         private static void Close(Agent? agent) => (agent as IDisposable)?.Dispose();
+
+        // The same beside the match's lock, for a seat change or a new game: an agent busy searching reads no input, so its
+        // process may take seconds to end, which commands (and the client's window) mustn't wait for
+        private static void CloseLater(Agent? agent)
+        {
+            if (agent is IDisposable disposable) Task.Run(disposable.Dispose);
+        }
 
         /// <summary>
         /// The MCTS search of an agent, also inside a fair one

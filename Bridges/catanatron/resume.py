@@ -44,11 +44,14 @@ def main(argv=None):
 
     files = sorted(glob.glob(os.path.join(args.run_dir, "results-*.jsonl")))
     lines = {path: [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()] for path in files}
-    rotations = defaultdict(set)
+    rotations, failed = defaultdict(set), set()
     for results in lines.values():
         for r in results:
             rotations[r["map_seed"]].add(r["rotation"])
-    complete = {seed for seed, done in rotations.items() if done == {0, 1, 2, 3}}
+            # A game that ended at a failure (its result record names it) leaves its map to be played again
+            if any(seat.get("failures") for seat in (r.get("result") or {}).get("seats", [])):
+                failed.add(r["map_seed"])
+    complete = {seed for seed, done in rotations.items() if done == {0, 1, 2, 3} and seed not in failed}
     if args.redo_lost:
         # A map where an agent's copy lost the game (it then played the first legal move) is played again
         for path in glob.glob(os.path.join(args.run_dir, "agent-*.log")):
