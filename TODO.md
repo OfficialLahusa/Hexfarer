@@ -70,6 +70,7 @@
 	- Nebenbei: alte v1-State-Matrizen löschen (Agents/Training/dataset noch ~19 GB, nur states.npy/1609/1610 sind nicht rekonstruierbar)
 - Weg zum starken Agent, nach Hebel sortiert
 	- 1. Messen: Catanatron- und JSettlers-Bridge stehen (5k gegen 3x AB:2 78,7 %, fair gegen 3 smarte JSettlers-Robots 81,0 %, bei gleicher Rechenzeit 50,7 %, s. Bridges), Leaderboard offen
+		- Als Nächstes: Handel bei JSettlers (bisher NT, kein Handel für alle): Angebote auf JSettlers' Handelsnachrichten abbilden (dort handelt die erste Annahme sofort, keine Partnerwahl), Antworten außerhalb des eigenen Zugs, Hexfarers Angebote an => vergleichbar mit dem besten veröffentlichten 1v3 (Rubin et al. 58,2 % mit Handel, 41,3 % ohne); smarte Robots vermutlich erst mit Handel stärker als fast
 	- 2. max^n: erledigt (~+70 Elo), Explorationskonstante egal; offen: Paranoid testen, Gegnerzüge nach Policy-Prior
 	- 3. GPU-Inference: erledigt (DirectML 566k States/s, MCTS ~320k Iterationen/s, Self-Play ~445k über BatchingEvaluator, nur mit Server-GC), CUDA auf dem Server; jetzt bremst die Net-Auswertung
 		- FP16 (export_onnx.py --fp16): Ausgaben wie FP32 (Präzisions-Set identisch), hilft nur, wo die GPU begrenzt: Server-Self-Play +17% (382k => 448k, dann CPU-gebunden), Desktop (DirectML) unverändert => auf CUDA FP16 für Self-Play, Reanalyse und Duelle (beide Seiten gleich), FP32 bleibt Master
