@@ -32,6 +32,9 @@ namespace Client
         // the network), and whether the seats are shuffled
         private readonly SeatKind[] _menuLocalSeats;
         private readonly SeatKind[] _menuHostSeats;
+        // The Open Seat Agents picked for the seats of each page
+        private readonly string?[] _menuLocalAgents = new string?[PLAYER_COUNT];
+        private readonly string?[] _menuHostAgents = new string?[PLAYER_COUNT];
         private bool _menuRandomSeats = true;
 
         private const float MenuWidth = 520, MenuLabelX = 28, MenuFieldX = 230, MenuFieldWidth = 262, MenuSeatRow = 44;
@@ -90,16 +93,26 @@ namespace Client
         /// <summary>
         /// The configured seats, shuffled if asked (otherwise as listed: seat 1 starts)
         /// </summary>
-        private SeatKind[] MenuSeats(SeatKind[] configured) =>
-            _menuRandomSeats ? configured.OrderBy(_ => Random.Shared.Next()).ToArray() : (SeatKind[])configured.Clone();
+        private (SeatKind[] Seats, string?[] Agents) MenuSeats(SeatKind[] configured, string?[] agents)
+        {
+            // A seat's Open Seat Agent moves with it
+            int[] order = Enumerable.Range(0, configured.Length).ToArray();
+            if (_menuRandomSeats) order = order.OrderBy(_ => Random.Shared.Next()).ToArray();
+            return (order.Select(i => configured[i]).ToArray(), order.Select(i => agents[i]).ToArray());
+        }
 
         /// <summary>
         /// A new game in this process, hosted for others if asked; a server joined before is left, an old hosting stopped
         /// </summary>
-        private void StartGameFromMenu(SeatKind[] seats, bool host)
+        private void StartGameFromMenu((SeatKind[] Seats, string?[] Agents) picked, bool host) => StartGameFromMenu(picked.Seats, host, picked.Agents);
+
+        private void StartGameFromMenu(SeatKind[] seats, bool host, string?[]? agents = null)
         {
             if (_sim is RemoteSimulation) Disconnect();
             StopHosting();
+            // The seats' Open Seat Agents first, so the new game starts them
+            Array.Copy(agents ?? new string?[PLAYER_COUNT], _seatAgents, PLAYER_COUNT);
+            Send(new ConfigureAgents(AgentSettingsFromTools));
             _menuOpen = false;
             _menuIsStartScreen = false;
             _playbackBeforeMenu = null;
@@ -176,21 +189,21 @@ namespace Client
             int humans = _menuLocalSeats.Count(kind => kind == SeatKind.Human);
             MenuHeader(dl, min, "Play on this computer", humans > 1 ? "The humans take turns; a curtain hides the hands." : "A human or a bot on each seat.");
 
-            DrawMenuSeats(dl, min, 92, "menulocalseat", _menuLocalSeats);
+            DrawMenuSeats(dl, min, 92, "menulocalseat", _menuLocalSeats, _menuLocalAgents);
 
             DrawToggle(dl, "menurandomseats", min + new Vector2(MenuLabelX, 278), "Shuffle the seats (otherwise seat 1 starts)", ref _menuRandomSeats);
             DrawToggle(dl, "menufreetrade", min + new Vector2(MenuLabelX, 322), "Trading between players", ref _freeTrade);
             DrawToggle(dl, "menudesert", min + new Vector2(MenuLabelX, 366), "Desert in the center", ref _centerDesert);
             DrawToggle(dl, "menutracked", min + new Vector2(MenuLabelX, 410), "Show the confirmed cards of the other hands", ref _showTrackedCards);
 
-            if (MenuButtons(dl, min, 464, "Start")) StartGameFromMenu(MenuSeats(_menuLocalSeats), host: false);
+            if (MenuButtons(dl, min, 464, "Start")) StartGameFromMenu(MenuSeats(_menuLocalSeats, _menuLocalAgents), host: false);
         }
 
         private void DrawMenuHost(ImDrawListPtr dl, Vector2 min)
         {
             MenuHeader(dl, min, "Host a game", "Others join over the network; you play a seat and run the match.");
 
-            DrawMenuSeats(dl, min, 92, "menuhostseat", _menuHostSeats);
+            DrawMenuSeats(dl, min, 92, "menuhostseat", _menuHostSeats, _menuHostAgents);
 
             MenuLabel(dl, min, 280, "Port");
             ImGui.SetCursorScreenPos(min + new Vector2(MenuFieldX, 276));
@@ -209,7 +222,7 @@ namespace Client
                 : "Each human seat gets a token to join with, shown after the start.";
             Theme.DrawText(dl, Theme.Regular15, min + new Vector2(MenuLabelX, 544), _hostOnNetwork && _hostOpenToSpectators ? new Color(255, 200, 90) : Theme.TextMuted, note);
 
-            if (MenuButtons(dl, min, 592, "Start hosting")) StartGameFromMenu(MenuSeats(_menuHostSeats), host: true);
+            if (MenuButtons(dl, min, 592, "Start hosting")) StartGameFromMenu(MenuSeats(_menuHostSeats, _menuHostAgents), host: true);
         }
 
         private void DrawMenuJoin(ImDrawListPtr dl, Vector2 min)
@@ -293,11 +306,11 @@ namespace Client
         }
 
         /// <summary>
-        /// Who plays each seat: a human or an agent from the ordered list (agents that need the value net only with it)
+        /// Who plays each seat: a human or an agent from the ordered list (agents that need the value net only with it), or an
+        /// Open Seat Agent of settings.json
         /// </summary>
-        private void DrawMenuSeats(ImDrawListPtr dl, Vector2 min, float y, string id, SeatKind[] seats)
+        private void DrawMenuSeats(ImDrawListPtr dl, Vector2 min, float y, string id, SeatKind[] seats, string?[] agents)
         {
-            string[] names = Simulation.Seats.Ordered.Select(Simulation.Seats.Name).ToArray();
             for (int seat = 0; seat < PLAYER_COUNT; seat++)
             {
                 Vector2 pos = min + new Vector2(MenuLabelX, y + seat * MenuSeatRow);
@@ -306,12 +319,13 @@ namespace Client
                 Theme.DrawText(dl, Theme.SemiBold15, pos + new Vector2(38, 6), Theme.TextSoft, Theme.PlayerName(seat));
 
                 ImGui.SetCursorScreenPos(min + new Vector2(MenuFieldX, y + seat * MenuSeatRow + 2));
-                ImGui.SetNextItemWidth(MenuFieldWidth);
-                int kind = Array.IndexOf(Simulation.Seats.Ordered, seats[seat]);
-                if (ImGui.Combo($"##{id}{seat}", ref kind, names, names.Length))
+                SeatKind kind = seats[seat];
+                string? agent = agents[seat];
+                if (SeatPicker($"##{id}{seat}", MenuFieldWidth, true, ref kind, ref agent)
+                    && (kind == SeatKind.Human || !Simulation.Seats.NeedsValueNet(kind) || _valueNetAvailable))
                 {
-                    SeatKind chosen = Simulation.Seats.Ordered[kind];
-                    if (chosen == SeatKind.Human || !Simulation.Seats.NeedsValueNet(chosen) || _valueNetAvailable) seats[seat] = chosen;
+                    seats[seat] = kind;
+                    agents[seat] = agent;
                 }
             }
         }

@@ -357,6 +357,7 @@ namespace Tests
 
             MatchEvent[] simple = [new UndoneEvent(), new SeatsEvent(AllHuman), new PlaybackEvent(new PlaybackState(true, true, 1.5f)),
                 new ThinkingEvent(2, true), new ErrorEvent("no"), new ClosedEvent("bye"), new AgentsEvent(new AgentSettings(2, 0, Agents.MCTS.OpponentModel.Paranoid)),
+                new AgentsEvent(AgentSettings.Default with { OpenSeatAgents = ["Catanatron AB:2", null, null, "Hexfarer"] }), new SeatsEvent([SeatKind.OpenSeatAgent, SeatKind.Human, SeatKind.Human, SeatKind.OpenSeatAgent]),
                 new WelcomeEvent(new SessionInfo("s1", "Ann", Role.Player, 2, "1.2.3.4")), new SessionsEvent([new SessionInfo("s1", "Ann", Role.Player, 2)])];
             foreach (MatchEvent e in simple)
             {
@@ -364,6 +365,10 @@ namespace Tests
                 Assert.Equal(Protocol.Serialize(e), Protocol.Serialize(back));
                 Assert.Equal(e.GetType(), back.GetType());
             }
+            // The seats' Open Seat Agents by name, kept through the protocol
+            AgentsEvent named = Assert.IsType<AgentsEvent>(Protocol.DeserializeEvent(Protocol.Serialize(new AgentsEvent(AgentSettings.Default with { OpenSeatAgents = ["A", null, null, "B"] }))));
+            Assert.Equal(["A", null, null, "B"], named.Settings.OpenSeatAgents!);
+            Assert.Null(Assert.IsType<AgentsEvent>(Protocol.DeserializeEvent(Protocol.Serialize(new AgentsEvent(AgentSettings.Default)))).Settings.OpenSeatAgents);
 
             // Commands
             Action move = RandomMove(match, random);
@@ -374,7 +379,8 @@ namespace Tests
             Assert.Equal(load.State, loadBack.State);
             Assert.Equal(load.Played.Count, loadBack.Played.Count);
             Command[] commands = [new UndoCommand(), new RedoCommand(), new NewGame(AllHuman, true, true), new SetSeat(3, SeatKind.MctsHard),
-                new SetPlayback(new PlaybackState(false, true, 0.2f)), new StepCommand(), new ConfigureAgents(AgentSettings.Default), new KickSession("s9"), new ApplyEdit(edit)];
+                new SetPlayback(new PlaybackState(false, true, 0.2f)), new StepCommand(), new ConfigureAgents(AgentSettings.Default), new KickSession("s9"), new ApplyEdit(edit),
+                new SetSeat(1, SeatKind.OpenSeatAgent), new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = [null, "Catanatron AB:2", null, null] })];
             foreach (Command c in commands)
                 Assert.Equal(Protocol.Serialize(c), Protocol.Serialize(Protocol.DeserializeCommand(Protocol.Serialize(c))));
         }

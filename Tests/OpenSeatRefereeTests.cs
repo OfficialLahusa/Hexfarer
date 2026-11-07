@@ -405,6 +405,88 @@ namespace Tests
         }
 
         [Fact]
+        public void AResetStartsTheAgentsGameAgainFromTheNewPosition()
+        {
+            // An undo or an edit in the simulator: the agent's game ends, cut short, and a new one starts where the game is now
+            ScriptedAgent agent = new(needs: "truth");
+            TestUtil.Seed(15);
+            GameState state = TestUtil.NewGame();
+            using OpenSeatAgentProxy proxy = new(0, state, agent, "g15");
+            GameState elsewhere = new(state);
+            Agent[] others = TestUtil.RandomAgents();
+            for (int i = 0; i < 30; i++) others[TestUtil.ActingPlayer(elsewhere)].Act(elsewhere).Apply(elsewhere);
+            proxy.ResetToState(elsewhere);
+            Assert.Equal(["hello", "before", "after", "before"], agent.Received.Select(m => m["type"]!.GetValue<string>()));
+            Assert.True(agent.Received[2]["truncated"]!.GetValue<bool>());
+            JsonNode before = agent.Received[3];
+            Assert.NotEqual("g15", before["game_id"]!.GetValue<string>());
+            Assert.Equal(OspCodec.Canonical(new OspCodec(state.Board).State(elsewhere)), OspCodec.Canonical(before["state"]));
+            // The new game counts its moves from 0
+            if (TestUtil.ActingPlayer(elsewhere) == 0)
+            {
+                proxy.Act(elsewhere);
+                Assert.Equal(0, Int(agent.OfType("decide").Last()["n"]));
+                Assert.Equal(before["game_id"]!.GetValue<string>(), agent.OfType("decide").Last()["game_id"]!.GetValue<string>());
+            }
+        }
+
+        /// <summary>
+        /// An agent that answers only when told: its answers wait in a queue, and Receive blocks until one is there or the
+        /// wait is cancelled
+        /// </summary>
+        private sealed class SlowAgent : IOpenSeatChannel
+        {
+            public readonly List<JsonNode> Received = [];
+            private readonly System.Collections.Concurrent.BlockingCollection<JsonNode> _answers = new();
+            public void Send(JsonNode message)
+            {
+                Received.Add(message.DeepClone());
+                if (message["type"]!.GetValue<string>() == "hello")
+                    _answers.Add(new JsonObject { ["type"] = "hello", ["protocol"] = "osp", ["version"] = 1, ["name"] = "slow", ["rulesets"] = new JsonArray("standard"), ["needs"] = "truth" });
+            }
+            // Answers the last decision sent, with its first legal move
+            public void AnswerLast()
+            {
+                JsonNode decide = Received.Last(m => m["type"]!.GetValue<string>() == "decide");
+                _answers.Add(new JsonObject { ["type"] = "decide", ["game_id"] = decide["game_id"]!.DeepClone(), ["n"] = decide["n"]!.DeepClone(), ["action"] = decide["legal"]![0]!.DeepClone() });
+            }
+            public JsonNode Receive(CancellationToken cancellation = default) => _answers.Take(cancellation);
+            public void Dispose() { }
+        }
+
+        [Fact]
+        public void AWaitTheSimulationStopsReturnsAMoveAndTheLateAnswerIsSkipped()
+        {
+            SlowAgent agent = new();
+            TestUtil.Seed(16);
+            GameState state = TestUtil.NewGame();
+            using OpenSeatAgentProxy proxy = new(0, state, agent, "g16");
+            // The simulation stops waiting (a pause, an undo): a legal move comes back, which it throws away
+            using (CancellationTokenSource stop = new())
+            {
+                stop.CancelAfter(200);
+                Action move = proxy.Act(state, stop.Token);
+                Assert.True(move.IsValidFor(state));
+            }
+            // The game goes on (the simulation played a move for the seat) up to the seat's next decision; the agent's answer
+            // to the first one comes late, and the next decision skips it and takes its own
+            Agent[] others = TestUtil.RandomAgents();
+            do
+            {
+                Action played = others[TestUtil.ActingPlayer(state)].Act(state);
+                played.Apply(state);
+                proxy.HandleAction(played);
+            } while (TestUtil.ActingPlayer(state) != 0);
+            agent.AnswerLast();
+            Task<Action> next = Task.Run(() => proxy.Act(state, CancellationToken.None));
+            Assert.True(SpinWait.SpinUntil(() => agent.Received.Count(m => m["type"]!.GetValue<string>() == "decide") == 2, 5000));
+            Assert.False(next.Wait(300), "the late answer of the first decision must not be taken for the second");
+            agent.AnswerLast();
+            Assert.True(next.Wait(5000));
+            Assert.True(next.Result.IsValidFor(state));
+        }
+
+        [Fact]
         public void AnAgentThatDoesntObserveGetsNoSteps()
         {
             ScriptedAgent agent = new(observe: false);

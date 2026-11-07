@@ -1,5 +1,6 @@
 using Agents;
 using Agents.MCTS;
+using Agents.OpenSeat;
 using Common;
 using Common.Actions;
 using Action = Common.Actions.Action;
@@ -16,6 +17,9 @@ namespace Simulation
         private readonly object _lock = new();
         private readonly bool _valueNetAvailable;
         private SeatKind[] _seats;
+        private readonly IReadOnlyList<ExternalAgent> _externalAgents;
+        // Games started for Open Seat Agents, for their game ids
+        private int _agentGames;
         private Agent[] _agents;
         private AgentRunner? _runner;
         private AnalysisRunner? _analysis;
@@ -85,10 +89,15 @@ namespace Simulation
         /// </summary>
         public static bool SeesView(SessionInfo session) => session.Role is Role.Player or Role.Agent && session.Seat != null;
 
-        public Match(GameState state, SeatKind[] seats, bool? valueNetAvailable = null)
+        /// <summary>
+        /// A match of the state with the seats; externalAgents are the Open Seat Agents its seats may pick (from the host's
+        /// settings)
+        /// </summary>
+        public Match(GameState state, SeatKind[] seats, bool? valueNetAvailable = null, IReadOnlyList<ExternalAgent>? externalAgents = null)
         {
             if (seats.Length != state.Players.Length) throw new ArgumentException("One seat kind per player is needed.", nameof(seats));
             _valueNetAvailable = valueNetAvailable ?? Simulation.Seats.ValueNetAvailable;
+            _externalAgents = externalAgents ?? [];
             Record = new GameRecord(state);
             _beliefs = new RecordBeliefs(state, state.Players.Length);
             _seats = (SeatKind[])seats.Clone();
@@ -134,10 +143,18 @@ namespace Simulation
             _analysis.Wake();
         }
 
+        /// <summary>
+        /// The Open Seat Agents the seats may pick
+        /// </summary>
+        public IReadOnlyList<ExternalAgent> ExternalAgents => _externalAgents;
+
         public void Dispose()
         {
             _runner?.Dispose();
             _analysis?.Dispose();
+            // Open Seat Agents are processes: closed with the match
+            lock (_lock)
+                foreach (Agent agent in _agents) Close(agent);
         }
 
         /// <summary>
@@ -333,8 +350,7 @@ namespace Simulation
                             return;
                         }
                         _seats[seat.Seat] = seat.Kind;
-                        _agents[seat.Seat] = Simulation.Seats.CreateAgent(seat.Kind, (sbyte)seat.Seat, Record.State, AgentSettings, _valueNetAvailable);
-                        ResetAgentLocked(_agents[seat.Seat]);
+                        ReplaceAgentLocked(seat.Seat);
                         Publish(new SeatsEvent((SeatKind[])_seats.Clone()));
                         positionChanged = true;
                         break;
@@ -346,7 +362,16 @@ namespace Simulation
                         break;
 
                     case ConfigureAgents configure:
-                        AgentSettings = configure.Settings;
+                        {
+                            // A seat of an Open Seat Agent that picks another one gets it
+                            AgentSettings previous = AgentSettings;
+                            AgentSettings = configure.Settings;
+                            for (int s = 0; s < _seats.Length; s++)
+                                if (_seats[s] == SeatKind.OpenSeatAgent && OpenSeatAgentOf(previous, s) != OpenSeatAgentOf(AgentSettings, s))
+                                {
+                                    ReplaceAgentLocked(s);
+                                }
+                        }
                         foreach (Agent agent in _agents)
                         {
                             if (SearchOf(agent) is MCTSAgent mcts)
@@ -422,8 +447,10 @@ namespace Simulation
 
         private Agent[] CreateAgents()
         {
+            if (_agents != null)
+                foreach (Agent old in _agents) Close(old);
             Agent[] agents = Enumerable.Range(0, _seats.Length)
-                .Select(seat => Simulation.Seats.CreateAgent(_seats[seat], (sbyte)seat, Record.State, AgentSettings, _valueNetAvailable)).ToArray();
+                .Select(CreateAgentLocked).ToArray();
             foreach (Agent agent in agents) ResetAgentLocked(agent);
             return agents;
         }
@@ -434,8 +461,34 @@ namespace Simulation
         private void ResetAgentLocked(Agent agent)
         {
             if (agent is InformationSetMCTSAgent fair) fair.ResetTo(Record.State, _beliefs.For(fair.PlayerIndex));
+            else if (agent is OpenSeatAgentProxy external) external.ResetTo(Record.State, _beliefs.For(external.PlayerIndex));
             else agent.ResetToState(Record.State);
         }
+
+        // The agent of a seat: an Open Seat Agent's process with a game of its own and what its seat knows; why it couldn't
+        // start goes to everyone
+        private Agent CreateAgentLocked(int seat)
+        {
+            Agent agent = Simulation.Seats.CreateAgent(_seats[seat], (sbyte)seat, Record.State, AgentSettings, _valueNetAvailable, _externalAgents,
+                $"match-{++_agentGames}-seat{seat + 1}", _beliefs.For(seat), out string? error);
+            if (error != null) Publish(new ErrorEvent(error));
+            return agent;
+        }
+
+        // A seat's agent goes and a new one takes over the position; an Open Seat Agent starts its game there with what the
+        // seat knows, so it needs no reset (which would end that game and start another)
+        private void ReplaceAgentLocked(int seat)
+        {
+            Close(_agents[seat]);
+            _agents[seat] = CreateAgentLocked(seat);
+            if (_agents[seat] is not OpenSeatAgentProxy) ResetAgentLocked(_agents[seat]);
+        }
+
+        private static string? OpenSeatAgentOf(AgentSettings settings, int seat) =>
+            settings.OpenSeatAgents is { } names && seat < names.Count ? names[seat] : null;
+
+        // An agent that holds a process (an Open Seat Agent) is closed when its seat gets another
+        private static void Close(Agent? agent) => (agent as IDisposable)?.Dispose();
 
         /// <summary>
         /// The MCTS search of an agent, also inside a fair one

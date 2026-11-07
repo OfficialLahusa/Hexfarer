@@ -245,7 +245,15 @@ namespace Client
         /// The agent settings of the developer tools
         /// </summary>
         private AgentSettings AgentSettingsFromTools => new(_selectedMctsBudget == 1 ? _mctsThinkingSeconds : null,
-            _selectedMctsBudget == 2 ? _mctsIterations : 0, (OpponentModel)_selectedOpponentModel);
+            _selectedMctsBudget == 2 ? _mctsIterations : 0, (OpponentModel)_selectedOpponentModel, (string?[])_seatAgents.Clone());
+
+        // The Open Seat Agent each seat of a local game plays, by name (null for the other seats)
+        private readonly string?[] _seatAgents = new string?[PLAYER_COUNT];
+
+        /// <summary>
+        /// The Open Seat Agents a local game can seat, from settings.json
+        /// </summary>
+        private IReadOnlyList<ExternalAgent> ExternalAgents => _settings.OpenSeatAgents;
         #endregion
 
         public void Draw(Time deltaTime)
@@ -325,7 +333,7 @@ namespace Client
         private LocalSimulation StartLocal(GameState state, SeatKind[] seats, IEnumerable<HistoryEntry>? history = null, IEnumerable<HistoryEntry>? redo = null,
             PlaybackState? playback = null)
         {
-            Match match = new Match(state, seats, _valueNetAvailable);
+            Match match = new Match(state, seats, _valueNetAvailable, ExternalAgents);
             if (history != null || redo != null)
             {
                 // Continue a game from another match (e.g. after leaving a server) with its moves
@@ -469,15 +477,45 @@ namespace Client
         /// </summary>
         private void NewGame(bool clearBoard = false) => Send(new Simulation.NewGame(Seats, _centerDesert, clearBoard, State.Settings.FreeTrade, State.Settings.ShowTrackedCards));
 
-        private void SetSeat(int seat, SeatKind kind)
+        private void SetSeat(int seat, SeatKind kind, string? agent = null)
         {
             if (Simulation.Seats.NeedsValueNet(kind) && kind != SeatKind.Human && !_valueNetAvailable)
             {
                 _eventLog.WriteLine(new ColoredStrEntry($"{Simulation.Seats.Name(kind)} needs the value net {StateValueNet.DefaultModelFile}, which is missing", Color.Red));
                 return;
             }
+            if (kind == SeatKind.OpenSeatAgent)
+            {
+                // The seat's agent goes with the agent settings; a seat that plays an Open Seat Agent already gets the new one
+                // from them alone
+                _seatAgents[seat] = agent;
+                Send(new ConfigureAgents(AgentSettingsFromTools));
+                if (Seats[seat] == SeatKind.OpenSeatAgent) return;
+            }
             Send(new Simulation.SetSeat(seat, kind));
         }
+
+        /// <summary>
+        /// A seat picker: the seat kinds, then (for a game in this process) the Open Seat Agents of settings.json; whether
+        /// another was picked, which then is in kind and agent
+        /// </summary>
+        private bool SeatPicker(string id, float width, bool local, ref SeatKind kind, ref string? agent)
+        {
+            IReadOnlyList<SeatChoice> choices = Simulation.Seats.Choices(local ? ExternalAgents : []);
+            string[] labels = choices.Select(c => c.Label).ToArray();
+            int index = Simulation.Seats.ChoiceIndex(choices, kind, agent);
+            ImGui.SetNextItemWidth(width);
+            if (!ImGui.Combo(id, ref index, labels, labels.Length) || index < 0 || index == Simulation.Seats.ChoiceIndex(choices, kind, agent)) return false;
+            kind = choices[index].Kind;
+            agent = choices[index].Agent;
+            return true;
+        }
+
+        /// <summary>
+        /// Who plays a seat, an Open Seat Agent by its name
+        /// </summary>
+        private string SeatName(int seat) =>
+            Seats[seat] == SeatKind.OpenSeatAgent && _sim is not RemoteSimulation && _seatAgents[seat] is string agent ? agent : Simulation.Seats.Name(Seats[seat]);
 
         /// <summary>
         /// How the agents move in each mode: in Play mode the agent seats, in Spectate mode all seats while playback runs, in

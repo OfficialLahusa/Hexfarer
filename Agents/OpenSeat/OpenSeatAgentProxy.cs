@@ -14,18 +14,21 @@ namespace Agents.OpenSeat
     /// what it needs: its seat's view (another seat's hand, development cards and points with victory point cards are
     /// null, another seat's bought card and steal "unknown"), a world drawn from that view by the seat's BeliefTracker for
     /// every decision (marked "drawn"; steps then carry the view), or the true state (steps carry it too). The proxy keeps
-    /// its own copy of the game, following the moves it is told, for the states before them and the seat's beliefs.
+    /// its own copy of the game, following the moves it is told, for the states before them and the seat's beliefs. A
+    /// reset (an undo or an edit in the simulator) ends the agent's game, cut short, and starts a new one from the position.
     /// </summary>
     public sealed class OpenSeatAgentProxy : Agent, IDisposable
     {
         private readonly IOpenSeatChannel _channel;
-        private readonly string _gameId;
+        private readonly string _baseId;
         private readonly OspCodec _codec;
         // The game as the moves told to the proxy left it, and what the seat knows of it (for worlds)
-        private readonly GameState _mirror;
-        private readonly BeliefTracker? _beliefs;
+        private GameState _mirror;
+        private BeliefTracker? _beliefs;
         private readonly Random _random;
-        private int _moves;
+        // The agent's current game (a new one after each reset) and its moves
+        private string _gameId;
+        private int _moves, _resets;
         private bool _closed;
 
         /// <summary>
@@ -34,13 +37,18 @@ namespace Agents.OpenSeat
         public OpenSeatHello Hello { get; }
 
         /// <summary>
-        /// Greets the agent on the channel and starts the game; the channel is the proxy's from now on (disposed with it).
-        /// seed draws the worlds reproducibly.
+        /// The id of the agent's current game (a new one after each reset)
         /// </summary>
-        public OpenSeatAgentProxy(sbyte seat, GameState start, IOpenSeatChannel channel, string gameId, int? seed = null) : base(seat)
+        public string GameId => _gameId;
+
+        /// <summary>
+        /// Greets the agent on the channel and starts the game; the channel is the proxy's from now on (disposed with it).
+        /// seed draws the worlds reproducibly; beliefs are what the seat knows if the game is under way (else it starts).
+        /// </summary>
+        public OpenSeatAgentProxy(sbyte seat, GameState start, IOpenSeatChannel channel, string gameId, int? seed = null, BeliefTracker? beliefs = null) : base(seat)
         {
             _channel = channel;
-            _gameId = gameId;
+            _baseId = _gameId = gameId;
             _codec = new OspCodec(start.Board);
             _mirror = new GameState(start);
             _random = seed is int s ? new Random(s) : new Random();
@@ -56,19 +64,46 @@ namespace Agents.OpenSeat
             // Hexfarer's referee plays the rulebook; its options (no trades between players, other limits) go with the game
             if (!Hello.Rulesets.Contains("standard"))
                 Fail($"The Open Seat Agent {Hello.Name} doesn't play the standard rules (it plays {string.Join(", ", Hello.Rulesets)}).");
-            if (Hello.Needs == OpenSeatNeeds.World) _beliefs = new BeliefTracker(seat, start);
-
-            Send(new JsonObject
-            {
-                ["type"] = "before",
-                ["game_id"] = gameId,
-                ["seat"] = (int)seat,
-                ["players"] = start.Players.Length,
-                ["ruleset"] = OspCodec.Ruleset(start.Settings),
-                ["board"] = _codec.BoardJson(),
-                ["state"] = StateFor(start),
-            });
+            if (Hello.Needs == OpenSeatNeeds.World) _beliefs = beliefs != null ? new BeliefTracker(beliefs) : new BeliefTracker(seat, start);
+            SendBefore(start);
         }
+
+        private void SendBefore(GameState start) => Send(new JsonObject
+        {
+            ["type"] = "before",
+            ["game_id"] = _gameId,
+            ["seat"] = (int)PlayerIndex,
+            ["players"] = start.Players.Length,
+            ["ruleset"] = OspCodec.Ruleset(start.Settings),
+            ["board"] = _codec.BoardJson(),
+            ["state"] = StateFor(start),
+        });
+
+        private void SendAfter() => _channel.Send(new JsonObject
+        {
+            ["type"] = "after",
+            ["game_id"] = _gameId,
+            ["winner"] = _mirror.HasEnded ? _mirror.Turn.PlayerIndex : null,
+            ["vp"] = new JsonArray(_mirror.Players.Select(p => (JsonNode)p.VictoryPoints.Total).ToArray()),
+            ["truncated"] = !_mirror.HasEnded,
+        });
+
+        /// <summary>
+        /// The game jumped (an undo or an edit): the agent's game ends, cut short, and a new one starts from the position,
+        /// with what the seat knows there (beliefs, for an agent that gets worlds)
+        /// </summary>
+        public void ResetTo(GameState state, BeliefTracker? beliefs)
+        {
+            if (_closed) return;
+            SendAfter();
+            _gameId = $"{_baseId}-{++_resets}";
+            _mirror = new GameState(state);
+            _moves = 0;
+            if (Hello.Needs == OpenSeatNeeds.World) _beliefs = beliefs != null ? new BeliefTracker(beliefs) : new BeliefTracker(PlayerIndex, state);
+            SendBefore(state);
+        }
+
+        public override void ResetToState(GameState state) => ResetTo(state, null);
 
         // The state the agent gets for a decision: its view, a world drawn from it, or the truth
         private JsonObject StateFor(GameState state)
@@ -101,7 +136,19 @@ namespace Agents.OpenSeat
                 ["state"] = StateFor(state),
                 ["legal"] = moves,
             });
-            JsonNode answer = _channel.Receive(cancellation);
+            JsonNode answer;
+            try
+            {
+                // An answer to an earlier decision (one the simulation stopped waiting for, or of a game reset since) is skipped
+                do answer = _channel.Receive(cancellation);
+                while (answer["type"]?.ToJsonString() == "\"decide\"" && answer["game_id"]?.ToJsonString() is string id
+                    && (id != $"\"{_gameId}\"" || answer["n"] is JsonNode at && int.TryParse(at.ToJsonString(), out int asked) && asked < _moves));
+            }
+            catch (OperationCanceledException)
+            {
+                // The simulation stopped waiting (a pause, an undo) and throws the move away; the agent's answer comes later
+                return legal[0];
+            }
             if (answer["type"]?.ToJsonString() != "\"decide\"" || answer["action"] is not JsonNode chosen)
                 Fail($"The Open Seat Agent {Hello.Name} answered a decision with {answer.ToJsonString()}.");
             if (answer["n"] is JsonNode n && n.ToJsonString() != _moves.ToString())
@@ -168,14 +215,7 @@ namespace Agents.OpenSeat
             _closed = true;
             try
             {
-                _channel.Send(new JsonObject
-                {
-                    ["type"] = "after",
-                    ["game_id"] = _gameId,
-                    ["winner"] = _mirror.HasEnded ? _mirror.Turn.PlayerIndex : null,
-                    ["vp"] = new JsonArray(_mirror.Players.Select(p => (JsonNode)p.VictoryPoints.Total).ToArray()),
-                    ["truncated"] = !_mirror.HasEnded,
-                });
+                SendAfter();
             }
             catch (OpenSeatException) { }
             finally

@@ -174,6 +174,7 @@ namespace Client
                     else if (scene == "newgame")
                     {
                         Array.Copy(Seats, _newGameSeats, PLAYER_COUNT);
+                        Array.Copy(_seatAgents, _newGameAgents, PLAYER_COUNT);
                         _dialog = Dialog.NewGame;
                     }
                     else if (scene == "save") _openSaveModal = true;
