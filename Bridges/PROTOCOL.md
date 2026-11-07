@@ -153,6 +153,8 @@ the ruleset allows trading between players.
   card type is listed, 0 included. `played` may count only knights (Hexfarer's engine keeps no other).
 - A `world` fills them with a game the referee drew from the seat's view and says so (`"drawn":true`).
 - Under `truth` they are the real ones.
+- `bank` counts each resource as 19 less what the hands hold. A referee without a resource bank (`bank_shortage`
+  `unlimited`) may send counts below 0, once the hands hold more than 19; Hexfarer reads them as an empty bank.
 
 ## Ruleset
 
