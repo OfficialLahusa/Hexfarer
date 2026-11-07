@@ -39,7 +39,7 @@ def play(games, agent_command, logs):
         "jsettlers.gameopt.NT": "t",
         "jsettlers.allow.debug": "N",
     }
-    arguments = ["java", f"-Dosp.agent={agent_command}", f"-Dosp.log={logs}", "-cp", jsettlers.classpath(), "osp.jsettlers.OspServer"]
+    arguments = ["java", f"-Dosp.agent={agent_command}", f"-Dosp.log={logs}", "-Dosp.debug=true", "-cp", jsettlers.classpath(), "osp.jsettlers.OspServer"]
     properties["jsettlers.port"] = str(free_port())
     arguments += [f"-D{name}={value}" for name, value in properties.items()]
     result = subprocess.run(arguments, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=int(os.environ.get("JSETTLERS_ROBOT_TIMEOUT", "900")))
@@ -63,8 +63,15 @@ class RobotTests(unittest.TestCase):
             self.assertGreaterEqual(max(stats["vp"]), 10, stats)
 
     def test_the_server_never_has_to_end_the_robots_turn(self):
-        # JSettlers ends a robot's turn when it stops answering, e.g. after a bought piece it doesn't place
-        self.assertNotIn("force end turn", self.output)
+        # JSettlers ends a robot's turn when it stops answering, e.g. after a bought piece it doesn't place (its own robots
+        # sometimes get stuck too, so only ours count)
+        self.assertNotIn("For robot extrabot", self.output)
+
+    def test_jsettlers_pinger_wakes_the_brain(self):
+        # Once a second JSettlers' pinger sends the brain a message, so it looks at the game again even when no game
+        # message comes (after reading the game while the server changed it, say)
+        pinged = [line for line in self.output.splitlines() if line.startswith("[osp extrabot") and line.endswith("] pinged")]
+        self.assertEqual(2, len(pinged), self.output[-3000:])
 
     def test_the_robot_decides_through_its_agent_without_fallbacks(self):
         for stats in self.stats:

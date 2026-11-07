@@ -4,6 +4,8 @@ import java.io.File;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.TreeSet;
 
 import soc.game.SOCCity;
@@ -13,6 +15,7 @@ import soc.game.SOCPlayingPiece;
 import soc.game.SOCRoad;
 import soc.game.SOCSettlement;
 import soc.message.SOCMessage;
+import soc.message.SOCTimingPing;
 import soc.robot.SOCRobotBrain;
 import soc.robot.SOCRobotClient;
 import soc.util.CappedQueue;
@@ -46,6 +49,9 @@ public class OspRobotBrain extends SOCRobotBrain
     private String actedIn;
     // The second step of a two-step move, the game state its first step was sent in, and how many messages came since
     private List<Object> pending;
+    // The brain's own once-a-second ping, and whether it has woken the brain yet (for the debug line)
+    private Timer pings;
+    private boolean pinged;
     private int pendingFrom, pendingWaits;
     private long n;
     private int decisions, asked, fallbacks;
@@ -79,6 +85,27 @@ public class OspRobotBrain extends SOCRobotBrain
             Thread.currentThread().setName("ospBrain-" + client.getNickname() + "-" + game.getName());
         }
         catch (Throwable th) {}
+        // JSettlers' brains get a TIMINGPING once a second from a pinger that SOCRobotBrain.run starts (its class isn't
+        // public, and this run replaces that one): the brain pings itself, so it looks at the game again even when no game
+        // message comes, e.g. after it read the game while the server changed it
+        final CappedQueue<SOCMessage> queue = gameEventQ;
+        final SOCTimingPing ping = new SOCTimingPing(game.getName());
+        pings = new Timer("ospPing-" + client.getNickname() + "-" + game.getName(), true);
+        pings.scheduleAtFixedRate(new TimerTask()
+        {
+            @Override
+            public void run()
+            {
+                try
+                {
+                    queue.put(ping);
+                }
+                catch (Exception e)
+                {
+                    cancel();
+                }
+            }
+        }, 1000, 1000);
         try
         {
             while (alive)
@@ -91,6 +118,11 @@ public class OspRobotBrain extends SOCRobotBrain
                     client.leaveGame(game, "dismiss msg", false, false);
                     alive = false;
                     break;
+                }
+                if (message.getType() == SOCMessage.TIMINGPING && ! pinged)
+                {
+                    pinged = true;
+                    debug("pinged");
                 }
                 try
                 {
@@ -117,6 +149,7 @@ public class OspRobotBrain extends SOCRobotBrain
                     finish(osp.seatOf(ourPlayerNumber));
                 close();
             }
+            pings.cancel();
             OspServer.BRAINS.remove(this);
         }
     }
