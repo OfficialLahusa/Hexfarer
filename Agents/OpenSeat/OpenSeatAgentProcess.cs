@@ -42,6 +42,11 @@ namespace Agents.OpenSeat
         public bool HasExited => _disposed ? _exited : _process.HasExited;
 
         /// <summary>
+        /// Agents started and not yet closed (stub)
+        /// </summary>
+        public static int Running => -1;
+
+        /// <summary>
         /// Starts the command (its words split as SplitCommandLine does); answers have to come within answerTimeout,
         /// standard error is appended to errorLog if given
         /// </summary>

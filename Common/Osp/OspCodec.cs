@@ -366,6 +366,11 @@ namespace Common.Osp
         }
 
         /// <summary>
+        /// A game in the protocol's state (stub)
+        /// </summary>
+        public GameState BuildState(JsonNode state, JsonArray legal) => throw new NotImplementedException();
+
+        /// <summary>
         /// The open offer between players: who offered what to whom, the answers so far (accept, decline or counter) and
         /// the counteroffers in the offerer's terms; null without one
         /// </summary>

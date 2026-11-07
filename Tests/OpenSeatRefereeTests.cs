@@ -54,8 +54,9 @@ namespace Tests
                 for (int seat = 0; seat < 4; seat++)
                 {
                     JsonObject view = codec.View(state, seat);
-                    // Everything public is as in the full state
-                    foreach (string field in new[] { "prompt", "current", "free_roads", "robber", "buildings", "bank", "offer" })
+                    // Everything public is as in the full state, whose turn it is too
+                    Assert.Equal(state.Turn.PlayerIndex, Int(truth["on_turn"]));
+                    foreach (string field in new[] { "prompt", "current", "on_turn", "free_roads", "robber", "buildings", "bank", "offer" })
                         Assert.Equal(OspCodec.Canonical(truth[field]), OspCodec.Canonical(view[field]));
                     for (int other = 0; other < 4; other++)
                     {
@@ -418,11 +419,15 @@ namespace Tests
         /// <summary>
         /// Hexfarer's Open Seat Agent (SeatAgent) in the same process, answering through the channel
         /// </summary>
-        private sealed class InProcessAgent(SeatAgent agent) : IOpenSeatChannel
+        private sealed class InProcessAgent(SeatAgent agent, bool dropSteps = false) : IOpenSeatChannel
         {
             private readonly Queue<JsonNode> _answers = new();
-            // Through text both ways, as over a process's streams
-            public void Send(JsonNode message) { if (agent.Handle(JsonNode.Parse(message.ToJsonString())!) is JsonNode answer) _answers.Enqueue(JsonNode.Parse(answer.ToJsonString())!); }
+            // Through text both ways, as over a process's streams; without the steps if asked
+            public void Send(JsonNode message)
+            {
+                if (dropSteps && message["type"]!.GetValue<string>() == "step") return;
+                if (agent.Handle(JsonNode.Parse(message.ToJsonString())!) is JsonNode answer) _answers.Enqueue(JsonNode.Parse(answer.ToJsonString())!);
+            }
             public JsonNode Receive(CancellationToken cancellation = default) => _answers.Dequeue();
             public void Dispose() { }
         }
@@ -444,6 +449,40 @@ namespace Tests
             Assert.True(Int(stats["decisions"]) > 20);
         }
         #endregion
+
+        [Fact]
+        public void AGameRebuiltFromTheTrueStateWritesBackAsItAndListsTheSameMoves()
+        {
+            HashSet<string> prompts = [];
+            foreach ((GameState state, _, _) in RandomMoves(games: 3).Where((_, i) => i % 3 == 0))
+            {
+                OspCodec codec = new(state.Board);
+                sbyte acting = TestUtil.ActingPlayer(state);
+                JsonObject truth = codec.State(state);
+                List<string> legal = LegalActionProvider.GetActionsForState(state, acting).Select(a => OspCodec.Canonical(codec.Move(a))).Order().ToList();
+                GameState rebuilt = codec.BuildState(truth, new JsonArray(legal.Select(m => JsonNode.Parse(m)).ToArray()));
+                string at = $"{truth["prompt"]} with seat {acting}";
+                Assert.Equal(OspCodec.Canonical(truth), OspCodec.Canonical(codec.State(rebuilt)));
+                Assert.Equal(legal, LegalActionProvider.GetActionsForState(rebuilt, acting).Select(a => OspCodec.Canonical(codec.Move(a))).Order().ToList());
+                Assert.True(TestUtil.ActingPlayer(rebuilt) == acting, at);
+                prompts.Add(truth["prompt"]!.GetValue<string>());
+            }
+            Assert.Superset(new HashSet<string> { "setup_settlement", "setup_road", "roll", "main", "discard", "move_robber" }, prompts);
+        }
+
+        [Fact]
+        public void HexfarersOpenHandAgentRebuildsItsGameWhenTheRefereeSendsNoSteps()
+        {
+            // As under JSettlers' robot: no steps, only each decision's true state
+            StringWriter log = new();
+            SeatAgent seatAgent = new(new StateValueNet(TinyNet, provider: InferenceProvider.Cpu), iterations: 16, seconds: 0, log, leavesPerBatch: 16);
+            List<GameState> befores = PlayWithProxy(new InProcessAgent(seatAgent, dropSteps: true), seed: 14, seat: 1);
+            Assert.True(befores[^1].HasEnded);
+            JsonNode stats = JsonNode.Parse(log.ToString().Trim().Split('\n')[^1])!;
+            Assert.False(stats["lost"]!.GetValue<bool>(), log.ToString());
+            Assert.Equal(0, Int(stats["fallbacks"]));
+            Assert.True(Int(stats["rebuilds"]) > 5, log.ToString());
+        }
 
         #region Agents as processes
         [Fact]
@@ -478,6 +517,17 @@ namespace Tests
             OpenSeatException error = Assert.Throws<OpenSeatException>(() => OpenSeatHello.Exchange(process));
             Assert.Contains("ended", error.Message);
             Assert.Contains("Usage", error.Message);
+            process.Dispose();
+        }
+
+        [Fact]
+        public void LinesThatArentTheProtocolsAreSkippedAndKeptForTheErrorMessage()
+        {
+            // The help goes to standard output, as text, and the program ends
+            OpenSeatAgentProcess process = OpenSeatAgentProcess.Start($"dotnet \"{Path.Combine(AppContext.BaseDirectory, "OpenSeat.dll")}\" --help", TimeSpan.FromSeconds(60));
+            OpenSeatException error = Assert.Throws<OpenSeatException>(() => OpenSeatHello.Exchange(process));
+            Assert.Contains("ended", error.Message);
+            Assert.Contains("OpenSeat replay", error.Message);
             process.Dispose();
         }
 

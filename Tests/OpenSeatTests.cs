@@ -417,6 +417,19 @@ namespace Tests
         }
 
         [Fact]
+        public void AFinishedGamesPromptIsntCompared()
+        {
+            // Engines name the prompt of a finished game differently (JSettlers "over", Hexfarer the last one): after the
+            // game it doesn't count, while the game goes on it does
+            List<JsonNode> game = Replay.Read(Fixture).Where(m => m["game_id"]!.GetValue<string>() == "catanatron-100").ToList();
+            Replica replica = new(game[0]);
+            JsonNode state = replica.Codec.State(replica.State).DeepClone();
+            state["prompt"] = "over";
+            Assert.Null(replica.FirstDifference(state, "after", goesOn: false));
+            Assert.Equal("state: prompt", replica.FirstDifference(state, "test")!.Value.kind);
+        }
+
+        [Fact]
         public void TheAgentTakesOverAHandAndBankTheRefereeHoldsDifferently()
         {
             // A referee that gave seat 2 an ore from the bank Hexfarer's rules wouldn't have (as Catanatron's bank shortage

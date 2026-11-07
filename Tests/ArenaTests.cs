@@ -1,6 +1,7 @@
 using Agents;
 using Agents.Inference;
 using Agents.MCTS;
+using Agents.OpenSeat;
 using Arena;
 using Common;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -612,6 +613,7 @@ namespace Tests
             Assert.DoesNotContain("failed", text);
             // Without trades between players nobody offers any
             Assert.Contains("no trades between players", text);
+            Assert.Equal(0, OpenSeatAgentProcess.Running);
             Assert.All(text.Split('\n').Where(line => line.Contains(" done): ")), line => Assert.Contains("offers C 0 (0 traded), B 0", line));
             Assert.Equal(1, result.Groups);
             Assert.Contains("all games played: 4 games", text);
@@ -635,6 +637,8 @@ namespace Tests
             Assert.Contains("Open Seat Agent B: hexfarer-ismcts-fair-16it-b16, needs truth", text);
             Assert.DoesNotContain("failed", text);
             Assert.Equal(1, result.Pairs);
+            // Every game's agents were closed after it
+            Assert.Equal(0, OpenSeatAgentProcess.Running);
         }
     }
 }
