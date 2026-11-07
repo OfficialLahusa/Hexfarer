@@ -36,8 +36,9 @@ namespace Agents.MCTS
         public MCTSNode RootNode;
         protected sbyte _ownerIdx;
         protected double _explorationParameter;
-        // Tie breaks, the opponents' random moves and the outcomes of random moves; shared and thread-safe unless the tree
-        // was given a source of its own (one thread selecting at a time, see the constructor)
+        // Tie breaks, the opponents' moves under the Random model and the outcomes of random moves (dice, steals, cards).
+        // Random.Shared (thread-safe, unseeded) unless the tree was given a source of its own: then a seeded search repeats
+        // exactly, but only one thread may select at a time (see the constructor)
         protected Random _random;
 
         /// <summary>
@@ -80,6 +81,9 @@ namespace Agents.MCTS
         public MCTSTree(GameState rootState, sbyte ownerIdx, double explorationParameter, bool normalizeValues = true, OpponentModel model = OpponentModel.Random,
             Random? random = null)
         {
+            // A source of its own only for a tree selected on one thread: System.Random isn't thread-safe, and under draws
+            // from several threads its state can break so that it returns 0 from then on, which biases the search without
+            // any error (MCTSAgent passes one only with selection on one thread)
             _random = random ?? Random.Shared;
             RefuseOpenTrade(rootState);
             RootState = rootState;
@@ -569,6 +573,7 @@ namespace Agents.MCTS
                 // This is to avoid the AI from making intentional bad moves on other players' turns
                 if (!node.OwnerDecides)
                 {
+                    // From the tree's source, so a seeded search picks the same opponent moves
                     return children[_random.Next(children.Length)];
                 }
 
@@ -580,7 +585,9 @@ namespace Agents.MCTS
                 double bestValue = double.NegativeInfinity;
                 foreach (MCTSNode child in children)
                 {
-                    // Slight random jitter to break ties (especially important for unexplored nodes)
+                    // Slight random jitter to break ties (especially important for unexplored nodes, which share one value). It
+                    // decides only between children within 1e-5 of each other, but over a whole search that is enough for two
+                    // unseeded runs to grow different trees
                     double value = child.GetUCT(_explorationParameter, logParentVisits, valueRange) + _random.NextDouble() * 1e-5;
                     if (value > bestValue)
                     {
@@ -606,6 +613,7 @@ namespace Agents.MCTS
             double chosenValue = double.NegativeInfinity;
             foreach (MCTSNode child in children)
             {
+                // The same tie-break jitter, from the tree's source
                 double value = child.GetUCT(_explorationParameter, logVisits, range, valuePlayer, invert) + _random.NextDouble() * 1e-5;
                 if (value > chosenValue)
                 {
@@ -634,6 +642,7 @@ namespace Agents.MCTS
             double chosenValue = double.NegativeInfinity;
             foreach (MCTSNode child in children)
             {
+                // Tie-break jitter as above: unvisited children share firstPlayValue, so it decides which of them goes first
                 double value = child.GetPUCT(_explorationParameter, sqrtVisits, range, valuePlayer, invert, firstPlayValue) + _random.NextDouble() * 1e-5;
                 if (value > chosenValue)
                 {
@@ -649,6 +658,7 @@ namespace Agents.MCTS
             double total = 0;
             foreach (MCTSNode outcome in outcomes)
                 total += outcome.OutcomeProbability;
+            // An outcome by its probability, from the tree's source, so a seeded search draws the same dice, steals and cards
             double remaining = _random.NextDouble() * total;
 
             foreach (MCTSNode outcome in outcomes)

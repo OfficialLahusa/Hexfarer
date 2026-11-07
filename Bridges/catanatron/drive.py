@@ -292,6 +292,8 @@ def play(game, open_seat_agents, write, game_id, codes, budget_ms=DEFAULT_DECIDE
     ruleset = {"preset": "catanatron"}
     write({"type": "before", "game_id": game_id, "seed": game.seed, "players": 4, "ruleset": ruleset, "budget": budget,
            "bots": codes, "board": board, "state": full})
+    # The agents' seed is the map's: the same in a map's four rotations (the agent sits in another seat in each) and again
+    # when the run is repeated, which with the fixed hash seed (see the end) replays a seeded agent's games
     for seat, agent in list(playing.items()):
         agent.send({"type": "before", "game_id": game_id, "seat": seat, "players": 4, "ruleset": ruleset, "budget": budget,
                     "seed": game.seed, "board": board, "state": seat_state(seat, full)})

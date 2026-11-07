@@ -170,15 +170,23 @@ namespace OpenSeat
             _stale = false;
             _lost = !_replica.BoardMatches(before);
             if (_lost) log.WriteLine($"{_gameId}: the board doesn't write back as sent");
-            // The game's seed seeds the agent's randomness, its search included: with an iteration budget and selection on one
-            // thread (--serial) it plays the same game the same way; on all cores or with a time budget the timing decides too
+            // The game's seed seeds the agent's randomness, its search included. SeedCurrentThread covers only what this thread
+            // draws from Utils.Random; the search runs on pool threads and draws from its trees' sources, so it gets the seed
+            // itself (without it the trees draw from Random.Shared, which the seed doesn't reach)
+            // A game replays exactly only where nothing else decides: an iteration budget (a time budget depends on the speed),
+            // selection on one thread (--serial; on all cores the threads' order decides and the search ignores the seed), the
+            // same build, net file and execution provider (their float results can differ in the last digits), and a referee
+            // whose own game repeats (JSettlers rolls its own dice, so there the seed fixes only this side)
+            // The same seed plays the same game the same way, so the variety between games comes from the referee's seeds
             int? gameSeed = before["seed"] is JsonValue seed && seed.TryGetValue(out int value) ? value : null;
             if (gameSeed is int seeded) Utils.Random.SeedCurrentThread(seeded);
-            // A time-based search keeps within the budget's time per decision, with a fifth of it to spare
+            // A time-based search keeps within the budget's time per decision, with a fifth of it to spare; an iteration budget
+            // doesn't watch it, so for a replay the referee has to allow the time
             double budgetSeconds = before["budget"]?["decide_ms"] is JsonValue ms && ms.TryGetValue(out int decideMs) ? decideMs * 0.8 / 1000 : double.MaxValue;
             _agent = new MCTSAgent(_seat, _replica.State, timeLimitSeconds: seconds > 0 ? Math.Min(seconds, budgetSeconds) : seconds, valueNet: net,
                 iterationLimit: iterations, leavesPerBatch: leavesPerBatch, parallelSelection: parallelSelection, seed: gameSeed);
-            // The fair agent's worlds and trees draw from a stream of their own, also from the game's seed
+            // The fair agent's worlds and trees draw from a stream of their own, also from the game's seed: mixed, since two
+            // sources from one seed draw the same numbers (its worlds would follow the MCTS agent's tree seeds)
             _fair = fair ? new InformationSetMCTSAgent(_agent, _replica.State, seed: gameSeed is int fairSeed ? fairSeed ^ 0x2545F491 : null) : null;
             // Offers and counteroffers only where a decision names them (in trades, since their cards can be any)
             _agent.Offers.Enabled = false;

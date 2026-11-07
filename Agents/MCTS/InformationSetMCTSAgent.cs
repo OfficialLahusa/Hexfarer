@@ -25,11 +25,14 @@ namespace Agents.MCTS
         private ISNode? _reusable;
 
         /// <param name="search">The MCTS agent of the same seat, whose net, budget and settings the search uses</param>
-        /// <param name="seed">Seed of the worlds, random if null</param>
+        /// <param name="seed">Seed of the worlds and of each tree (whose iterations draw from it, see ISMCTSTree), random if
+        /// null. Drawn only on the thread that calls Act, so safe with selection on all cores too; the search repeats exactly
+        /// only with an iteration budget and selection on one thread</param>
         public InformationSetMCTSAgent(MCTSAgent search, GameState initialState, int? seed = null)
             : base(search.PlayerIndex)
         {
             _search = search;
+            // Worlds for trades and the trees' seeds: from the seed, or a source of its own seeded at random
             _random = seed is int s ? new Random(s) : new Random();
             _mirror = new GameState(initialState);
             _beliefs = new BeliefTracker(PlayerIndex, initialState);

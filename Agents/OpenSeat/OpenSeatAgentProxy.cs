@@ -91,6 +91,8 @@ namespace Agents.OpenSeat
             _codec = new OSPCodec(start.Board);
             _mirror = new GameState(start);
             _budget = budget ?? OpenSeatBudget.Default;
+            // The agent's seed for this game: the one given (so a run repeats) or a fresh one; the same seed makes a seeded
+            // agent play the same game the same way
             Seed = seed ?? Random.Shared.Next();
             _random = new Random(Seed);
             try

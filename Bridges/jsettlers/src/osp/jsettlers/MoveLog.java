@@ -79,6 +79,8 @@ final class MoveLog
     private final int[] moves, choices;
     // Each seat's line of the result record, and the seed every agent of the game gets; the record once the game ended
     private final SeatRecord[] records;
+    // A fresh seed per game: JSettlers' game draws its first player, dice and development cards from an unseeded Random of
+    // its own, so a game doesn't repeat, and the seed fixes only the agents' side
     final int seed = new java.util.Random().nextInt(Integer.MAX_VALUE);
     private int turns;
     private volatile Map<String, Object> result;

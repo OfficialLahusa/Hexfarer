@@ -78,7 +78,8 @@ namespace Agents.MCTS
         public double RootNoiseConcentration { get; set; } = 10;
 
         /// <summary>
-        /// Random numbers for the root noise
+        /// Random numbers for the root noise. Not drawn from an MCTSAgent's seed: self-play sets its own, and the agents that
+        /// play for a referee or in duels use no noise
         /// </summary>
         public Random NoiseRandom { get; set; } = Random.Shared;
 
