@@ -10,7 +10,8 @@ namespace OpenSeat
     /// writes it (a file, or a directory with a file per game, as JSettlers' server writes them with -Dosp.record, where it
     /// follows the newest game), plays each game through Hexfarer's rules (Relay) and into a match hosted for watchers
     /// (SimulationServer, which the client joins with the Watch role). A game or a part from the referee's state comes in
-    /// as a loaded position, each move with the referee's outcome (RelayMove), so watchers can step back through the part.
+    /// as a loaded position, each move with the referee's outcome (RelayMove) and each known rule difference as an edit, so
+    /// watchers can step back through the part.
     /// </summary>
     internal sealed class LiveRelay : IAsyncDisposable
     {
@@ -21,7 +22,7 @@ namespace OpenSeat
         private readonly SimulationServer _server;
         private readonly CancellationTokenSource _stop = new();
         private readonly Task _feeding;
-        private readonly Relay _relay = new();
+        private readonly Relay _relay = new(patch: true);
         private readonly TextWriter? _log;
 
         public Uri Uri => _server.Uri;
@@ -75,6 +76,10 @@ namespace OpenSeat
                                 Moves++;
                                 _match.Handle(Feeder, new RelayMove(moved.Action));
                                 if (delaySeconds > 0) await Task.Delay(TimeSpan.FromSeconds(delaySeconds), stop);
+                                break;
+                            case Relay.Patched patched:
+                                // An edit in the game's history, so watchers keep the game from its first move
+                                _match.Handle(Feeder, new ApplyEdit(new BoardEdit($"took over the referee's state ({patched.Difference})", patched.Seat, patched.Before, patched.After)));
                                 break;
                             case Relay.Ended ended when ended.Part.Cut == null:
                                 _log?.WriteLine($"{ended.Part.GameId}: ended after {ended.Part.FirstMove + ended.Part.Actions.Count} moves");

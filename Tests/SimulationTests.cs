@@ -380,7 +380,8 @@ namespace Tests
             Assert.Equal(load.Played.Count, loadBack.Played.Count);
             Command[] commands = [new UndoCommand(), new RedoCommand(), new NewGame(AllHuman, true, true), new SetSeat(3, SeatKind.MCTSHard),
                 new SetPlayback(new PlaybackState(false, true, 0.2f)), new StepCommand(), new ConfigureAgents(AgentSettings.Default), new KickSession("s9"), new ApplyEdit(edit),
-                new SetSeat(1, SeatKind.OpenSeatAgent), new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = [null, "Catanatron AB:2", null, null] })];
+                new SetSeat(1, SeatKind.OpenSeatAgent), new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = [null, "Catanatron AB:2", null, null] }),
+                new NewGame([SeatKind.OpenSeatAgent, SeatKind.Human, SeatKind.Human, SeatKind.Human], false, Agents: AgentSettings.Default with { OpenSeatAgents = ["A", null, null, null] })];
             foreach (Command c in commands)
                 Assert.Equal(Protocol.Serialize(c), Protocol.Serialize(Protocol.DeserializeCommand(Protocol.Serialize(c))));
         }

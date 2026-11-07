@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import soc.game.ResourceSet;
 import soc.game.SOCBoard;
 import soc.game.SOCCity;
 import soc.game.SOCDevCardConstants;
@@ -144,6 +145,15 @@ public final class OSPGame
         for (int type : RESOURCES)
             cards.put(RESOURCE_NAMES[type], (long) set.getAmount(type));
         return cards;
+    }
+
+    /** A card set of only the cards there, for moves, from JSettlers' resources */
+    public static Map<String, Object> cardSet(ResourceSet set)
+    {
+        int[] counts = new int[SOCResourceConstants.WOOD + 1];
+        for (int type : RESOURCES)
+            counts[type] = set.getAmount(type);
+        return cardSet(counts);
     }
 
     /** A card set of only the cards there, for moves */

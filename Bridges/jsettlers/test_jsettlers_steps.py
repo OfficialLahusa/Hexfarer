@@ -242,6 +242,12 @@ class StepTests(unittest.TestCase):
             self.assertIsNotNone(messages[-1]["winner"])
             self.assertGreaterEqual(messages[-1]["vp"][messages[-1]["winner"]], 10)
 
+    def test_a_recorded_games_line_counts_the_decisions_with_a_choice(self):
+        lines = [json.loads(line[line.index("{"):]) for line in self.output.splitlines() if '"osp-game"' in line]
+        self.assertEqual(2, len(lines), self.output[-3000:])
+        for line in lines:
+            self.assertTrue(all(0 < choices <= moves for choices, moves in zip(line["choices"], line["moves"])), line)
+
     def test_a_recorded_game_is_the_one_the_agent_saw(self):
         agent = {m["game_id"]: [s["action"] for s in self.games[i] if s["type"] == "step"] for i, m in enumerate(g[1] for g in self.games)}
         for messages in self.recorded:
@@ -268,6 +274,16 @@ class LockTests(unittest.TestCase):
         output = jsettlers.run("osp.jsettlers.LockCheck")
         self.assertIn("waited for the game's monitor", output)
         self.assertIn("waited for the move log", output)
+        self.assertIn("destroyed beside a waiting read", output)
+
+
+@unittest.skipUnless(jsettlers.available(), "needs a JDK and JSettlers' jar in JSETTLERS_JAR")
+class RecordTests(unittest.TestCase):
+    """Server runs recording into the same directory keep each other's records (RecordCheck.java)"""
+
+    def test_a_second_run_keeps_the_first_runs_records(self):
+        jsettlers.build()
+        self.assertIn("both runs' records kept", jsettlers.run("osp.jsettlers.RecordCheck"))
 
 
 if __name__ == "__main__":

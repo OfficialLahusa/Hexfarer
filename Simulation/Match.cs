@@ -32,6 +32,21 @@ namespace Simulation
         private Agent? _busyAgent;
         private bool _busyAgentStale;
 
+        // Stops the Open Seat Agents still starting when the match closes
+        private readonly CancellationTokenSource _closing = new();
+
+        // Agents whose move failed: resuming (or a step) gives their seats new ones
+        private readonly List<Agent> _failedAgents = [];
+
+        /// <summary>
+        /// A seat's Open Seat Agent while its process starts and answers hello, which happens beside the match (not under its
+        /// lock, so commands go on): the seat takes no moves meanwhile
+        /// </summary>
+        private sealed class StartingAgent(sbyte seat) : Agent(seat)
+        {
+            public override Action Act(GameState state) => throw new InvalidOperationException("The seat's agent is still starting.");
+        }
+
         public GameRecord Record { get; }
 
         // What each seat knows along the history, for the views the seats get
@@ -101,7 +116,8 @@ namespace Simulation
             Record = new GameRecord(state);
             _beliefs = new RecordBeliefs(state, state.Players.Length);
             _seats = (SeatKind[])seats.Clone();
-            _agents = CreateAgents();
+            // Locked like every other change of the agents, since an agent may start in the background
+            lock (_lock) _agents = CreateAgents();
         }
 
         public SeatKind[] Seats
@@ -150,6 +166,7 @@ namespace Simulation
 
         public void Dispose()
         {
+            _closing.Cancel();
             _runner?.Dispose();
             _analysis?.Dispose();
             // Open Seat Agents are processes: closed with the match
@@ -330,6 +347,12 @@ namespace Simulation
                             }
                             state.Settings.FreeTrade = newGame.FreeTrade;
                             state.Settings.ShowTrackedCards = newGame.ShowTrackedCards;
+                            // The new game's agent settings first, so its seats start their Open Seat Agents (and only those)
+                            if (newGame.Agents is AgentSettings agents)
+                            {
+                                AgentSettings = agents;
+                                Publish(new AgentsEvent(AgentSettings));
+                            }
                             _seats = (SeatKind[])newGame.Seats.Clone();
                             Record.Reset(state);
                             _beliefs = RecordBeliefs.Of(Record);
@@ -361,6 +384,7 @@ namespace Simulation
 
                     case SetPlayback playback:
                         Playback = playback.Playback;
+                        if (!Playback.Paused) RestartFailedAgentsLocked();
                         Publish(new PlaybackEvent(Playback));
                         positionChanged = true;
                         break;
@@ -390,7 +414,11 @@ namespace Simulation
 
                     case StepCommand:
                         if (Record.Redo.Count > 0) positionChanged = RedoLocked(sender);
-                        else _runner?.RequestStep();
+                        else
+                        {
+                            RestartFailedAgentsLocked();
+                            _runner?.RequestStep();
+                        }
                         break;
 
                     case KickSession or CreateToken or RevokeToken or SetServerOptions:
@@ -469,14 +497,55 @@ namespace Simulation
             else agent.ResetToState(Record.State);
         }
 
-        // The agent of a seat: an Open Seat Agent's process with a game of its own and what its seat knows; why it couldn't
-        // start goes to everyone
+        // The agent of a seat: an Open Seat Agent's process with a game of its own and what its seat knows, started in the
+        // background; why it couldn't start goes to everyone
         private Agent CreateAgentLocked(int seat)
         {
+            string gameId = $"match-{++_agentGames}-seat{seat + 1}";
+            if (_seats[seat] == SeatKind.OpenSeatAgent && OpenSeatAgentOf(AgentSettings, seat) is string name && _externalAgents.Any(a => a.Name == name))
+                return StartInBackgroundLocked(seat, gameId);
             Agent agent = Simulation.Seats.CreateAgent(_seats[seat], (sbyte)seat, Record.State, AgentSettings, _valueNetAvailable, _externalAgents,
-                $"match-{++_agentGames}-seat{seat + 1}", _beliefs.For(seat), out string? error);
+                gameId, _beliefs.For(seat), out string? error);
             if (error != null) Publish(new ErrorEvent(error));
             return agent;
+        }
+
+        // An Open Seat Agent's start (its process and its hello take a while) outside the lock: the seat waits meanwhile and
+        // gets the agent when it is ready, unless the seat got another one or the match closed. Moves played meanwhile make
+        // it start over at the position.
+        private StartingAgent StartInBackgroundLocked(int seat, string gameId)
+        {
+            StartingAgent starting = new((sbyte)seat);
+            (SeatKind kind, AgentSettings settings, int version) = (_seats[seat], AgentSettings, Record.Version);
+            GameState state = new(Record.State);
+            BeliefTracker beliefs = new(_beliefs.For(seat));
+            CancellationToken closing = _closing.Token;
+            Task.Run(() =>
+            {
+                Agent agent;
+                string? error;
+                try
+                {
+                    agent = Simulation.Seats.CreateAgent(kind, (sbyte)seat, state, settings, _valueNetAvailable, _externalAgents, gameId, beliefs, out error, closing);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                lock (_lock)
+                {
+                    if (closing.IsCancellationRequested || !ReferenceEquals(_agents[seat], starting))
+                    {
+                        Close(agent);
+                        return;
+                    }
+                    if (error != null) Publish(new ErrorEvent(error));
+                    _agents[seat] = agent;
+                    if (Record.Version != version || agent is not OpenSeatAgentProxy) ResetAgentLocked(agent);
+                }
+                _runner?.Wake();
+            });
+            return starting;
         }
 
         // A seat's agent goes and a new one takes over the position; an Open Seat Agent starts its game there with what the
@@ -538,7 +607,7 @@ namespace Simulation
         private bool WantsAgentMoveLocked(bool step)
         {
             int acting = ActingPlayerOf(Record.State);
-            if (acting < 0 || _busyAgent != null) return false;
+            if (acting < 0 || _busyAgent != null || _agents[acting] is StartingAgent) return false;
             return step || (!Playback.Paused && (_seats[acting] != SeatKind.Human || Playback.HumanStandIns));
         }
 
@@ -596,6 +665,31 @@ namespace Simulation
         internal void PublishError(string message)
         {
             lock (_lock) Publish(new ErrorEvent(message));
+        }
+
+        /// <summary>
+        /// An agent's move failed (an Open Seat Agent that ended or broke the protocol, say): the match pauses and says why,
+        /// unless the seat got another agent meanwhile. No move is played for it; resuming (or a step) gives the seat a new
+        /// agent, another seat kind replaces it.
+        /// </summary>
+        internal void AgentFailed(Agent agent, string message)
+        {
+            lock (_lock)
+            {
+                if (!ReferenceEquals(_agents[agent.PlayerIndex], agent)) return;
+                _failedAgents.Add(agent);
+                Publish(new ErrorEvent($"The agent of seat {agent.PlayerIndex + 1} failed: {message} The match is paused: resuming starts the seat's agent again."));
+                Playback = Playback with { Paused = true };
+                Publish(new PlaybackEvent(Playback));
+            }
+        }
+
+        // The seats whose agents failed get new ones (an Open Seat Agent starts again at the position)
+        private void RestartFailedAgentsLocked()
+        {
+            foreach (Agent failed in _failedAgents)
+                if (ReferenceEquals(_agents[failed.PlayerIndex], failed)) ReplaceAgentLocked(failed.PlayerIndex);
+            _failedAgents.Clear();
         }
         #endregion
 

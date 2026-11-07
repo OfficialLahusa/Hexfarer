@@ -80,8 +80,7 @@ namespace Simulation
                 }
                 catch (Exception e) when (e is not OperationCanceledException)
                 {
-                    _match.PublishError($"The agent of seat {agent.PlayerIndex + 1} failed: {e.Message}");
-                    _wake.WaitOne(1000);
+                    _match.AgentFailed(agent, e.Message);
                 }
                 finally
                 {

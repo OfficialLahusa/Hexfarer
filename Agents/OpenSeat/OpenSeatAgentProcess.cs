@@ -26,7 +26,8 @@ namespace Agents.OpenSeat
         private readonly BlockingCollection<string?> _lines = new();
         private readonly Queue<string> _tail = new();
         private readonly StreamWriter? _errorLog;
-        private bool _disposed, _exited;
+        // Disposed from another thread than the one waiting for an answer (a seat that gets another agent)
+        private volatile bool _disposed, _exited;
 
         private OpenSeatAgentProcess(Process process, TimeSpan timeout, string command, StreamWriter? errorLog)
         {
@@ -132,8 +133,11 @@ namespace Agents.OpenSeat
             lock (_tail) return _tail.Count == 0 ? "" : $"; it said last:{Environment.NewLine}{string.Join(Environment.NewLine, _tail)}";
         }
 
+        private OpenSeatException Closed() => new($"The Open Seat Agent \"{_command}\" was closed.");
+
         public void Send(JsonNode message)
         {
+            if (_disposed) throw Closed();
             try
             {
                 _process.StandardInput.WriteLine(message.ToJsonString());
@@ -142,6 +146,10 @@ namespace Agents.OpenSeat
             catch (IOException e)
             {
                 throw new OpenSeatException($"The Open Seat Agent \"{_command}\" ended before it read its messages{Ended()}{Said()}", e);
+            }
+            catch (InvalidOperationException) when (_disposed)
+            {
+                throw Closed();
             }
         }
 
@@ -160,9 +168,11 @@ namespace Agents.OpenSeat
                 catch (OperationCanceledException) { throw; }
                 if (line == null)
                 {
-                    // Its output ended: the agent did; wait for the rest of its standard error
-                    _process.WaitForExit(2000);
+                    // Its output ended: the agent did (or was closed meanwhile); wait for the rest of its standard error
+                    try { _process.WaitForExit(2000); }
+                    catch (InvalidOperationException) when (_disposed) { }
                     _lines.Add(null);
+                    if (_disposed) throw Closed();
                     throw new OpenSeatException($"The Open Seat Agent \"{_command}\" ended without an answer{Ended()}{Said()}");
                 }
                 if (line.Trim().Length == 0) continue;
@@ -188,7 +198,11 @@ namespace Agents.OpenSeat
             }
         }
 
-        private string Ended() => _process.HasExited ? $" (exit code {_process.ExitCode})" : "";
+        private string Ended()
+        {
+            try { return _process.HasExited ? $" (exit code {_process.ExitCode})" : ""; }
+            catch (InvalidOperationException) when (_disposed) { return ""; }
+        }
 
         public void Dispose()
         {

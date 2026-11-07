@@ -186,9 +186,10 @@ namespace Tests
         #region The referee's messages (OpenSeatAgentProxy with a scripted agent)
         /// <summary>
         /// An Open Seat Agent in the test: records what the referee sends and answers hello and decide (by default the
-        /// first legal move)
+        /// first legal move); one that ends at a step can't be sent it
         /// </summary>
-        private sealed class ScriptedAgent(string needs = "view", bool observe = true, Func<JsonNode, JsonNode>? choose = null, string[]? rulesets = null) : IOpenSeatChannel
+        private sealed class ScriptedAgent(string needs = "view", bool observe = true, Func<JsonNode, JsonNode>? choose = null, string[]? rulesets = null,
+            bool endsAtStep = false) : IOpenSeatChannel
         {
             public readonly List<JsonNode> Received = [];
             private readonly Queue<JsonNode> _answers = new();
@@ -196,6 +197,7 @@ namespace Tests
 
             public void Send(JsonNode message)
             {
+                if (endsAtStep && message["type"]!.GetValue<string>() == "step") throw new OpenSeatException("The scripted agent ended.");
                 Received.Add(message.DeepClone());
                 switch (message["type"]!.GetValue<string>())
                 {
@@ -316,6 +318,60 @@ namespace Tests
             OpenSeatException error = Assert.Throws<OpenSeatException>(() => PlayWithProxy(agent, seed: 3));
             Assert.Contains("not one of the legal moves", error.Message);
             Assert.Contains(agent.Received, m => m["type"]!.GetValue<string>() == "error");
+        }
+
+        [Fact]
+        public void AClosedAgentIsToldNoMoreMovesAndFailsWhenAskedAgain()
+        {
+            // An answer outside the list closes the agent
+            ScriptedAgent agent = new(choose: _ => JsonNode.Parse("""["build_city",[[9,9],[9,9],[9,9]]]""")!);
+            TestUtil.Seed(3);
+            GameState state = TestUtil.NewGame();
+            using OpenSeatAgentProxy proxy = new(0, state, agent, "g3");
+            Assert.Throws<OpenSeatException>(() => proxy.Act(state));
+            int sent = agent.Received.Count;
+            // The match tells every agent the moves played: the closed one takes them without a word
+            Action move = LegalActionProvider.GetActionsForState(state, 0)[0];
+            move.Apply(state);
+            proxy.HandleAction(move);
+            Assert.Equal(sent, agent.Received.Count);
+            Assert.Contains("closed", Assert.Throws<OpenSeatException>(() => proxy.Act(state)).Message);
+        }
+
+        [Fact]
+        public void AnAgentThatEndedBeforeAStepFailsAtItsNextDecisionWithWhy()
+        {
+            ScriptedAgent agent = new(endsAtStep: true);
+            TestUtil.Seed(3);
+            GameState state = TestUtil.NewGame();
+            using OpenSeatAgentProxy proxy = new(1, state, agent, "g3");
+            // Seat 0's move goes to the agent as a step, which it can't take any more: the move is played all the same
+            Action move = LegalActionProvider.GetActionsForState(state, 0)[0];
+            move.Apply(state);
+            proxy.HandleAction(move);
+            Assert.Contains("scripted agent ended", Assert.Throws<OpenSeatException>(() => proxy.Act(state)).Message);
+        }
+
+        // An agent that answers hello as given
+        private sealed class HelloAgent(JsonObject hello) : IOpenSeatChannel
+        {
+            public void Send(JsonNode message) { }
+            public JsonNode Receive(CancellationToken cancellation = default) => hello.DeepClone();
+            public void Dispose() { }
+        }
+
+        [Theory]
+        [InlineData("""{"observe":"true"}""")]
+        [InlineData("""{"observe":1}""")]
+        [InlineData("""{"rulesets":[1]}""")]
+        [InlineData("""{"rulesets":[null]}""")]
+        [InlineData("""{"rulesets":"standard"}""")]
+        public void AHelloWithAFieldOfTheWrongTypeBreaksTheProtocol(string fields)
+        {
+            JsonObject hello = new() { ["type"] = "hello", ["protocol"] = "osp", ["version"] = 1, ["rulesets"] = new JsonArray("standard") };
+            Assert.Equal("standard", OpenSeatHello.Exchange(new HelloAgent(hello)).Rulesets.Single());
+            foreach ((string key, JsonNode? value) in JsonNode.Parse(fields)!.AsObject()) hello[key] = value?.DeepClone();
+            Assert.Throws<OpenSeatException>(() => OpenSeatHello.Exchange(new HelloAgent(hello)));
         }
 
         [Fact]
@@ -554,6 +610,9 @@ namespace Tests
                     Assert.Equal(OSPCodec.Canonical(truth), OSPCodec.Canonical(codec.State(rebuilt)));
                     Assert.Equal(legal, LegalActionProvider.GetActionsForState(rebuilt, acting).Select(a => OSPCodec.Canonical(codec.Move(a))).Order().ToList());
                     Assert.True(TestUtil.ActingPlayer(rebuilt) == acting, at);
+                    // Who else still discards after a 7, and that the robber moves after them
+                    Assert.True(state.Turn.AwaitedPlayerDiscards.SequenceEqual(rebuilt.Turn.AwaitedPlayerDiscards), at);
+                    Assert.True(state.Turn.MustMoveRobber == rebuilt.Turn.MustMoveRobber, at);
                     prompts.Add(truth["prompt"]!.GetValue<string>());
                 }
                 // The codec's board is as the referee sent it
@@ -569,6 +628,31 @@ namespace Tests
             sbyte acting = TestUtil.ActingPlayer(game);
             JsonArray legal = new(LegalActionProvider.GetActionsForState(game, acting).Select(a => JsonNode.Parse(codec.Move(a).ToJsonString())).ToArray());
             return (codec, JsonNode.Parse(codec.State(game).ToJsonString())!, legal);
+        }
+
+        [Fact]
+        public void ARebuiltDiscardKeepsTheSeatsThatStillDiscardAndTheRobberAfterThem()
+        {
+            // A 7 on seat 1's turn: seat 0 discarded already (16 cards, 8 left), seats 2 and 3 still have to, seat 1 holds 5
+            GameState game = TestUtil.EmptyNormalTurn(1);
+            TestUtil.GiveCards(game, 0, ResourceCardType.Lumber, 8);
+            TestUtil.GiveCards(game, 1, ResourceCardType.Brick, 5);
+            TestUtil.GiveCards(game, 2, ResourceCardType.Wool, 9);
+            TestUtil.GiveCards(game, 3, ResourceCardType.Grain, 8);
+            game.Turn.AwaitedPlayerDiscards = [false, false, true, true];
+            game.Turn.MustMoveRobber = true;
+            (OSPCodec codec, JsonNode state, JsonArray legal) = Message(game);
+            GameState rebuilt = codec.BuildState(state, legal);
+            Assert.Equal(game.Turn.AwaitedPlayerDiscards, rebuilt.Turn.AwaitedPlayerDiscards);
+            // Seat 2 discards, then seat 3, then seat 1 moves the robber
+            foreach (sbyte seat in new sbyte[] { 2, 3 })
+            {
+                Assert.Equal(seat, TestUtil.ActingPlayer(rebuilt));
+                Assert.All(LegalActionProvider.GetActionsForState(rebuilt, seat), a => Assert.IsType<DiscardAction>(a));
+                LegalActionProvider.GetActionsForState(rebuilt, seat)[0].Apply(rebuilt);
+            }
+            Assert.Equal(1, TestUtil.ActingPlayer(rebuilt));
+            Assert.All(LegalActionProvider.GetActionsForState(rebuilt, 1), a => Assert.IsType<RobberAction>(a));
         }
 
         [Fact]
@@ -751,6 +835,23 @@ namespace Tests
             Assert.Contains("ended", error.Message);
             Assert.Contains("bench: plays N random games", error.Message);
             process.Dispose();
+        }
+
+        [Fact]
+        public void AnAgentClosedWhileItIsAwaitedFailsAsTheProtocolSays()
+        {
+            // Hexfarer's agent waits for hello on its input: closing it ends the agent while an answer is awaited
+            OpenSeatAgentProcess process = OpenSeatAgentProcess.Start(AgentCommand(), TimeSpan.FromSeconds(60));
+            Exception? awaited = null;
+            Thread receiver = new(() => { try { process.Receive(); } catch (Exception e) { awaited = e; } });
+            receiver.Start();
+            Thread.Sleep(500);
+            process.Dispose();
+            Assert.True(receiver.Join(30000), "the wait should end with the agent");
+            Assert.IsType<OpenSeatException>(awaited);
+            // And every use after it
+            Assert.Throws<OpenSeatException>(() => process.Receive());
+            Assert.Throws<OpenSeatException>(() => process.Send(new JsonObject { ["type"] = "hello" }));
         }
 
         [Fact]

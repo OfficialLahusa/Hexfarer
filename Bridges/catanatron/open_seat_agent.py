@@ -188,7 +188,8 @@ def rebuild(board, state, legal, ruleset, players=None):
         if seat == on_turn:
             ps("HAS_ROLLED", prompt in ("main", "discard", "move_robber") or (prompt == "road_building" and "roll" not in legal_types))
 
-    s.resource_freqdeck = [state["bank"][RESOURCE_NAMES[r]] for r in RESOURCES]
+    # An unlimited bank (JSettlers') counts below 0 once the hands hold more than 19 of a resource: an empty supply here
+    s.resource_freqdeck = [max(0, state["bank"][RESOURCE_NAMES[r]]) for r in RESOURCES]
     # The deck: the cards nobody holds or played, as many as the referee's bank has (Hexfarer reports only knights played)
     remaining = []
     for card, total in DEVELOPMENT_DECK.items():

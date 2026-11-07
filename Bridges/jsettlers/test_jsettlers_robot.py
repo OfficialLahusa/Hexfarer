@@ -67,6 +67,22 @@ class RobotTests(unittest.TestCase):
             self.assertIsNotNone(stats["winner"], stats)
             self.assertGreaterEqual(stats["vp"][stats["winner"]], 10, stats)
 
+    def test_an_unrecorded_games_line_counts_no_choices(self):
+        # Listing the legal moves for every request would cost the server's one message thread: only a recorded game has them
+        lines = [json.loads(line[line.index("{"):]) for line in self.output.splitlines() if '"osp-game"' in line]
+        self.assertEqual(2, len(lines), self.output[-3000:])
+        for line in lines:
+            self.assertIsNone(line["choices"], line)
+            self.assertTrue(all(moves > 20 for moves in line["moves"]), line)
+
+    def test_each_decision_of_the_robot_is_one_move_of_its_seat(self):
+        # The brain moves again only once the move log counted its last move: a decision more than its seat's moves is a
+        # move sent twice, which JSettlers mostly ignores, so nothing else would show it
+        games = {line["game_id"]: line for line in (json.loads(line[line.index("{"):]) for line in self.output.splitlines() if '"osp-game"' in line)}
+        self.assertEqual(2, len(games), self.output[-3000:])
+        for stats in self.stats:
+            self.assertEqual(games[stats["game_id"]]["moves"][stats["seat"]], stats["decisions"], stats)
+
     def test_the_server_never_has_to_end_the_robots_turn(self):
         # JSettlers ends a robot's turn when it stops answering, e.g. after a bought piece it doesn't place (its own robots
         # sometimes get stuck too, so only ours count)
@@ -77,8 +93,10 @@ class RobotTests(unittest.TestCase):
         # say) leaves the server waiting for a piece the robot can't place, until it ends the robot's turn
         started = [line for line in self.output.splitlines() if re.match(r"\[osp extrabot .*\] state 3[0-2]: ", line)]
         self.assertEqual([], started)
-        # The debug lines are there to check
-        self.assertTrue(any(re.match(r"\[osp extrabot .*\] state 3[0-2], pending ", line) for line in self.output.splitlines()), self.output[-3000:])
+        # The debug lines are there to check, if the robot paid for a piece at all (the test agent builds only 2 to 5
+        # times in two games, now and then not once)
+        if any(re.match(r'\[osp extrabot .*\] state 20: \["build_', line) for line in self.output.splitlines()):
+            self.assertTrue(any(re.match(r"\[osp extrabot .*\] state 3[0-2], pending ", line) for line in self.output.splitlines()), self.output[-3000:])
 
     def test_jsettlers_pinger_wakes_the_brain(self):
         # Once a second JSettlers' pinger sends the brain a message, so it looks at the game again even when no game

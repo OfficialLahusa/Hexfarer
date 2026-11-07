@@ -29,7 +29,9 @@ namespace Agents.OpenSeat
         // The agent's current game (a new one after each reset) and its moves
         private string _gameId;
         private int _moves, _resets;
+        // Closed: the agent failed (why, if it did) or the seat ended
         private bool _closed;
+        private string? _failure;
 
         /// <summary>
         /// The agent's answer to hello
@@ -42,10 +44,17 @@ namespace Agents.OpenSeat
         public string GameId => _gameId;
 
         /// <summary>
-        /// Greets the agent on the channel and starts the game; the channel is the proxy's from now on (disposed with it).
-        /// seed draws the worlds reproducibly; beliefs are what the seat knows if the game is under way (else it starts).
+        /// The channel to the agent, for tests
         /// </summary>
-        public OpenSeatAgentProxy(sbyte seat, GameState start, IOpenSeatChannel channel, string gameId, int? seed = null, BeliefTracker? beliefs = null) : base(seat)
+        internal IOpenSeatChannel Channel => _channel;
+
+        /// <summary>
+        /// Greets the agent on the channel and starts the game; the channel is the proxy's from now on (disposed with it).
+        /// seed draws the worlds reproducibly; beliefs are what the seat knows if the game is under way (else it starts);
+        /// cancellation stops the wait for the agent's hello.
+        /// </summary>
+        public OpenSeatAgentProxy(sbyte seat, GameState start, IOpenSeatChannel channel, string gameId, int? seed = null, BeliefTracker? beliefs = null,
+            CancellationToken cancellation = default) : base(seat)
         {
             _channel = channel;
             _baseId = _gameId = gameId;
@@ -54,7 +63,7 @@ namespace Agents.OpenSeat
             _random = seed is int s ? new Random(s) : new Random();
             try
             {
-                Hello = OpenSeatHello.Exchange(channel);
+                Hello = OpenSeatHello.Exchange(channel, cancellation);
             }
             catch
             {
@@ -164,6 +173,8 @@ namespace Agents.OpenSeat
 
         public override void HandleAction(Action action)
         {
+            // A closed agent gets no more moves; its seat fails when it is asked next
+            if (_closed) return;
             // Called after the move was played, so its history holds its result; the copy is still before it
             if (Hello.Observe)
             {
@@ -180,7 +191,16 @@ namespace Agents.OpenSeat
                 // The state before the move: the truth for an open-hand agent, the view for one that gets worlds
                 if (Hello.Needs == OpenSeatNeeds.Truth) step["state"] = _codec.State(_mirror);
                 else if (Hello.Needs == OpenSeatNeeds.World) step["state"] = _codec.View(_mirror, PlayerIndex);
-                Send(step);
+                try
+                {
+                    Send(step);
+                }
+                catch (OpenSeatException e)
+                {
+                    // The agent ended or broke: the move stands, the seat fails at its next decision with why
+                    Close(e.Message);
+                    return;
+                }
             }
 
             GameState? before = _beliefs != null ? new GameState(_mirror) : null;
@@ -192,17 +212,23 @@ namespace Agents.OpenSeat
 
         private void Send(JsonNode message)
         {
-            if (_closed) throw new OpenSeatException($"The Open Seat Agent {Hello?.Name} was already closed.");
+            if (_closed) throw new OpenSeatException($"The Open Seat Agent {Hello?.Name} was already closed{(_failure != null ? $": {_failure}" : ".")}");
             _channel.Send(message);
         }
 
         // Ends the seat: tells the agent why (if it still listens) and closes it
-        private void Fail(string message)
+        private void Close(string message)
         {
             try { _channel.Send(new JsonObject { ["type"] = "error", ["message"] = message }); }
             catch (OpenSeatException) { }
             _closed = true;
+            _failure = message;
             _channel.Dispose();
+        }
+
+        private void Fail(string message)
+        {
+            Close(message);
             throw new OpenSeatException(message);
         }
 

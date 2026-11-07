@@ -444,8 +444,12 @@ namespace Common.OSP
             // Road Building may come before the roll, its roads then before it too (the legal moves tell); after a robber
             // moved by a knight the state can't tell, it counts as rolled
             t.MustRoll = prompt == "roll" || prompt == "road_building" && listed.Contains("roll");
-            t.MustMoveRobber = prompt == "move_robber";
-            if (prompt == "discard") t.AwaitedPlayerDiscards[current] = true;
+            // After a 7 the seats discard from the lowest up, as the protocol orders them: the current one and every later seat
+            // above the limit still have to, and the robber moves after them
+            t.MustMoveRobber = prompt is "move_robber" or "discard";
+            if (prompt == "discard")
+                for (int seat = current; seat < players.Count; seat++)
+                    t.AwaitedPlayerDiscards[seat] = seat == current || Size(players[seat]!, "hand_size", "hand") > game.Settings.RobberCardLimit;
 
             // Hands, development cards, played knights, pieces, Longest Road and Largest Army; the cards held or played count
             // against the deck (of the played ones the referee may count only knights, as Hexfarer does)

@@ -110,9 +110,8 @@ namespace Client
         {
             if (_sim is RemoteSimulation) Disconnect();
             StopHosting();
-            // The seats' Open Seat Agents first, so the new game starts them
+            // The seats' Open Seat Agents go with the new game, which starts them (only its own, none for the old game's seats)
             Array.Copy(agents ?? new string?[PLAYER_COUNT], _seatAgents, PLAYER_COUNT);
-            Send(new ConfigureAgents(AgentSettingsFromTools));
             _menuOpen = false;
             _menuIsStartScreen = false;
             _playbackBeforeMenu = null;
@@ -121,7 +120,7 @@ namespace Client
             bool human = seats.Contains(SeatKind.Human);
             _mode = human ? InteractionMode.Play : InteractionMode.Spectate;
             ClearHumanInput();
-            Send(new Simulation.NewGame(seats, _centerDesert, FreeTrade: _freeTrade, ShowTrackedCards: _showTrackedCards));
+            Send(new Simulation.NewGame(seats, _centerDesert, FreeTrade: _freeTrade, ShowTrackedCards: _showTrackedCards, Agents: AgentSettingsFromTools));
             Send(new SetPlayback(PlaybackState.Default with { PaceSeconds = _settings.BotPace, HumanStandIns = !human }));
             _endScreenDismissed = false;
             if (host)

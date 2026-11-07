@@ -151,10 +151,10 @@ namespace Simulation
         /// <summary>
         /// The agent of a seat, an Open Seat Agent from the simulation's list among them (a process, its game named gameId,
         /// knowing what beliefs says the seat knows): an unknown one, or one that doesn't start, leaves the seat to the
-        /// Builder and says why in error
+        /// Builder and says why in error. cancellation stops the wait for an agent's hello.
         /// </summary>
         public static Agent CreateAgent(SeatKind kind, sbyte seat, GameState state, AgentSettings settings, bool valueNetAvailable,
-            IReadOnlyList<ExternalAgent> externalAgents, string gameId, BeliefTracker? beliefs, out string? error)
+            IReadOnlyList<ExternalAgent> externalAgents, string gameId, BeliefTracker? beliefs, out string? error, CancellationToken cancellation = default)
         {
             error = null;
             if (kind != SeatKind.OpenSeatAgent) return CreateAgent(kind, seat, state, settings, valueNetAvailable);
@@ -166,7 +166,7 @@ namespace Simulation
             {
                 try
                 {
-                    return new OpenSeatAgentProxy(seat, state, OpenSeatAgentProcess.Start(agent.Command, OpenSeatAgentTimeout), gameId, beliefs: beliefs);
+                    return new OpenSeatAgentProxy(seat, state, OpenSeatAgentProcess.Start(agent.Command, OpenSeatAgentTimeout), gameId, beliefs: beliefs, cancellation: cancellation);
                 }
                 catch (OpenSeatException e)
                 {

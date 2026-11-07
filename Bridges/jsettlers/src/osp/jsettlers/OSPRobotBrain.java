@@ -50,14 +50,15 @@ public class OSPRobotBrain extends SOCRobotBrain
     // The steps the agent has been sent
     private int sent;
     private String agentName = "?";
-    // The true state the last move was chosen in, to wait for the server to take it
-    private String actedIn;
-    // The second step of a two-step move, the game state its first step was sent in, and how many messages came since
+    // Where the move log was (its moves and gaps) when the seat last moved: the next move waits until the log has gone on,
+    // so the server took that one
+    private long actedAt = -1;
+    // The second step of a two-step move, and the game state its first step was sent in
     private List<Object> pending;
     // The brain's own once-a-second ping, and whether it has woken the brain yet (for the debug line)
     private Timer pings;
     private boolean pinged;
-    private int pendingFrom, pendingWaits;
+    private int pendingFrom;
     private int decisions, asked, fallbacks;
     private long thinkingMillis;
 
@@ -166,12 +167,11 @@ public class OSPRobotBrain extends SOCRobotBrain
     {
         int state, acting;
         boolean over, winnerNamed;
-        // The state the next move starts from (in the protocol's order of discards), and it with JSettlers' game state
+        // The state the next move starts from (in the protocol's order of discards)
         Map<String, Object> position;
-        String situation;
         List<Object> legal;
-        // The game's moves so far, and those the agent hasn't been sent
-        long moves;
+        // The game's moves so far, with its gaps (changes no move explains), and those the agent hasn't been sent
+        long moves, progress;
         List<Map<String, Object>> steps;
         MoveLog log;
     }
@@ -197,11 +197,11 @@ public class OSPRobotBrain extends SOCRobotBrain
             seen.winnerNamed = truthGame.getPlayerWithWin() != null;
             seen.state = truthGame.getGameState();
             seen.position = log != null ? log.state() : osp.state(-1);
-            seen.situation = seen.state + "|" + Json.write(seen.position, true);
             seen.acting = osp.acting();
             int seat = osp.seatOf(ourPlayerNumber);
             seen.legal = seen.acting == seat && ! seen.over ? osp.legal(seat) : null;
             seen.moves = log != null ? log.size() : 0;
+            seen.progress = log != null ? log.size() + log.gaps() : 0;
             seen.steps = log != null ? log.stepsFrom(sent) : null;
             return seen;
         });
@@ -219,7 +219,6 @@ public class OSPRobotBrain extends SOCRobotBrain
             return;
         }
         int state = seen.state;
-        String situation = seen.situation;
         int acting = seen.acting;
         List<Object> legal = seen.legal;
 
@@ -229,25 +228,23 @@ public class OSPRobotBrain extends SOCRobotBrain
         {
             if (acting == seat && secondStep(pending, state))
             {
+                // Until the server took the second step the move log stays where it was (the server waits for the piece,
+                // say): no new move until then, which the server would take as a new first step
                 pending = null;
-                // Until the server took the second step the game stays in this situation (it waits for the piece, say): no
-                // new move in it, which the server would take as a new first step
-                actedIn = situation;
                 return;
             }
-            if (state == pendingFrom && ++pendingWaits < 200)
+            if (state == pendingFrom)
                 return;
             // The server went elsewhere (the move needed no second step, or it refused the first): choose anew
             pending = null;
         }
-        if (acting != seat || situation.equals(actedIn) || legal.isEmpty())
+        if (acting != seat || seen.progress == actedAt || legal.isEmpty())
             return;
         decisions++;
         @SuppressWarnings("unchecked")
         List<Object> move = (List<Object>) (legal.size() == 1 ? legal.get(0) : ask(seat, legal, seen));
-        actedIn = situation;
+        actedAt = seen.progress;
         pendingFrom = state;
-        pendingWaits = 0;
         firstStep(move, state);
     }
 

@@ -40,12 +40,12 @@ namespace Agents.OpenSeat
 
         /// <summary>
         /// Greets the agent and reads its answer: it has to answer with the same protocol and version; it needs its seat's
-        /// view and doesn't observe unless it says otherwise
+        /// view and doesn't observe unless it says otherwise. A field of another type than the protocol's breaks it.
         /// </summary>
-        public static OpenSeatHello Exchange(IOpenSeatChannel channel)
+        public static OpenSeatHello Exchange(IOpenSeatChannel channel, CancellationToken cancellation = default)
         {
             channel.Send(new JsonObject { ["type"] = "hello", ["protocol"] = Protocol, ["version"] = Version });
-            JsonNode answer = channel.Receive();
+            JsonNode answer = channel.Receive(cancellation);
             if (Text(answer["type"]) != "hello" || Text(answer["protocol"]) != Protocol || answer["version"]?.ToJsonString() != Version.ToString())
                 throw new OpenSeatException($"The agent didn't answer hello in protocol {Protocol} version {Version}: {answer.ToJsonString()}");
             OpenSeatNeeds needs = Text(answer["needs"]) switch
@@ -55,8 +55,20 @@ namespace Agents.OpenSeat
                 "truth" => OpenSeatNeeds.Truth,
                 string other => throw new OpenSeatException($"The agent needs \"{other}\", which isn't view, world or truth."),
             };
-            string[] rulesets = answer["rulesets"] is JsonArray list ? list.Select(r => r!.GetValue<string>()).ToArray() : [];
-            return new OpenSeatHello(Text(answer["name"]) ?? "unnamed", rulesets, answer["observe"]?.GetValue<bool>() ?? false, needs);
+            OpenSeatException Malformed(string field) => new($"The agent's hello has a {field} of the wrong type: {answer.ToJsonString()}");
+            string[] rulesets = answer["rulesets"] switch
+            {
+                null => [],
+                JsonArray list => list.Select(r => Text(r) ?? throw Malformed("rulesets")).ToArray(),
+                _ => throw Malformed("rulesets"),
+            };
+            bool observe = answer["observe"] switch
+            {
+                null => false,
+                JsonValue value when value.TryGetValue(out bool flag) => flag,
+                _ => throw Malformed("observe"),
+            };
+            return new OpenSeatHello(Text(answer["name"]) ?? "unnamed", rulesets, observe, needs);
         }
 
         private static string? Text(JsonNode? node) => node is JsonValue value && value.TryGetValue(out string? text) ? text : null;

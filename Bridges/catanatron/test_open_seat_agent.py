@@ -69,6 +69,16 @@ class RebuildTests(unittest.TestCase):
             self.assertEqual(sorted(map(canonical, legal)), sorted(map(canonical, moves)), f"legal moves at turn {state['turn']}")
         self.assertTrue({"setup_settlement", "setup_road", "roll", "main", "discard", "move_robber"} <= prompts, prompts)
 
+    def test_a_bank_below_zero_is_an_empty_supply(self):
+        # JSettlers has no resource bank: when the hands hold more than 19 of a resource its count comes out below 0
+        game, board, state, legal = next(p for p in positions(seeds=[3]) if p[2]["prompt"] == "main")
+        state = json.loads(json.dumps(state))
+        state["bank"]["lumber"] = -3
+        rebuilt = open_seat_agent.rebuild(board, state, legal, CATANATRON)
+        supply = dict(zip(open_seat_agent.RESOURCES, rebuilt.state.resource_freqdeck))
+        self.assertEqual(0, supply["WOOD"])
+        self.assertTrue(all(count >= 0 for count in rebuilt.state.resource_freqdeck), rebuilt.state.resource_freqdeck)
+
     def test_the_deck_has_the_referees_size_and_no_card_more_than_remains(self):
         for game, board, state, legal in positions(seeds=[7], every=11):
             rebuilt = open_seat_agent.rebuild(board, state, legal, CATANATRON)

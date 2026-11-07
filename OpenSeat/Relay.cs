@@ -11,9 +11,10 @@ namespace OpenSeat
     /// harness (Replica). Where the rules part (a state Hexfarer holds differently, a move it doesn't allow, a result it
     /// can't reach), the part ends, and a new one starts from the referee's state at its next decision (Replica.Rebuild).
     /// A save file holds where its part ended and the moves since it began, so the client steps back through them to the
-    /// part's start.
+    /// part's start. With patch (for a match, which keeps edits in its history), what the known rule differences change
+    /// (Replica.Patch) is taken over as an edit instead, and the part goes on.
     /// </summary>
-    internal sealed class Relay
+    internal sealed class Relay(bool patch = false)
     {
         /// <summary>
         /// A stretch of a game that Hexfarer's rules followed: its number in the game (from 1), the move it starts at, the
@@ -22,12 +23,14 @@ namespace OpenSeat
         public sealed record Part(string GameId, int Number, int FirstMove, GameState Start, GameState End, List<Action> Actions, string? Cut);
 
         /// <summary>
-        /// What following a message gives: a part starts (from this state), a move was followed (with its outcome), or a
-        /// part ended
+        /// What following a message gives: a part starts (from this state), a move was followed (with its outcome), the
+        /// referee's state was taken over at a decision (the seat that decides, before and after, the difference), or a part
+        /// ended
         /// </summary>
         public abstract record Event;
         public sealed record Started(string GameId, int Number, int FirstMove, GameState State) : Event;
         public sealed record Moved(string GameId, Action Action) : Event;
+        public sealed record Patched(string GameId, int Seat, GameState Before, GameState After, string Difference) : Event;
         public sealed record Ended(Part Part) : Event;
 
         /// <summary>
@@ -78,7 +81,14 @@ namespace OpenSeat
                         string? difference = _broken ?? (_replica.FirstDifference(message["state"]!, $"move {n}") is (string found, _) ? found : null);
                         if (difference == null && _replica.Acting() != Int(message["seat"])) difference = "seat";
                         if (difference == null) break;
-                        if (_started) events.Add(new Ended(new Part(_id, _number, _first, _start, new GameState(_replica.State), _actions, difference)));
+                        GameState end = new(_replica.State);
+                        if (patch && _started && _broken == null && _replica.Patch(message["state"]!) && _replica.Acting() == Int(message["seat"]))
+                        {
+                            Log.Add($"{_id} move {n}: {difference}; taken over from the referee's state");
+                            events.Add(new Patched(_id, Int(message["seat"]), end, new GameState(_replica.State), difference));
+                            break;
+                        }
+                        if (_started) events.Add(new Ended(new Part(_id, _number, _first, _start, end, _actions, difference)));
                         Log.Add($"{_id} move {n}: {difference}; part {_number + 1} starts from the referee's state");
                         _replica.Rebuild(message["state"]!, message["legal"]!.AsArray());
                         (_start, _first, _actions, _broken, _started) = (new GameState(_replica.State), n, [], null, true);

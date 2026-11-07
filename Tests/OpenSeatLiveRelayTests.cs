@@ -2,6 +2,7 @@ using Common;
 using Common.Actions;
 using OpenSeat;
 using Simulation;
+using Common.OSP;
 using System.Text.Json.Nodes;
 using Xunit;
 using Action = Common.Actions.Action;
@@ -53,6 +54,29 @@ namespace Tests
             return state;
         }
 
+        // What a watcher of the live relay ends with: the state, the entries since the last part started (the moves and the
+        // differences taken over as edits) and the parts started
+        private static (GameState End, int Entries, int Parts) Watched(IEnumerable<JsonNode> messages)
+        {
+            Relay relay = new(patch: true);
+            (GameState? end, int entries, int parts) = (null, 0, 0);
+            foreach (JsonNode message in messages)
+                foreach (Relay.Event e in relay.Feed(message))
+                    switch (e)
+                    {
+                        case Relay.Started:
+                            (entries, parts) = (0, parts + 1);
+                            break;
+                        case Relay.Moved or Relay.Patched:
+                            entries++;
+                            break;
+                        case Relay.Ended ended:
+                            end = ended.Part.End;
+                            break;
+                    }
+            return (end!, entries, parts);
+        }
+
         private static string TempPath(string name)
         {
             string directory = Path.Combine(Path.GetTempPath(), "hexfarer-live-" + Guid.NewGuid().ToString("N"));
@@ -95,17 +119,47 @@ namespace Tests
             JsonNode roll = game.First(m => m["type"]!.GetValue<string>() == "step" && Int(m["n"]) >= 40
                 && m["action"]![0]!.GetValue<string>() == "roll" && m["result"]!["dice"]!.AsArray().Sum(d => Int(d)) != 7);
             roll["result"]!["dice"] = new JsonArray(3, 4);
-            List<Relay.Part> parts = new Relay().Run(game.Select(m => JsonNode.Parse(m.ToJsonString())!)).ToList();
-            Assert.True(parts.Count >= 2);
+            (GameState End, int Entries, int Parts) expected = Watched(game.Select(m => JsonNode.Parse(m.ToJsonString())!));
+            Assert.True(expected.Parts >= 2);
             string path = TempPath("game.jsonl");
             Append(path, game);
 
             await using LiveRelay live = await LiveRelay.StartAsync(path, Config(), pollMilliseconds: 20);
             using RemoteSimulation watcher = await Watch(live);
             // The last part's moves only: it starts from the referee's state
-            Assert.True(Pump(watcher, () => watcher.Game.Record.State.Equals(parts[^1].End)), $"watcher at {watcher.Game.Record.History.Count} moves");
-            Assert.Equal(parts[^1].Actions.Count, watcher.Game.Record.History.Count);
-            Assert.Equal(parts.Count, live.Parts);
+            Assert.True(Pump(watcher, () => watcher.Game.Record.State.Equals(expected.End)), $"watcher at {watcher.Game.Record.History.Count} moves");
+            Assert.Equal(expected.Entries, watcher.Game.Record.History.Count);
+            Assert.Equal(expected.Parts, live.Parts);
+        }
+
+        [Fact]
+        public async Task AHandTheRefereeHoldsDifferentlyIsTakenOverAsAnEditAndTheGameGoesOn()
+        {
+            List<JsonNode> game = Games()[0];
+            List<Relay.Part> original = new Relay().Run(game.Select(m => JsonNode.Parse(m.ToJsonString())!)).ToList();
+            Assert.Single(original);
+            // At a roll (not a 7) the referee's state holds a card more in seat 0's small hand, one the bank has; its next
+            // state doesn't
+            int Count(JsonNode? cards, string name) => cards?[name] is JsonNode n ? Int(n) : 0;
+            int at = Enumerable.Range(50, 400).First(n => game.FirstOrDefault(m => At(m, "decide", n)) is JsonNode decide && decide["state"]!["prompt"]!.GetValue<string>() == "roll"
+                && game.FirstOrDefault(m => At(m, "step", n)) is JsonNode roll && roll["result"]!["dice"]!.AsArray().Sum(d => Int(d)) != 7
+                && decide["state"]!["players"]![0]!["hand"]!.AsObject().Sum(c => Int(c.Value)) < 5);
+            JsonNode state = game.First(m => At(m, "decide", at))["state"]!;
+            string card = OSPCodec.ResourceNames.Values.First(name => Count(state["bank"], name) > 0);
+            state["bank"]![card] = Count(state["bank"], card) - 1;
+            JsonNode seat0 = state["players"]![0]!;
+            seat0["hand"]![card] = Count(seat0["hand"], card) + 1;
+            if (seat0["hand_size"] is JsonNode size) seat0["hand_size"] = Int(size) + 1;
+            string path = TempPath("game.jsonl");
+            Append(path, game);
+
+            await using LiveRelay live = await LiveRelay.StartAsync(path, Config(), pollMilliseconds: 20);
+            using RemoteSimulation watcher = await Watch(live);
+            // One game from its first move: the card comes in as an edit at that decision and goes again at the next
+            Assert.True(Pump(watcher, () => watcher.Game.Record.State.Equals(original[0].End)), $"watcher at {watcher.Game.Record.History.Count} entries");
+            Assert.Equal(original[0].Actions.Count + 2, watcher.Game.Record.History.Count);
+            Assert.Equal(2, watcher.Game.Record.History.Count(entry => entry.Edit != null));
+            Assert.Equal(1, live.Parts);
         }
 
         [Fact]
@@ -114,16 +168,16 @@ namespace Tests
             List<List<JsonNode>> games = Games();
             string first = TempPath("a.jsonl"), directory = Path.GetDirectoryName(first)!;
             Append(first, games[0]);
-            List<Relay.Part> a = new Relay().Run(games[0]).ToList(), b = new Relay().Run(games[1]).ToList();
+            (GameState End, int Entries, int Parts) a = Watched(games[0]), b = Watched(games[1]);
 
             await using LiveRelay live = await LiveRelay.StartAsync(directory, Config(), pollMilliseconds: 20);
             using RemoteSimulation watcher = await Watch(live);
-            Assert.True(Pump(watcher, () => watcher.Game.Record.State.Equals(a[^1].End)));
+            Assert.True(Pump(watcher, () => watcher.Game.Record.State.Equals(a.End)));
 
             // A new game appears, as a server writes a file per game
             Append(Path.Combine(directory, "b.jsonl"), games[1]);
-            Assert.True(Pump(watcher, () => watcher.Game.Record.State.Equals(b[^1].End)), $"watcher at {watcher.Game.Record.History.Count} moves");
-            Assert.Equal(b[^1].Actions.Count, watcher.Game.Record.History.Count);
+            Assert.True(Pump(watcher, () => watcher.Game.Record.State.Equals(b.End)), $"watcher at {watcher.Game.Record.History.Count} moves");
+            Assert.Equal(b.Entries, watcher.Game.Record.History.Count);
         }
 
         [Fact]
@@ -135,12 +189,12 @@ namespace Tests
             Append(older, games[0]);
             Thread.Sleep(50);
             Append(Path.Combine(directory, "b.jsonl"), games[1]);
-            List<Relay.Part> b = new Relay().Run(games[1]).ToList();
+            (GameState End, int Entries, int Parts) b = Watched(games[1]);
 
             await using LiveRelay live = await LiveRelay.StartAsync(directory, Config(), pollMilliseconds: 20);
             using RemoteSimulation watcher = await Watch(live);
-            Assert.True(Pump(watcher, () => watcher.Game.Record.State.Equals(b[^1].End)));
-            Assert.Equal(b.Count, live.Parts);
+            Assert.True(Pump(watcher, () => watcher.Game.Record.State.Equals(b.End)));
+            Assert.Equal(b.Parts, live.Parts);
         }
 
         [Fact]
