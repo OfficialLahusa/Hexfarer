@@ -58,6 +58,15 @@ class RecorderTests(unittest.TestCase):
                 self.assertEqual(len(legal), len(set(legal)), f"a move listed twice at {n}")
                 self.assertIn(canonical(step["action"]), set(legal), f"move {n}")
 
+    def test_seats_are_numbered_in_turn_order_from_the_first_player(self):
+        # JSettlers draws who starts; the protocol's seat 0 is always the one who does, and the setup goes round in order
+        for game in self.games:
+            setup = [m["seat"] for m in game if m["type"] == "decide" and m["state"]["prompt"] == "setup_settlement"]
+            self.assertEqual([0, 1, 2, 3, 3, 2, 1, 0], setup)
+            first_roll = next(m for m in game if m["type"] == "decide" and m["state"]["prompt"] == "roll")
+            self.assertEqual(0, first_roll["seat"])
+        self.assertTrue(any(game[0]["jsettlers_first"] != 0 for game in self.games), "every game started with JSettlers' player 0")
+
     def test_a_game_ends_with_a_winner_at_ten_points(self):
         winners = 0
         for game in self.games:

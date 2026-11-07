@@ -26,7 +26,8 @@ import soc.game.SOCSettlement;
  * protocol move where JSettlers takes two steps: a robber move with its victim, a Year of Plenty or Monopoly card with its
  * resources, a bought road, settlement or city with its place. JSettlers' players discard at the same time after a 7;
  * the protocol asks them one after another, from the lowest seat. JSettlers keeps no resource bank: the bank is what the
- * hands leave of 19 cards a resource.
+ * hands leave of 19 cards a resource. JSettlers draws who starts; the protocol's seats are the turn order from the first
+ * player (seat 0 starts), so a JSettlers player number becomes seatOf it.
  */
 public final class OspGame
 {
@@ -46,10 +47,26 @@ public final class OspGame
     public final SOCGame game;
     public final OspBoard board;
 
+    // JSettlers' player number of seat 0
+    public final int first;
+
     public OspGame(SOCGame game)
     {
         this.game = game;
         this.board = new OspBoard(game.getBoard());
+        this.first = game.getFirstPlayer();
+    }
+
+    /** The protocol's seat of a JSettlers player number: its place in the turn order from the first player */
+    public int seatOf(int player)
+    {
+        return (player - first + game.maxPlayers) % game.maxPlayers;
+    }
+
+    /** JSettlers' player number of a protocol seat */
+    public int playerOf(int seat)
+    {
+        return (seat + first) % game.maxPlayers;
     }
 
     public static String resourceName(int type)
@@ -90,9 +107,9 @@ public final class OspGame
             return -1;
         if (game.getGameState() == SOCGame.WAITING_FOR_DISCARDS)
             for (int seat = 0; seat < game.maxPlayers; seat++)
-                if (game.getPlayer(seat).getNeedToDiscard())
+                if (game.getPlayer(playerOf(seat)).getNeedToDiscard())
                     return seat;
-        return game.getCurrentPlayerNumber();
+        return seatOf(game.getCurrentPlayerNumber());
     }
 
     /** The protocol's prompt: what the seat that acts has to do */
@@ -160,7 +177,7 @@ public final class OspGame
         SOCPlayer longest = game.getPlayerWithLongestRoad(), largest = game.getPlayerWithLargestArmy();
         for (int seat = 0; seat < game.maxPlayers; seat++)
         {
-            SOCPlayer player = game.getPlayer(seat);
+            SOCPlayer player = game.getPlayer(playerOf(seat));
             for (SOCPlayingPiece piece : player.getSettlements())
                 settlements.add(Json.array((long) seat, board.intersection(piece.getCoordinates())));
             for (SOCPlayingPiece piece : player.getCities())
@@ -207,8 +224,8 @@ public final class OspGame
         state.put("prompt", prompt());
         // Who acts: a player discarding after a 7 may be another than the one on turn
         int acting = acting();
-        state.put("current", (long) (acting >= 0 ? acting : game.getCurrentPlayerNumber()));
-        state.put("on_turn", (long) game.getCurrentPlayerNumber());
+        state.put("current", (long) (acting >= 0 ? acting : seatOf(game.getCurrentPlayerNumber())));
+        state.put("on_turn", (long) seatOf(game.getCurrentPlayerNumber()));
         state.put("free_roads", (long) freeRoads());
         state.put("robber", board.hex(game.getBoard().getRobberHex()));
         state.put("buildings", Json.object("settlements", settlements, "cities", cities, "roads", roads));
@@ -228,9 +245,10 @@ public final class OspGame
         return sites;
     }
 
-    // The players with a building at the hex who could be robbed there: not the robber, and holding cards
-    private List<Integer> victims(int hex, int robber)
+    // The seats with a building at the hex who could be robbed there: not the robber, and holding cards
+    private List<Integer> victims(int hex, int robberSeat)
     {
+        int robber = playerOf(robberSeat);
         List<Integer> victims = new ArrayList<>();
         SOCBoard b = game.getBoard();
         for (int node : b.getAdjacentNodesToHex(hex))
@@ -239,8 +257,8 @@ public final class OspGame
             if (piece == null)
                 continue;
             int owner = piece.getPlayerNumber();
-            if (owner != robber && ! victims.contains(owner) && game.getPlayer(owner).getResources().getTotal() > 0)
-                victims.add(owner);
+            if (owner != robber && ! victims.contains(seatOf(owner)) && game.getPlayer(owner).getResources().getTotal() > 0)
+                victims.add(seatOf(owner));
         }
         victims.sort(null);
         return victims;
@@ -257,7 +275,8 @@ public final class OspGame
         List<Object> legal = new ArrayList<>();
         if (seat != acting())
             return legal;
-        SOCPlayer player = game.getPlayer(seat);
+        int pn = playerOf(seat);
+        SOCPlayer player = game.getPlayer(pn);
         switch (prompt())
         {
         case "setup_settlement":
@@ -286,7 +305,7 @@ public final class OspGame
             int robber = game.getBoard().getRobberHex();
             for (int hex : game.getBoard().getLandHexCoords())
             {
-                if (hex == robber || ! game.canMoveRobber(seat, hex))
+                if (hex == robber || ! game.canMoveRobber(pn, hex))
                     continue;
                 List<Integer> victims = victims(hex, seat);
                 if (victims.isEmpty())
@@ -297,25 +316,25 @@ public final class OspGame
             break;
         }
         case "roll":
-            if (game.canRollDice(seat))
+            if (game.canRollDice(pn))
                 legal.add(move("roll", null));
-            cardMoves(seat, legal);
+            cardMoves(pn, legal);
             break;
         case "main":
-            if (game.couldBuildRoad(seat))
+            if (game.couldBuildRoad(pn))
                 for (int edge : roadSites(player))
                     legal.add(move("build_road", board.path(edge)));
-            if (game.couldBuildSettlement(seat))
+            if (game.couldBuildSettlement(pn))
                 for (int node : board.nodes())
                     if (player.canPlaceSettlement(node))
                         legal.add(move("build_settlement", board.intersection(node)));
-            if (game.couldBuildCity(seat))
+            if (game.couldBuildCity(pn))
                 for (int node : board.nodes())
                     if (player.isPotentialCity(node))
                         legal.add(move("build_city", board.intersection(node)));
-            if (game.couldBuyDevCard(seat))
+            if (game.couldBuyDevCard(pn))
                 legal.add(move("buy_development", null));
-            cardMoves(seat, legal);
+            cardMoves(pn, legal);
             // Bank trades of one card at the player's best rate: JSettlers' client offers no other, and its bookkeeping
             // of a worse one fails (SOCPlayer.makeBankTrade counts every trade of a resource with its 2:1 harbor at 2:1)
             for (int give : RESOURCES)
@@ -335,7 +354,7 @@ public final class OspGame
                             legal.add(move("bank_trade", Json.object("give", cardSet(gives), "get", cardSet(gets))));
                     }
             }
-            if (game.canEndTurn(seat))
+            if (game.canEndTurn(pn))
                 legal.add(move("end_turn", null));
             break;
         default:
@@ -344,14 +363,14 @@ public final class OspGame
         return legal;
     }
 
-    // The development cards the seat may play now, Year of Plenty and Monopoly with every choice of resources
-    private void cardMoves(int seat, List<Object> legal)
+    // The development cards the player may play now, Year of Plenty and Monopoly with every choice of resources
+    private void cardMoves(int pn, List<Object> legal)
     {
-        if (game.canPlayKnight(seat))
+        if (game.canPlayKnight(pn))
             legal.add(move("play_knight", null));
-        if (game.canPlayRoadBuilding(seat))
+        if (game.canPlayRoadBuilding(pn))
             legal.add(move("play_road_building", null));
-        if (game.canPlayDiscovery(seat))
+        if (game.canPlayDiscovery(pn))
             for (int i = 0; i < RESOURCES.length; i++)
                 for (int j = i; j < RESOURCES.length; j++)
                 {
@@ -359,7 +378,7 @@ public final class OspGame
                     pick.sort(null);
                     legal.add(move("play_year_of_plenty", pick));
                 }
-        if (game.canPlayMonopoly(seat))
+        if (game.canPlayMonopoly(pn))
             for (int type : RESOURCES)
                 legal.add(move("play_monopoly", RESOURCE_NAMES[type]));
     }
@@ -397,7 +416,8 @@ public final class OspGame
     {
         String type = (String) move.get(0);
         Object value = move.size() > 1 ? move.get(1) : null;
-        SOCPlayer player = game.getPlayer(seat);
+        int pn = playerOf(seat);
+        SOCPlayer player = game.getPlayer(pn);
         SOCBoard b = game.getBoard();
         int state = game.getGameState();
         boolean initial = state < SOCGame.ROLL_OR_CARD;
@@ -412,7 +432,7 @@ public final class OspGame
         {
             int node = board.node(value);
             if (! initial)
-                game.buySettlement(seat);
+                game.buySettlement(pn);
             game.putPiece(new SOCSettlement(player, node, b));
             return null;
         }
@@ -420,12 +440,12 @@ public final class OspGame
         {
             int edge = board.edge(value);
             if (! initial && state != SOCGame.PLACING_FREE_ROAD1 && state != SOCGame.PLACING_FREE_ROAD2)
-                game.buyRoad(seat);
+                game.buyRoad(pn);
             game.putPiece(new SOCRoad(player, edge, b));
             return null;
         }
         case "build_city":
-            game.buyCity(seat);
+            game.buyCity(pn);
             game.putPiece(new SOCCity(player, board.node(value), b));
             return null;
         case "buy_development":
@@ -452,21 +472,21 @@ public final class OspGame
             Map<String, Object> result = new LinkedHashMap<>();
             for (int other = 0; other < game.maxPlayers; other++)
                 if (other != seat)
-                    result.put(Integer.toString(other), (long) taken[other]);
+                    result.put(Integer.toString(other), (long) taken[playerOf(other)]);
             return Json.object("taken", result);
         }
         case "move_robber":
         {
             Map<String, Object> robbery = (Map<String, Object>) value;
             int hex = board.hexCoord((List<?>) robbery.get("hex"));
-            SOCMoveRobberResult result = game.moveRobber(seat, hex);
+            SOCMoveRobberResult result = game.moveRobber(pn, hex);
             int loot = result.getLoot();
             if (game.getGameState() == SOCGame.WAITING_FOR_ROB_CHOOSE_PLAYER)
-                loot = game.choosePlayerForRobbery(Json.integer(robbery.get("victim")));
+                loot = game.choosePlayerForRobbery(playerOf(Json.integer(robbery.get("victim"))));
             return Json.object("stolen", loot > 0 ? resourceName(loot) : null);
         }
         case "discard":
-            game.discard(seat, resourceSet(value));
+            game.discard(pn, resourceSet(value));
             return null;
         case "bank_trade":
         {
