@@ -3,7 +3,7 @@ using Agents.Inference;
 using Agents.OpenSeat;
 using Common;
 using Common.Actions;
-using Common.Osp;
+using Common.OSP;
 using OpenSeat;
 using System.Text.Json.Nodes;
 using Action = Common.Actions.Action;
@@ -49,7 +49,7 @@ namespace Tests
         {
             foreach ((GameState state, _, _) in RandomMoves(games: 2).Where((_, i) => i % 25 == 0))
             {
-                OspCodec codec = new(state.Board);
+                OSPCodec codec = new(state.Board);
                 JsonObject truth = codec.State(state);
                 for (int seat = 0; seat < 4; seat++)
                 {
@@ -57,13 +57,13 @@ namespace Tests
                     // Everything public is as in the full state, whose turn it is too
                     Assert.Equal(state.Turn.PlayerIndex, Int(truth["on_turn"]));
                     foreach (string field in new[] { "prompt", "current", "on_turn", "free_roads", "robber", "buildings", "bank", "offer" })
-                        Assert.Equal(OspCodec.Canonical(truth[field]), OspCodec.Canonical(view[field]));
+                        Assert.Equal(OSPCodec.Canonical(truth[field]), OSPCodec.Canonical(view[field]));
                     for (int other = 0; other < 4; other++)
                     {
                         JsonNode theirs = view["players"]![other]!, true_ = truth["players"]![other]!;
                         if (other == seat)
                         {
-                            Assert.Equal(OspCodec.Canonical(true_), OspCodec.Canonical(theirs));
+                            Assert.Equal(OSPCodec.Canonical(true_), OSPCodec.Canonical(theirs));
                             continue;
                         }
                         // Another seat's cards and its points with victory point cards stay hidden, its counts don't
@@ -71,7 +71,7 @@ namespace Tests
                         Assert.Null(theirs["development"]);
                         Assert.Null(theirs["vp"]);
                         foreach (string field in new[] { "seat", "public_vp", "played", "longest_road", "has_longest_road", "has_largest_army", "pieces_left" })
-                            Assert.Equal(OspCodec.Canonical(true_[field]), OspCodec.Canonical(theirs[field]));
+                            Assert.Equal(OSPCodec.Canonical(true_[field]), OSPCodec.Canonical(theirs[field]));
                         Assert.Equal(state.Players[other].ResourceCards.Count(), (uint)Int(theirs["hand_size"]));
                         Assert.Equal(state.Players[other].DevelopmentCards.Count(), (uint)Int(theirs["development_size"]));
                     }
@@ -87,9 +87,9 @@ namespace Tests
             {
                 for (int seat = 0; seat < 4; seat++)
                 {
-                    JsonNode? result = OspCodec.Result(applied, seat);
+                    JsonNode? result = OSPCodec.Result(applied, seat);
                     // As the referee sees it (for open-hand agents): everything
-                    Assert.Equal(OspCodec.Canonical(OspCodec.Result(applied, seat: null)), OspCodec.Canonical(OspCodec.Result(applied, applied switch
+                    Assert.Equal(OSPCodec.Canonical(OSPCodec.Result(applied, seat: null)), OSPCodec.Canonical(OSPCodec.Result(applied, applied switch
                     {
                         RobberAction robber => robber.PlayerIndex,
                         _ => applied.PlayerIndex,
@@ -102,7 +102,7 @@ namespace Tests
                         case BuyDevelopmentCardAction buy:
                             sawCard = true;
                             // Only the buyer sees the card
-                            if (seat == buy.PlayerIndex) Assert.Equal(OspCodec.CardNames[buy.History!.DrawnType], result!["card"]!.GetValue<string>());
+                            if (seat == buy.PlayerIndex) Assert.Equal(OSPCodec.CardNames[buy.History!.DrawnType], result!["card"]!.GetValue<string>());
                             else Assert.Null(result!["card"]);
                             Assert.True(result.AsObject().ContainsKey("card"));
                             break;
@@ -110,7 +110,7 @@ namespace Tests
                             sawSteal = true;
                             // Thief and victim see the card, the others that one was stolen
                             bool party = seat == robber.PlayerIndex || seat == robber.TargetPlayerIndex;
-                            Assert.Equal(party ? OspCodec.ResourceNames[stolen] : "unknown", result!["stolen"]!.GetValue<string>());
+                            Assert.Equal(party ? OSPCodec.ResourceNames[stolen] : "unknown", result!["stolen"]!.GetValue<string>());
                             break;
                         case RobberAction:
                             sawEmptyRobber = true;
@@ -138,12 +138,12 @@ namespace Tests
         public void TheRulesetNamesWhatDiffersFromTheRulebook()
         {
             GameSettings settings = new() { FreeTrade = true };
-            Assert.Equal("""{"preset":"standard"}""", OspCodec.Canonical(OspCodec.Ruleset(settings)));
+            Assert.Equal("""{"preset":"standard"}""", OSPCodec.Canonical(OSPCodec.Ruleset(settings)));
             settings.FreeTrade = false;
-            Assert.Equal("""{"player_trading":"none","preset":"standard"}""", OspCodec.Canonical(OspCodec.Ruleset(settings)));
+            Assert.Equal("""{"player_trading":"none","preset":"standard"}""", OSPCodec.Canonical(OSPCodec.Ruleset(settings)));
             settings.VictoryPoints = 12;
             settings.RobberCardLimit = 9;
-            Assert.Equal("""{"discard_limit":9,"player_trading":"none","preset":"standard","victory_points":12}""", OspCodec.Canonical(OspCodec.Ruleset(settings)));
+            Assert.Equal("""{"discard_limit":9,"player_trading":"none","preset":"standard","victory_points":12}""", OSPCodec.Canonical(OSPCodec.Ruleset(settings)));
         }
 
         [Fact]
@@ -153,7 +153,7 @@ namespace Tests
             state.Settings.FreeTrade = true;
             TestUtil.GiveCards(state, 0, ResourceCardType.Ore, 2);
             TestUtil.GiveCards(state, 2, ResourceCardType.Wool, 1);
-            OspCodec codec = new(state.Board);
+            OSPCodec codec = new(state.Board);
             Assert.Null(codec.State(state)["offer"]);
 
             CardSet<ResourceCardType> ore = new(), wool = new();
@@ -161,25 +161,25 @@ namespace Tests
             wool.Add(ResourceCardType.Wool, 1);
             // Offered to seats 1 and 2 (a bit per seat)
             OfferTradeAction offer = new(0, ore, wool, 0b0110);
-            Assert.Equal("""["offer",{"get":{"wool":1},"give":{"ore":1},"to":[1,2]}]""", OspCodec.Canonical(codec.Move(offer)));
+            Assert.Equal("""["offer",{"get":{"wool":1},"give":{"ore":1},"to":[1,2]}]""", OSPCodec.Canonical(codec.Move(offer)));
             offer.Apply(state);
             JsonNode open = codec.State(state)["offer"]!;
-            Assert.Equal("""{"answers":{},"from":0,"get":{"wool":1},"give":{"ore":1},"to":[1,2]}""", OspCodec.Canonical(open));
+            Assert.Equal("""{"answers":{},"from":0,"get":{"wool":1},"give":{"ore":1},"to":[1,2]}""", OSPCodec.Canonical(open));
 
             RespondToTradeAction no = new(1, false);
-            Assert.Equal("""["respond",{"accept":false}]""", OspCodec.Canonical(codec.Move(no)));
+            Assert.Equal("""["respond",{"accept":false}]""", OSPCodec.Canonical(codec.Move(no)));
             no.Apply(state);
             RespondToTradeAction yes = new(2, true);
-            Assert.Equal("""["respond",{"accept":true}]""", OspCodec.Canonical(codec.Move(yes)));
+            Assert.Equal("""["respond",{"accept":true}]""", OSPCodec.Canonical(codec.Move(yes)));
             yes.Apply(state);
-            Assert.Equal("""{"1":"decline","2":"accept"}""", OspCodec.Canonical(codec.State(state)["offer"]!["answers"]));
+            Assert.Equal("""{"1":"decline","2":"accept"}""", OSPCodec.Canonical(codec.State(state)["offer"]!["answers"]));
 
-            Assert.Equal("""["confirm",{"partner":2}]""", OspCodec.Canonical(codec.Move(new ConfirmTradeAction(0, 2))));
-            Assert.Equal("""["cancel"]""", OspCodec.Canonical(codec.Move(new CancelTradeAction(0))));
+            Assert.Equal("""["confirm",{"partner":2}]""", OSPCodec.Canonical(codec.Move(new ConfirmTradeAction(0, 2))));
+            Assert.Equal("""["cancel"]""", OSPCodec.Canonical(codec.Move(new CancelTradeAction(0))));
             // A counteroffer in the offerer's terms
             CardSet<ResourceCardType> twoOre = new();
             twoOre.Add(ResourceCardType.Ore, 2);
-            Assert.Equal("""["counter",{"get":{"wool":1},"give":{"ore":2}}]""", OspCodec.Canonical(codec.Move(new CounterTradeAction(1, twoOre, wool))));
+            Assert.Equal("""["counter",{"get":{"wool":1},"give":{"ore":2}}]""", OSPCodec.Canonical(codec.Move(new CounterTradeAction(1, twoOre, wool))));
         }
         #endregion
 
@@ -255,15 +255,15 @@ namespace Tests
                 Assert.Equal(OpenSeatNeeds.View, proxy.Hello.Needs);
             }
             Assert.Equal(["hello", "before", "after"], agent.Received.Select(m => m["type"]!.GetValue<string>()));
-            Assert.Equal("""{"protocol":"osp","type":"hello","version":1}""", OspCodec.Canonical(agent.Received[0]));
+            Assert.Equal("""{"protocol":"osp","type":"hello","version":1}""", OSPCodec.Canonical(agent.Received[0]));
             JsonNode before = agent.Received[1];
-            OspCodec codec = new(start.Board);
+            OSPCodec codec = new(start.Board);
             Assert.Equal("g5", before["game_id"]!.GetValue<string>());
             Assert.Equal(2, Int(before["seat"]));
             Assert.Equal(4, Int(before["players"]));
-            Assert.Equal(OspCodec.Canonical(OspCodec.Ruleset(start.Settings)), OspCodec.Canonical(before["ruleset"]));
-            Assert.Equal(OspCodec.Canonical(codec.BoardJson()), OspCodec.Canonical(before["board"]));
-            Assert.Equal(OspCodec.Canonical(codec.View(start, 2)), OspCodec.Canonical(before["state"]));
+            Assert.Equal(OSPCodec.Canonical(OSPCodec.Ruleset(start.Settings)), OSPCodec.Canonical(before["ruleset"]));
+            Assert.Equal(OSPCodec.Canonical(codec.BoardJson()), OSPCodec.Canonical(before["board"]));
+            Assert.Equal(OSPCodec.Canonical(codec.View(start, 2)), OSPCodec.Canonical(before["state"]));
             // A game that never started is cut short
             Assert.True(agent.Received[2]["truncated"]!.GetValue<bool>());
             Assert.True(agent.Disposed);
@@ -279,13 +279,13 @@ namespace Tests
             {
                 JsonArray legal = decide["legal"]!.AsArray();
                 JsonNode move = legal[pick.Next(legal.Count)]!.DeepClone();
-                chosen.Add(OspCodec.Canonical(move));
+                chosen.Add(OSPCodec.Canonical(move));
                 return move;
             });
             List<GameState> befores = PlayWithProxy(agent, seed: 11);
             Assert.True(befores[^1].HasEnded);
 
-            OspCodec codec = new(befores[0].Board);
+            OSPCodec codec = new(befores[0].Board);
             List<JsonNode> decides = agent.OfType("decide").ToList();
             Assert.Equal(chosen.Count, decides.Count);
             Assert.True(decides.Count > 20);
@@ -296,10 +296,10 @@ namespace Tests
                 int n = Int(decides[d]["n"]);
                 GameState state = befores[n];
                 Assert.Equal(0, Int(decides[d]["seat"]));
-                List<string> legal = LegalActionProvider.GetActionsForState(state, 0).Select(a => OspCodec.Canonical(codec.Move(a))).ToList();
-                Assert.Equal(legal, decides[d]["legal"]!.AsArray().Select(OspCodec.Canonical));
+                List<string> legal = LegalActionProvider.GetActionsForState(state, 0).Select(a => OSPCodec.Canonical(codec.Move(a))).ToList();
+                Assert.Equal(legal, decides[d]["legal"]!.AsArray().Select(OSPCodec.Canonical));
                 JsonNode step = ownSteps.Single(s => Int(s["n"]) == n);
-                Assert.Equal(chosen[d], OspCodec.Canonical(step["action"]));
+                Assert.Equal(chosen[d], OSPCodec.Canonical(step["action"]));
             }
             // Every move of the game reached the agent once, in order
             Assert.Equal(Enumerable.Range(0, befores.Count - 1), agent.OfType("step").Select(s => Int(s["n"])));
@@ -358,13 +358,13 @@ namespace Tests
         {
             ScriptedAgent agent = new(needs: "truth");
             List<GameState> befores = PlayWithProxy(agent, seed: 6);
-            OspCodec codec = new(befores[0].Board);
+            OSPCodec codec = new(befores[0].Board);
             List<JsonNode> steps = agent.OfType("step").ToList();
             Assert.Equal(befores.Count - 1, steps.Count);
             foreach (JsonNode step in steps)
-                Assert.Equal(OspCodec.Canonical(codec.State(befores[Int(step["n"])])), OspCodec.Canonical(step["state"]));
+                Assert.Equal(OSPCodec.Canonical(codec.State(befores[Int(step["n"])])), OSPCodec.Canonical(step["state"]));
             foreach (JsonNode decide in agent.OfType("decide"))
-                Assert.Equal(OspCodec.Canonical(codec.State(befores[Int(decide["n"])])), OspCodec.Canonical(decide["state"]));
+                Assert.Equal(OSPCodec.Canonical(codec.State(befores[Int(decide["n"])])), OSPCodec.Canonical(decide["state"]));
             // An open-hand agent sees every result in full: another seat's bought card and steal too
             Assert.Contains(steps, s => Int(s["seat"]) != 0 && s["result"]?["card"] is JsonValue);
             Assert.DoesNotContain(steps, s => s["result"]?["card"] is null && s["action"]![0]!.GetValue<string>() == "buy_development");
@@ -376,7 +376,7 @@ namespace Tests
         {
             ScriptedAgent agent = new(needs: "world");
             List<GameState> befores = PlayWithProxy(agent, seed: 8, seat: 3);
-            OspCodec codec = new(befores[0].Board);
+            OSPCodec codec = new(befores[0].Board);
             bool hidden = false;
             foreach (JsonNode decide in agent.OfType("decide"))
             {
@@ -385,7 +385,7 @@ namespace Tests
                 JsonObject view = codec.View(truth, 3);
                 Assert.True(world["drawn"]!.GetValue<bool>());
                 foreach (string field in new[] { "prompt", "current", "free_roads", "robber", "buildings", "bank", "offer" })
-                    Assert.Equal(OspCodec.Canonical(view[field]), OspCodec.Canonical(world[field]));
+                    Assert.Equal(OSPCodec.Canonical(view[field]), OSPCodec.Canonical(world[field]));
                 for (int p = 0; p < 4; p++)
                 {
                     JsonNode drawn = world["players"]![p]!;
@@ -393,15 +393,15 @@ namespace Tests
                     Assert.NotNull(drawn["hand"]);
                     Assert.Equal(truth.Players[p].ResourceCards.Count(), (uint)drawn["hand"]!.AsObject().Sum(c => Int(c.Value)));
                     Assert.Equal(truth.Players[p].DevelopmentCards.Count(), (uint)drawn["development"]!.AsObject().Sum(c => Int(c.Value)));
-                    if (p == 3) Assert.Equal(OspCodec.Canonical(view["players"]![3]), OspCodec.Canonical(drawn));
-                    else hidden |= OspCodec.Canonical(drawn["hand"]) != OspCodec.Canonical(codec.State(truth)["players"]![p]!["hand"]);
+                    if (p == 3) Assert.Equal(OSPCodec.Canonical(view["players"]![3]), OSPCodec.Canonical(drawn));
+                    else hidden |= OSPCodec.Canonical(drawn["hand"]) != OSPCodec.Canonical(codec.State(truth)["players"]![p]!["hand"]);
                     Assert.True(Int(drawn["vp"]) < truth.Settings.VictoryPoints);
                 }
             }
             Assert.True(hidden, "a world should differ from the truth somewhere over a whole game");
             // Steps under world carry the seat's view, not a world
             foreach (JsonNode step in agent.OfType("step"))
-                Assert.Equal(OspCodec.Canonical(codec.View(befores[Int(step["n"])], 3)), OspCodec.Canonical(step["state"]));
+                Assert.Equal(OSPCodec.Canonical(codec.View(befores[Int(step["n"])], 3)), OSPCodec.Canonical(step["state"]));
         }
 
         [Fact]
@@ -420,7 +420,7 @@ namespace Tests
             Assert.True(agent.Received[2]["truncated"]!.GetValue<bool>());
             JsonNode before = agent.Received[3];
             Assert.NotEqual("g15", before["game_id"]!.GetValue<string>());
-            Assert.Equal(OspCodec.Canonical(new OspCodec(state.Board).State(elsewhere)), OspCodec.Canonical(before["state"]));
+            Assert.Equal(OSPCodec.Canonical(new OSPCodec(state.Board).State(elsewhere)), OSPCodec.Canonical(before["state"]));
             // The new game counts its moves from 0
             if (TestUtil.ActingPlayer(elsewhere) == 0)
             {
@@ -520,7 +520,7 @@ namespace Tests
         public void HexfarersOwnAgentPlaysASeatUnderHexfarersRefereeWithoutTakingAnythingOver(bool fair)
         {
             StringWriter log = new();
-            SeatAgent seatAgent = new(new StateValueNet(TinyNet, provider: InferenceProvider.Cpu), iterations: 16, seconds: 0, log, leavesPerBatch: 16, fair: fair);
+            SeatAgent seatAgent = new(new StateValueNet(TinyNet, provider: InferenceProvider.CPU), iterations: 16, seconds: 0, log, leavesPerBatch: 16, fair: fair);
             List<GameState> befores = PlayWithProxy(new InProcessAgent(seatAgent), seed: 12, seat: 2);
             Assert.True(befores[^1].HasEnded);
             // The same rules on both sides: nothing to take over, no move replaced, never lost
@@ -541,31 +541,31 @@ namespace Tests
                 List<GameState> states = RandomMoves(games: 1, firstSeed: seed).Select(m => m.before).Where((_, i) => i % 3 == 0).ToList();
                 // One codec for the game, on a board built from the referee's board message as an agent has it; the positions
                 // are rebuilt from the last to the first, so nothing a rebuild leaves on that board can pass for an earlier one's
-                OspCodec codec = new(OspCodec.BuildBoard(new OspCodec(states[0].Board).BoardJson()));
-                string board = OspCodec.Canonical(codec.BoardJson());
+                OSPCodec codec = new(OSPCodec.BuildBoard(new OSPCodec(states[0].Board).BoardJson()));
+                string board = OSPCodec.Canonical(codec.BoardJson());
                 foreach (GameState state in Enumerable.Reverse(states))
                 {
                     sbyte acting = TestUtil.ActingPlayer(state);
                     JsonObject truth = codec.State(state);
-                    List<string> legal = LegalActionProvider.GetActionsForState(state, acting).Select(a => OspCodec.Canonical(codec.Move(a))).Order().ToList();
+                    List<string> legal = LegalActionProvider.GetActionsForState(state, acting).Select(a => OSPCodec.Canonical(codec.Move(a))).Order().ToList();
                     GameState rebuilt = codec.BuildState(truth, new JsonArray(legal.Select(m => JsonNode.Parse(m)).ToArray()));
                     string at = $"{truth["prompt"]} with seat {acting}";
                     Assert.NotSame(codec.Board, rebuilt.Board);
-                    Assert.Equal(OspCodec.Canonical(truth), OspCodec.Canonical(codec.State(rebuilt)));
-                    Assert.Equal(legal, LegalActionProvider.GetActionsForState(rebuilt, acting).Select(a => OspCodec.Canonical(codec.Move(a))).Order().ToList());
+                    Assert.Equal(OSPCodec.Canonical(truth), OSPCodec.Canonical(codec.State(rebuilt)));
+                    Assert.Equal(legal, LegalActionProvider.GetActionsForState(rebuilt, acting).Select(a => OSPCodec.Canonical(codec.Move(a))).Order().ToList());
                     Assert.True(TestUtil.ActingPlayer(rebuilt) == acting, at);
                     prompts.Add(truth["prompt"]!.GetValue<string>());
                 }
                 // The codec's board is as the referee sent it
-                Assert.Equal(board, OspCodec.Canonical(codec.BoardJson()));
+                Assert.Equal(board, OSPCodec.Canonical(codec.BoardJson()));
             }
             Assert.Superset(new HashSet<string> { "setup_settlement", "setup_road", "roll", "main", "discard", "move_robber" }, prompts);
         }
 
         // A state through text, as it comes in a message, with the codec it was written by
-        private static (OspCodec codec, JsonNode state, JsonArray legal) Message(GameState game)
+        private static (OSPCodec codec, JsonNode state, JsonArray legal) Message(GameState game)
         {
-            OspCodec codec = new(OspCodec.BuildBoard(new OspCodec(game.Board).BoardJson()));
+            OSPCodec codec = new(OSPCodec.BuildBoard(new OSPCodec(game.Board).BoardJson()));
             sbyte acting = TestUtil.ActingPlayer(game);
             JsonArray legal = new(LegalActionProvider.GetActionsForState(game, acting).Select(a => JsonNode.Parse(codec.Move(a).ToJsonString())).ToArray());
             return (codec, JsonNode.Parse(codec.State(game).ToJsonString())!, legal);
@@ -577,14 +577,14 @@ namespace Tests
             // Older referees (and logs) send no hand_size and development_size: the hands give them
             foreach ((GameState game, _, _) in RandomMoves(games: 2, firstSeed: 5).Where((_, i) => i < 40 || i % 20 == 0))
             {
-                (OspCodec codec, JsonNode state, JsonArray legal) = Message(game);
-                string expected = OspCodec.Canonical(codec.State(codec.BuildState(state, legal)));
+                (OSPCodec codec, JsonNode state, JsonArray legal) = Message(game);
+                string expected = OSPCodec.Canonical(codec.State(codec.BuildState(state, legal)));
                 foreach (JsonNode? player in state["players"]!.AsArray())
                 {
                     player!.AsObject().Remove("hand_size");
                     player.AsObject().Remove("development_size");
                 }
-                Assert.Equal(expected, OspCodec.Canonical(codec.State(codec.BuildState(state, legal))));
+                Assert.Equal(expected, OSPCodec.Canonical(codec.State(codec.BuildState(state, legal))));
             }
         }
 
@@ -598,7 +598,7 @@ namespace Tests
             game.Turn.RoundCounter = 3;
             game.ResourceBank.Remove(ResourceCardType.Brick, 4);
             game.Players[1].ResourceCards.Add(ResourceCardType.Brick, 4);
-            (OspCodec codec, JsonNode state, JsonArray legal) = Message(game);
+            (OSPCodec codec, JsonNode state, JsonArray legal) = Message(game);
             Assert.Equal(3, codec.BuildState(state, legal).Turn.RoundCounter);
             foreach (JsonNode? player in state["players"]!.AsArray())
             {
@@ -621,7 +621,7 @@ namespace Tests
             GameState game = RandomMoves(games: 1, firstSeed: 6).Select(m => m.before).Skip(40).First(s =>
                 s.DevelopmentBank.Get(DevelopmentCardType.RoadBuilding) > 0 && s.DevelopmentBank.Get(DevelopmentCardType.YearOfPlenty) > 0
                 && s.DevelopmentBank.Get(DevelopmentCardType.Monopoly) > 0);
-            (OspCodec codec, JsonNode state, JsonArray legal) = Message(game);
+            (OSPCodec codec, JsonNode state, JsonArray legal) = Message(game);
             JsonNode played = state["players"]![1]!["played"]!;
             played["road_building"] = 1;
             played["year_of_plenty"] = 1;
@@ -645,7 +645,7 @@ namespace Tests
             GameState game = RandomMoves(games: 1, firstSeed: 7).Select(m => m.before).First(s => s.Players.Any(p => p.LongestRoadLength >= 3)
                 && s.Players.All(p => p.VictoryPoints.LongestRoadPoints == 0));
             int seat = Array.FindIndex(game.Players, p => p.LongestRoadLength >= 3);
-            (OspCodec codec, JsonNode state, JsonArray legal) = Message(game);
+            (OSPCodec codec, JsonNode state, JsonArray legal) = Message(game);
             state["players"]![seat]!["longest_road"] = (int)game.Players[seat].LongestRoadLength - 1;
             state["players"]![(seat + 1) % 4]!["has_longest_road"] = true;
             state = JsonNode.Parse(state.ToJsonString())!;
@@ -660,7 +660,7 @@ namespace Tests
         {
             // The player on turn holds a knight from before and a monopoly bought this turn: the legal moves list the knight only
             GameState state = RandomMoves(games: 1, firstSeed: 4).Select(m => m.before).First(s =>
-                new OspCodec(s.Board).State(s)["prompt"]!.GetValue<string>() == "main" && !s.Turn.HasPlayedDevelopmentCard
+                new OSPCodec(s.Board).State(s)["prompt"]!.GetValue<string>() == "main" && !s.Turn.HasPlayedDevelopmentCard
                 && s.Players[s.Turn.PlayerIndex].DevelopmentCards.Count() == 0
                 && s.DevelopmentBank.Get(DevelopmentCardType.Knight) > 0 && s.DevelopmentBank.Get(DevelopmentCardType.Monopoly) > 0);
             PlayerState me = state.Players[state.Turn.PlayerIndex];
@@ -670,16 +670,16 @@ namespace Tests
                 me.DevelopmentCards.Add(type, 1);
             }
             me.NewDevelopmentCards.Add(DevelopmentCardType.Monopoly, 1);
-            OspCodec codec = new(OspCodec.BuildBoard(new OspCodec(state.Board).BoardJson()));
+            OSPCodec codec = new(OSPCodec.BuildBoard(new OSPCodec(state.Board).BoardJson()));
             sbyte acting = (sbyte)state.Turn.PlayerIndex;
-            List<string> legal = LegalActionProvider.GetActionsForState(state, acting).Select(a => OspCodec.Canonical(codec.Move(a))).Order().ToList();
+            List<string> legal = LegalActionProvider.GetActionsForState(state, acting).Select(a => OSPCodec.Canonical(codec.Move(a))).Order().ToList();
             Assert.Contains(legal, m => m.Contains("play_knight"));
             Assert.DoesNotContain(legal, m => m.Contains("play_monopoly"));
 
             GameState rebuilt = codec.BuildState(codec.State(state), new JsonArray(legal.Select(m => JsonNode.Parse(m)).ToArray()));
             Assert.Equal(1u, rebuilt.Players[acting].NewDevelopmentCards.Get(DevelopmentCardType.Monopoly));
             Assert.Equal(0u, rebuilt.Players[acting].NewDevelopmentCards.Get(DevelopmentCardType.Knight));
-            Assert.Equal(legal, LegalActionProvider.GetActionsForState(rebuilt, acting).Select(a => OspCodec.Canonical(codec.Move(a))).Order().ToList());
+            Assert.Equal(legal, LegalActionProvider.GetActionsForState(rebuilt, acting).Select(a => OSPCodec.Canonical(codec.Move(a))).Order().ToList());
         }
 
         [Fact]
@@ -687,7 +687,7 @@ namespace Tests
         {
             // As under JSettlers' robot: no steps, only each decision's true state
             StringWriter log = new();
-            SeatAgent seatAgent = new(new StateValueNet(TinyNet, provider: InferenceProvider.Cpu), iterations: 16, seconds: 0, log, leavesPerBatch: 16);
+            SeatAgent seatAgent = new(new StateValueNet(TinyNet, provider: InferenceProvider.CPU), iterations: 16, seconds: 0, log, leavesPerBatch: 16);
             List<GameState> befores = PlayWithProxy(new InProcessAgent(seatAgent, dropSteps: true), seed: 14, seat: 1);
             Assert.True(befores[^1].HasEnded);
             JsonNode stats = JsonNode.Parse(log.ToString().Trim().Split('\n')[^1])!;

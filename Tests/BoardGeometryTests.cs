@@ -211,7 +211,7 @@ namespace Tests
             Assert.Equal(File.ReadAllText(ReferencePath).ReplaceLineEndings("\n"), shapes[0]);
 
             // Its counts and keys as the protocol describes them: axial hexes, three hexes per intersection, two per path
-            OspShape shape = ShapeOf(Boards().First());
+            OSPShape shape = ShapeOf(Boards().First());
             Assert.Equal((19, 18, 54, 72, 9), (shape.Land.Length, shape.Sea.Length, shape.Intersections.Length, shape.Paths.Length, shape.Harbors.Length));
             Assert.All(shape.Intersections, key => Assert.Equal(3, key.Length));
             Assert.All(shape.Paths, path => Assert.Equal(2, path.Length));

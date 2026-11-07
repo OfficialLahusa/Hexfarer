@@ -135,7 +135,7 @@ namespace Common
         }
 
         /// <summary>
-        /// A classic board with the given contents (e.g. a board from another engine, see Common.Osp): the land tile at every
+        /// A classic board with the given contents (e.g. a board from another engine, see Common.OSP): the land tile at every
         /// map position within distance 2 of the center (type and number), water around it, the ports and the robber's map
         /// position. Shares the shape and geometry of every classic board.
         /// </summary>

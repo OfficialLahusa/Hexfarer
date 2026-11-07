@@ -2,7 +2,7 @@ using Agents;
 using Agents.Inference;
 using Common;
 using Common.Actions;
-using Common.Osp;
+using Common.OSP;
 using OpenSeat;
 using System.Text.Json.Nodes;
 using Action = Common.Actions.Action;
@@ -71,11 +71,11 @@ namespace Tests
         public void ABankShortageAfterARollIsNamedOnlyUnderCatanatronsRules(string preset, bool named)
         {
             // Hexfarer's bank has no brick left when a roll comes; the referee's still holds one
-            GameState game = RandomGames(games: 1).Skip(40).First(s => s.Turn.MustRoll && new OspCodec(s.Board).State(s)["prompt"]!.GetValue<string>() == "roll");
+            GameState game = RandomGames(games: 1).Skip(40).First(s => s.Turn.MustRoll && new OSPCodec(s.Board).State(s)["prompt"]!.GetValue<string>() == "roll");
             uint bricks = game.ResourceBank.Get(ResourceCardType.Brick);
             game.ResourceBank.Remove(ResourceCardType.Brick, bricks);
             game.Players[1].ResourceCards.Add(ResourceCardType.Brick, bricks);
-            OspCodec codec = new(game.Board);
+            OSPCodec codec = new(game.Board);
             JsonNode before = JsonNode.Parse(new JsonObject { ["type"] = "before", ["game_id"] = "shortage", ["seat"] = 0, ["players"] = 4,
                 ["ruleset"] = new JsonObject { ["preset"] = preset }, ["board"] = codec.BoardJson(), ["state"] = codec.State(game) }.ToJsonString())!;
             Replica replica = new(before);
@@ -215,7 +215,7 @@ namespace Tests
         {
             // Another seat's move whose state before it holds a hand Hexfarer's copy doesn't (as after Catanatron's bank
             // shortage): the copy takes it over at that step, before its own next decision, and follows on
-            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.Cpu);
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU);
             StringWriter log = new();
             SeatAgent agent = new(net, 16, 0, log);
             bool changed = false;
@@ -247,7 +247,7 @@ namespace Tests
                 {
                     JsonNode? answer = second.Handle(message);
                     if (message["type"]!.GetValue<string>() == "decide")
-                        Assert.Contains(OspCodec.Canonical(answer!["action"]), message["legal"]!.AsArray().Select(OspCodec.Canonical).ToHashSet());
+                        Assert.Contains(OSPCodec.Canonical(answer!["action"]), message["legal"]!.AsArray().Select(OSPCodec.Canonical).ToHashSet());
                 }
                 JsonNode end = JsonNode.Parse(whole.ToString().Trim().Split('\n').Last())!;
                 Assert.Equal((false, differs), (end["lost"]!.GetValue<bool>(), Int(end["patches"]) > 0));
@@ -261,7 +261,7 @@ namespace Tests
         {
             // Seat 0 of a recorded game (catanatron-101 reaches the known Longest Road difference): the agent follows the
             // recorded moves and answers the seat's decisions (its answers don't change the recorded game)
-            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.Cpu);
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU);
             StringWriter log = new();
             SeatAgent agent = new(net, 32, 0, log);
             Assert.Equal("osp", agent.Handle(JsonNode.Parse("""{"type":"hello","protocol":"osp","version":1}""")!)!["protocol"]!.GetValue<string>());
@@ -274,8 +274,8 @@ namespace Tests
                 if (type == "decide" && Int(message["seat"]) != 0) continue;
                 JsonNode? answer = agent.Handle(message);
                 if (type != "decide") continue;
-                HashSet<string> legal = message["legal"]!.AsArray().Select(OspCodec.Canonical).ToHashSet();
-                Assert.Contains(OspCodec.Canonical(answer!["action"]), legal);
+                HashSet<string> legal = message["legal"]!.AsArray().Select(OSPCodec.Canonical).ToHashSet();
+                Assert.Contains(OSPCodec.Canonical(answer!["action"]), legal);
                 Assert.Equal(Int(message["n"]), Int(answer["n"]));
                 answered++;
                 if (legal.Count > 1) choices++;
@@ -295,7 +295,7 @@ namespace Tests
         {
             // Budget 40 in batches of 16: each search evaluates whole batches, at least 48 leaves (three batches) and at
             // most a few batches more while the root waits for its moves; two games in a row, each with its own counts
-            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.Cpu);
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU);
             StringWriter log = new();
             SeatAgent agent = new(net, 40, 0, log, leavesPerBatch: 16);
             Assert.EndsWith("-40it-b16", agent.Name);
@@ -327,7 +327,7 @@ namespace Tests
         {
             // 20 ms per decision, batches of 16 selected on one thread: each search takes at least its budget and at most a
             // few batches longer, and the game's search time is the sum over its searches
-            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), intraOpThreads: 1, provider: InferenceProvider.Cpu);
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), intraOpThreads: 1, provider: InferenceProvider.CPU);
             StringWriter log = new();
             SeatAgent agent = new(net, 0, 0.02, log, leavesPerBatch: 16, parallelSelection: false);
             Assert.EndsWith("-0.02s-b16-serial", agent.Name);
@@ -366,7 +366,7 @@ namespace Tests
             // edit (a reset would make the hands known). With payout, the referee's state at one of seat 0's decisions gives
             // an extra card to a player whose hand seat 0 doesn't fully know, as a payout by other rules would (the next state
             // takes it back)
-            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.Cpu);
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU);
             StringWriter log = new();
             SeatAgent agent = new(net, 32, 0, log, leavesPerBatch: 16, fair: true);
             Assert.Contains("-ismcts-fair-", agent.Name);
@@ -421,7 +421,7 @@ namespace Tests
                         break;
                     case "decide":
                         TakeOver(message["state"]!);
-                        Assert.Contains(OspCodec.Canonical(answer!["action"]), message["legal"]!.AsArray().Select(OspCodec.Canonical).ToHashSet());
+                        Assert.Contains(OSPCodec.Canonical(answer!["action"]), message["legal"]!.AsArray().Select(OSPCodec.Canonical).ToHashSet());
                         break;
                 }
                 // After every message the seat knows what the independent tracker knows, no more and no less
@@ -442,7 +442,7 @@ namespace Tests
             // The same game twice; the second time the referee also lists a move Hexfarer's rules don't have next to every
             // single legal move, so the agent answers those decisions with a forced move and no search: its search work
             // stays the same, the earlier search isn't counted again
-            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.Cpu);
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU);
             JsonNode Stats(bool padded)
             {
                 StringWriter log = new();
@@ -505,7 +505,7 @@ namespace Tests
         {
             // JSettlers keeps no resource bank: its count is 19 less what the hands hold, below 0 once they hold more
             GameState game = RandomGames(games: 1).Skip(150).First();
-            OspCodec codec = new(OspCodec.BuildBoard(new OspCodec(game.Board).BoardJson()));
+            OSPCodec codec = new(OSPCodec.BuildBoard(new OSPCodec(game.Board).BoardJson()));
             JsonNode state = codec.State(game);
             int bank = Int(state["bank"]!["ore"]);
             JsonNode player = state["players"]![0]!;
@@ -537,7 +537,7 @@ namespace Tests
         {
             // A referee that gave seat 2 an ore from the bank Hexfarer's rules wouldn't have (as Catanatron's bank shortage
             // does with the rest of a short resource): the agent's copy takes both over and plays on
-            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.Cpu);
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU);
             StringWriter log = new();
             SeatAgent agent = new(net, 16, 0, log);
             int changedAt = -1;
@@ -570,10 +570,10 @@ namespace Tests
             {
                 TestUtil.Seed(seed);
                 Board board = MapGenerator.GenerateRandomClassic();
-                JsonObject written = new OspCodec(board).BoardJson();
-                Board read = OspCodec.BuildBoard(written);
+                JsonObject written = new OSPCodec(board).BoardJson();
+                Board read = OSPCodec.BuildBoard(written);
 
-                Assert.Equal(OspCodec.Canonical(written), OspCodec.Canonical(new OspCodec(read).BoardJson()));
+                Assert.Equal(OSPCodec.Canonical(written), OSPCodec.Canonical(new OSPCodec(read).BoardJson()));
                 for (int i = 0; i < board.Map.Length; i++)
                     Assert.Equal((board.Map.Values[i].Type, board.Map.Values[i].Number), (read.Map.Values[i].Type, read.Map.Values[i].Number));
                 Assert.Equal(board.Ports, read.Ports);
@@ -589,14 +589,14 @@ namespace Tests
         public void EveryLegalMoveHasItsOwnProtocolMoveAndKeysReadBack()
         {
             int decisions = 0;
-            OspCodec? codec = null;
+            OSPCodec? codec = null;
             foreach (GameState state in RandomGames())
             {
-                if (codec?.Board.Map != state.Board.Map) codec = new OspCodec(state.Board);
+                if (codec?.Board.Map != state.Board.Map) codec = new OSPCodec(state.Board);
                 sbyte player = TestUtil.ActingPlayer(state);
                 List<Action> legal = LegalActionProvider.GetActionsForState(state, player);
                 // Year of Plenty lists both orders of two cards, the protocol one set
-                List<string> moves = legal.Where(a => a is not YearOfPlentyAction).Select(a => OspCodec.Canonical(codec.Move(a))).ToList();
+                List<string> moves = legal.Where(a => a is not YearOfPlentyAction).Select(a => OSPCodec.Canonical(codec.Move(a))).ToList();
                 Assert.Equal(moves.Count, moves.Distinct().Count());
                 decisions++;
             }
@@ -604,7 +604,7 @@ namespace Tests
 
             // Every intersection and edge reads back from its key, in any order of its parts
             TestUtil.Seed(9);
-            OspCodec keys = new OspCodec(MapGenerator.GenerateRandomClassic());
+            OSPCodec keys = new OSPCodec(MapGenerator.GenerateRandomClassic());
             for (int i = 0; i < keys.Board.Intersections.Count; i++)
             {
                 JsonArray key = keys.Intersection(i).AsArray();
@@ -625,11 +625,11 @@ namespace Tests
             // Names by meaning, written here rather than taken from the codec
             (string name, ResourceCardType type)[] resources = [("lumber", ResourceCardType.Lumber), ("brick", ResourceCardType.Brick), ("wool", ResourceCardType.Wool), ("grain", ResourceCardType.Grain), ("ore", ResourceCardType.Ore)];
             (string name, DevelopmentCardType type)[] cards = [("knight", DevelopmentCardType.Knight), ("road_building", DevelopmentCardType.RoadBuilding), ("year_of_plenty", DevelopmentCardType.YearOfPlenty), ("monopoly", DevelopmentCardType.Monopoly), ("victory_point", DevelopmentCardType.VictoryPoint)];
-            OspCodec? codec = null;
+            OSPCodec? codec = null;
             int checkedStates = 0;
             foreach (GameState state in RandomGames(maxMoves: 1500))
             {
-                if (codec?.Board.Map != state.Board.Map) codec = new OspCodec(state.Board);
+                if (codec?.Board.Map != state.Board.Map) codec = new OSPCodec(state.Board);
                 JsonObject view = codec.State(state);
                 foreach ((string name, ResourceCardType type) in resources)
                     Assert.Equal(state.ResourceBank.Get(type), (uint)Int(view["bank"]![name]));

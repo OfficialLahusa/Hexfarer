@@ -121,7 +121,7 @@ namespace Client
             Vector2 size = new Vector2(ColumnWidth, 84);
             float[]? values = EvalValues();
 
-            ImDrawListPtr dl = Theme.BeginHud("##eval", min, size + new Vector2(0, 8));
+            ImDrawListPtr dl = Theme.BeginHUD("##eval", min, size + new Vector2(0, 8));
             Theme.DrawPanel(dl, min, min + size);
             Theme.DrawText(dl, Theme.Bold17, min + new Vector2(20, 12), Theme.Text, "Win chances");
             string source = _evalSource == EvalSource.Search && CurrentSearch != null && _mode == InteractionMode.Spectate ? "search" : "value net";
@@ -178,7 +178,7 @@ namespace Client
             Vector2 min = new Vector2(x, top);
             Vector2 size = new Vector2(ColumnWidth, height);
 
-            ImDrawListPtr dl = Theme.BeginHud("##playback", min, size + new Vector2(0, 8));
+            ImDrawListPtr dl = Theme.BeginHUD("##playback", min, size + new Vector2(0, 8));
             Theme.DrawPanel(dl, min, min + size);
             Theme.DrawText(dl, Theme.Bold17, min + new Vector2(20, 14), Theme.Text, "Playback");
 
@@ -274,7 +274,7 @@ namespace Client
 
             List<MoveAnalysis> analysis = Analysis();
             bool hasVisits = analysis.Any(m => m.Visits != null);
-            ImDrawListPtr dl = Theme.BeginHud("##policy", min, size + new Vector2(0, 8));
+            ImDrawListPtr dl = Theme.BeginHUD("##policy", min, size + new Vector2(0, 8));
             Theme.DrawPanel(dl, min, min + size, Theme.PlayerColor(acting), 16, null, 2);
             dl.AddCircleFilled(min + new Vector2(26, 28), 10, Theme.U32(Theme.PlayerColor(acting)), 24);
             Theme.DrawText(dl, Theme.Bold20, min + new Vector2(44, 15), Theme.Text, Theme.PlayerName(acting));
@@ -394,7 +394,7 @@ namespace Client
             Vector2 min = new Vector2(x, top);
             Vector2 size = new Vector2(ColumnWidth, height);
 
-            ImDrawListPtr dl = Theme.BeginHud("##edittools", min, size + new Vector2(0, 8));
+            ImDrawListPtr dl = Theme.BeginHUD("##edittools", min, size + new Vector2(0, 8));
             Theme.DrawPanel(dl, min, min + size);
             Theme.DrawText(dl, Theme.Bold17, min + new Vector2(20, 14), Theme.Text, "Edit");
             Theme.TextRight(dl, Theme.Regular13, min + new Vector2(size.X - 20, 18), Theme.TextMuted, $"for {Theme.PlayerName(_editPlayer)} (click a seat to switch)");
@@ -454,7 +454,7 @@ namespace Client
             Vector2 size = new Vector2(590, 194);
             PlayerState player = State.Players[_editPlayer];
 
-            ImDrawListPtr dl = Theme.BeginHud("##editcards", min, size + new Vector2(0, 8));
+            ImDrawListPtr dl = Theme.BeginHUD("##editcards", min, size + new Vector2(0, 8));
             Theme.DrawPanel(dl, min, min + size, Theme.PlayerColor(_editPlayer), 16, null, 2);
             dl.AddCircleFilled(min + new Vector2(26, 28), 10, Theme.U32(Theme.PlayerColor(_editPlayer)), 24);
             Theme.DrawText(dl, Theme.Bold20, min + new Vector2(44, 15), Theme.Text, $"{Theme.PlayerName(_editPlayer)}'s hand");

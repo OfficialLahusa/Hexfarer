@@ -1,5 +1,5 @@
 using Common;
-using Common.Osp;
+using Common.OSP;
 using Common.Serialization;
 using OpenSeat;
 using System.Text.Json.Nodes;
@@ -31,23 +31,23 @@ namespace Tests
         private static bool At(JsonNode message, string type, int n) => message["type"]!.GetValue<string>() == type && message["n"] is JsonNode at && Int(at) == n;
 
         // A game's state as the protocol writes it, without whose move is asked (a finished game asks nothing)
-        private static string Written(OspCodec codec, GameState state)
+        private static string Written(OSPCodec codec, GameState state)
         {
             JsonObject json = codec.State(state);
             json.Remove("prompt");
-            return OspCodec.Canonical(json);
+            return OSPCodec.Canonical(json);
         }
 
         // The players as Hexfarer writes them, in the fields the referee's state has (older logs have fewer); of the cards
         // played Hexfarer keeps the knights, and it counts the roads' lengths itself
         private static void SamePlayers(JsonNode theirs, GameState state)
         {
-            JsonArray ours = new OspCodec(state.Board).State(state)["players"]!.AsArray();
+            JsonArray ours = new OSPCodec(state.Board).State(state)["players"]!.AsArray();
             for (int seat = 0; seat < ours.Count; seat++)
             {
-                Assert.Equal(OspCodec.Canonical(theirs["players"]![seat]!["played"]!["knight"]), OspCodec.Canonical(ours[seat]!["played"]!["knight"]));
+                Assert.Equal(OSPCodec.Canonical(theirs["players"]![seat]!["played"]!["knight"]), OSPCodec.Canonical(ours[seat]!["played"]!["knight"]));
                 foreach ((string field, JsonNode? value) in theirs["players"]![seat]!.AsObject().Where(f => f.Key is not ("played" or "longest_road")))
-                    Assert.True(OspCodec.Canonical(value) == OspCodec.Canonical(ours[seat]![field]), $"seat {seat}, {field}: referee {value?.ToJsonString()}, Hexfarer {ours[seat]![field]?.ToJsonString()}");
+                    Assert.True(OSPCodec.Canonical(value) == OSPCodec.Canonical(ours[seat]![field]), $"seat {seat}, {field}: referee {value?.ToJsonString()}, Hexfarer {ours[seat]![field]?.ToJsonString()}");
             }
         }
 
@@ -100,7 +100,7 @@ namespace Tests
                 {
                     // Read back as the client reads it: the part's end, and its moves undone one by one lead to its start
                     SaveFile save = SaveFileSerializer.Load(Path.Combine(directory, Relay.FileName(part)));
-                    OspCodec codec = new(save.GameState.Board);
+                    OSPCodec codec = new(save.GameState.Board);
                     Assert.Equal(Written(codec, part.End), Written(codec, save.GameState));
                     Assert.Equal(part.Actions.Count, save.PlayedActions.Count);
                     Assert.Empty(save.UndoHistory);
@@ -136,9 +136,9 @@ namespace Tests
             Assert.Equal((0, n + 1), (parts[0].FirstMove, parts[0].Actions.Count));
             Assert.Equal(n + 1, parts[1].FirstMove);
             JsonNode decide = messages.First(m => At(m, "decide", n + 1));
-            OspCodec codec = new(parts[1].Start.Board);
+            OSPCodec codec = new(parts[1].Start.Board);
             SamePlayers(decide["state"]!, parts[1].Start);
-            Assert.Equal(OspCodec.Canonical(decide["state"]!["robber"]), OspCodec.Canonical(codec.State(parts[1].Start)["robber"]));
+            Assert.Equal(OSPCodec.Canonical(decide["state"]!["robber"]), OSPCodec.Canonical(codec.State(parts[1].Start)["robber"]));
             // The relay says where and why
             string line = Assert.Single(relay.Log);
             Assert.Contains($"move {n + 1}", line);

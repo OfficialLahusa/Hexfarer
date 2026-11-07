@@ -15,27 +15,27 @@ import soc.server.genericServer.Connection;
 
 /**
  * JSettlers' server with Open Seat Agents among its robots: it starts JSettlers' server (SOCServer) with the given
- * properties and keeps it, so the Open Seat Agents' robots (OspRobotClient, started by the server through
+ * properties and keeps it, so the Open Seat Agents' robots (OSPRobotClient, started by the server through
  * jsettlers.bots.start3p) can read the true game they play in. They run inside the server's process; a robot on another
  * machine would only see its seat's view. Every request the server handles for a game passes through MoveLog, which
  * keeps the game's moves as protocol steps (for agents that observe) and, with -Dosp.record=DIR, writes each game as a
  * referee log while it runs. JSettlers starts 30% of its own robots with its fast strategy and the rest with its smart
  * one (by name: "droid" and "robot"); -Dosp.bots=smart or fast gives all of them the one strategy.
  *
- * Usage: java -cp build:JSETTLERS_JAR -Dosp.agent="COMMAND" osp.jsettlers.OspServer [-Dname=value ...] [port]
+ * Usage: java -cp build:JSETTLERS_JAR -Dosp.agent="COMMAND" osp.jsettlers.OSPServer [-Dname=value ...] [port]
  * e.g. robot-only games with one robot of Hexfarer's: -Djsettlers.startrobots=7
- * -Djsettlers.bots.start3p=2,osp.jsettlers.OspRobotClient -Djsettlers.bots.percent3p=25 -Djsettlers.bots.botgames.total=100
+ * -Djsettlers.bots.start3p=2,osp.jsettlers.OSPRobotClient -Djsettlers.bots.percent3p=25 -Djsettlers.bots.botgames.total=100
  * -Djsettlers.bots.botgames.shutdown=Y -Djsettlers.bots.fast_pause_percent=10 -Djsettlers.gameopt.NT=t
  */
-public final class OspServer
+public final class OSPServer
 {
     private static volatile SOCServer server;
     // The robots' brains in games, so a shutdown lets them tell their agents the game's end first
-    static final Set<OspRobotBrain> BRAINS = ConcurrentHashMap.newKeySet();
+    static final Set<OSPRobotBrain> BRAINS = ConcurrentHashMap.newKeySet();
     // Each game's moves, from its first move on
     private static final Map<String, MoveLog> LOGS = new ConcurrentHashMap<>();
 
-    private OspServer() {}
+    private OSPServer() {}
 
     /** The true game of that name on this process's server, or null */
     public static SOCGame game(String name)
@@ -61,7 +61,7 @@ public final class OspServer
             game.takeMonitor();
             try
             {
-                return new MoveLog(game, new OspGame(game).state(-1));
+                return new MoveLog(game, new OSPGame(game).state(-1));
             }
             finally
             {
@@ -107,7 +107,7 @@ public final class OspServer
             MoveLog log = LOGS.get(name);
             if (log != null)
                 log.gameDestroyed();
-            for (OspRobotBrain brain : BRAINS)
+            for (OSPRobotBrain brain : BRAINS)
                 brain.gameEnding(name);
             LOGS.remove(name);
             super.destroyGame(name);
@@ -151,7 +151,7 @@ public final class OspServer
         // JSettlers' server exits right after its last robot-only game: the brains finish theirs first
         Runtime.getRuntime().addShutdownHook(new Thread(() ->
         {
-            for (OspRobotBrain brain : BRAINS)
+            for (OSPRobotBrain brain : BRAINS)
                 brain.finishOnShutdown();
         }, "osp-shutdown"));
         String bots = System.getProperty("osp.bots", "");

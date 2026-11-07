@@ -29,7 +29,7 @@ import soc.game.SOCSettlement;
  * hands leave of 19 cards a resource. JSettlers draws who starts; the protocol's seats are the turn order from the first
  * player (seat 0 starts), so a JSettlers player number becomes seatOf it.
  */
-public final class OspGame
+public final class OSPGame
 {
     // The protocol's resource names by JSettlers' resource type, and back
     private static final String[] RESOURCE_NAMES = new String[SOCResourceConstants.WOOD + 1];
@@ -45,15 +45,15 @@ public final class OspGame
         SOCResourceConstants.WHEAT, SOCResourceConstants.WOOD};
 
     public final SOCGame game;
-    public final OspBoard board;
+    public final OSPBoard board;
 
     // JSettlers' player number of seat 0
     public final int first;
 
-    public OspGame(SOCGame game)
+    public OSPGame(SOCGame game)
     {
         this.game = game;
-        this.board = new OspBoard(game.getBoard());
+        this.board = new OSPBoard(game.getBoard());
         this.first = game.getFirstPlayer();
     }
 

@@ -5,7 +5,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import soc.game.SOCGame;
 
 /**
- * A check for the bridge's tests (test_jsettlers_steps.py): a robot's read of the server's game (OspServer.read) waits
+ * A check for the bridge's tests (test_jsettlers_steps.py): a robot's read of the server's game (OSPServer.read) waits
  * while the server holds the game's monitor, and while its move log is handling a request. Prints one line per lock it
  * waited for; exits with 1 if a read went through.
  */
@@ -15,8 +15,8 @@ public final class LockCheck
 
     public static void main(String[] args) throws Exception
     {
-        SOCGame game = OspBoard.newGame("lock-check");
-        MoveLog log = new MoveLog(game, new OspGame(game).state(-1));
+        SOCGame game = OSPBoard.newGame("lock-check");
+        MoveLog log = new MoveLog(game, new OSPGame(game).state(-1));
         boolean ok = true;
 
         // The server changes the game under its monitor
@@ -46,7 +46,7 @@ public final class LockCheck
     private static boolean waits(String lock, SOCGame game, MoveLog log, Runnable release) throws Exception
     {
         AtomicBoolean read = new AtomicBoolean();
-        Thread reader = new Thread(() -> OspServer.read(game, log, () ->
+        Thread reader = new Thread(() -> OSPServer.read(game, log, () ->
         {
             read.set(true);
             return null;

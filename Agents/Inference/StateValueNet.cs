@@ -14,7 +14,7 @@ namespace Agents.Inference
     /// the CPU otherwise; the environment variable HEXFARER_INFERENCE (cpu, dml or cuda; the older CATANSIM_INFERENCE works
     /// too) overrides it.
     /// </summary>
-    public enum InferenceProvider { Auto, Cpu, DirectML, Cuda }
+    public enum InferenceProvider { Auto, CPU, DirectML, CUDA }
 
     public class StateValueNet
     {
@@ -91,24 +91,24 @@ namespace Agents.Inference
                 {
                     // No DirectX 12 GPU, or the CPU-only runtime (e.g. on Linux): fall back to the CPU
                     if (InferenceSetting == "dml") throw;
-                    provider = InferenceProvider.Cpu;
+                    provider = InferenceProvider.CPU;
                 }
             }
-            else if (provider == InferenceProvider.Cuda)
+            else if (provider == InferenceProvider.CUDA)
             {
                 try
                 {
-                    _session = CreateCudaSession(resolvedPath);
+                    _session = CreateCUDASession(resolvedPath);
                 }
                 catch (Exception e) when (e is OnnxRuntimeException or EntryPointNotFoundException or DllNotFoundException)
                 {
                     // No NVIDIA GPU, or the CUDA or cuDNN libraries are missing: fall back to the CPU
                     if (InferenceSetting == "cuda") throw;
-                    provider = InferenceProvider.Cpu;
+                    provider = InferenceProvider.CPU;
                 }
             }
 
-            if (provider == InferenceProvider.Cpu)
+            if (provider == InferenceProvider.CPU)
             {
                 var options = new SessionOptions() {
                     IntraOpNumThreads = intraOpThreads > 0 ? intraOpThreads : DefaultIntraOpThreads
@@ -142,10 +142,10 @@ namespace Agents.Inference
             if (provider != InferenceProvider.Auto) return provider;
             return InferenceSetting switch
             {
-                "cpu" => InferenceProvider.Cpu,
+                "cpu" => InferenceProvider.CPU,
                 "dml" => InferenceProvider.DirectML,
-                "cuda" => InferenceProvider.Cuda,
-                _ => OperatingSystem.IsWindows() ? InferenceProvider.DirectML : OperatingSystem.IsLinux() ? InferenceProvider.Cuda : InferenceProvider.Cpu,
+                "cuda" => InferenceProvider.CUDA,
+                _ => OperatingSystem.IsWindows() ? InferenceProvider.DirectML : OperatingSystem.IsLinux() ? InferenceProvider.CUDA : InferenceProvider.CPU,
             };
         }
 
@@ -162,7 +162,7 @@ namespace Agents.Inference
             return new InferenceSession(modelPath, options);
         }
 
-        private static InferenceSession CreateCudaSession(string modelPath)
+        private static InferenceSession CreateCUDASession(string modelPath)
         {
             // CUDA runs any batch size as it is and allows parallel Run calls on one session; it needs the CUDA and cuDNN
             // libraries the ONNX Runtime GPU package was built against

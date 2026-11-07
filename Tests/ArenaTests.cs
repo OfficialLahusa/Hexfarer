@@ -60,7 +60,7 @@ namespace Tests
             // The search runs whole batches: 40 iterations are three batches of 16 by default and two of 32 with b32; a time
             // budget searches in batches of 256
             AgentSpec agent = AgentSpec.Parse(spec.Replace("x.onnx", PlainModelPath));
-            StateValueNet net = new(PlainModelPath, provider: InferenceProvider.Cpu);
+            StateValueNet net = new(PlainModelPath, provider: InferenceProvider.CPU);
             GameState state = new GameState(MapGenerator.GenerateRandomClassic(), 4);
             MCTSAgent search = Assert.IsType<MCTSAgent>(agent.Create(0, state, net, iterations, seconds));
             search.Act(state);
@@ -90,7 +90,7 @@ namespace Tests
         }
 
         [Fact]
-        public void TheDefaultBatchOfPimcFollowsTheShareOfEachDeterminization()
+        public void TheDefaultBatchOfPIMCFollowsTheShareOfEachDeterminization()
         {
             // Four determinizations of 5000 iterations search trees of 1250, two of 12800 trees of 6400; bN holds as given
             Assert.Equal(16, AgentSpec.Parse("P=a.onnx=d4").BatchFor(5000));
@@ -148,27 +148,27 @@ namespace Tests
         }
 
         [Fact]
-        public void OnlyCudaRunsBatchesThatFillACallUnmerged()
+        public void OnlyCUDARunsBatchesThatFillACallUnmerged()
         {
             AgentSpec small = AgentSpec.Parse("S=a.onnx"), b255 = AgentSpec.Parse("M=a.onnx=b255"), b256 = AgentSpec.Parse("L=a.onnx=b256"),
                 b512 = AgentSpec.Parse("X=a.onnx=b512");
-            Assert.True(AgentSpec.Merges(InferenceProvider.Cuda, 5000, small));
-            Assert.True(AgentSpec.Merges(InferenceProvider.Cuda, 5000, b255));
-            Assert.False(AgentSpec.Merges(InferenceProvider.Cuda, 5000, b256));
-            Assert.False(AgentSpec.Merges(InferenceProvider.Cuda, 5000, b256, b512));
+            Assert.True(AgentSpec.Merges(InferenceProvider.CUDA, 5000, small));
+            Assert.True(AgentSpec.Merges(InferenceProvider.CUDA, 5000, b255));
+            Assert.False(AgentSpec.Merges(InferenceProvider.CUDA, 5000, b256));
+            Assert.False(AgentSpec.Merges(InferenceProvider.CUDA, 5000, b256, b512));
             // Without bN the budget sets the batch: 256 from 25600 iterations
-            Assert.False(AgentSpec.Merges(InferenceProvider.Cuda, 25600, small));
+            Assert.False(AgentSpec.Merges(InferenceProvider.CUDA, 25600, small));
             // Two sides sharing a file merge if either has small batches
-            Assert.True(AgentSpec.Merges(InferenceProvider.Cuda, 5000, b512, small));
-            Assert.True(AgentSpec.Merges(InferenceProvider.Cuda, 5000, small, b512));
+            Assert.True(AgentSpec.Merges(InferenceProvider.CUDA, 5000, b512, small));
+            Assert.True(AgentSpec.Merges(InferenceProvider.CUDA, 5000, small, b512));
             Assert.True(AgentSpec.Merges(InferenceProvider.DirectML, 5000, b256));
-            Assert.True(AgentSpec.Merges(InferenceProvider.Cpu, 5000, b512));
+            Assert.True(AgentSpec.Merges(InferenceProvider.CPU, 5000, b512));
         }
 
         [Fact]
         public void TheHeaderSaysWhoseLeafBatchesAreMerged()
         {
-            StateValueNet net = new(PlainModelPath, provider: InferenceProvider.Cpu);
+            StateValueNet net = new(PlainModelPath, provider: InferenceProvider.CPU);
             using BatchingEvaluator small = new([net], 256), large = new([net], 512);
             SideNets alone = new(net, null), merged = new(net, small), mergedLarge = new(net, large);
 
@@ -186,18 +186,18 @@ namespace Tests
         {
             // One game at a time: no merging, every search runs its batches on its side's net
             AgentSpec a = AgentSpec.Parse($"a={PlainModelPath}"), b64 = AgentSpec.Parse($"b={PlainModelPath}=b64"), c = AgentSpec.Parse($"c={PolicyModelPath}");
-            (SideNets first, SideNets second) = AgentSpec.Nets(a, AgentSpec.Parse($"a2={PlainModelPath}"), InferenceProvider.Cpu, 800, 1);
+            (SideNets first, SideNets second) = AgentSpec.Nets(a, AgentSpec.Parse($"a2={PlainModelPath}"), InferenceProvider.CPU, 800, 1);
             Assert.Same(first.Net, second.Net);
             Assert.Null(first.Leaves);
             Assert.Null(second.Leaves);
-            (first, second) = AgentSpec.Nets(a, b64, InferenceProvider.Cpu, 800, 1);
+            (first, second) = AgentSpec.Nets(a, b64, InferenceProvider.CPU, 800, 1);
             Assert.NotSame(first.Net, second.Net);
             // With a time budget both default to 256: the same net again, unless the file differs; never merged, even with
             // several games allowed (a time budget plays one at a time)
-            (first, second) = AgentSpec.Nets(AgentSpec.Parse($"t={PlainModelPath}=b256"), a, InferenceProvider.Cpu, 0, 16);
+            (first, second) = AgentSpec.Nets(AgentSpec.Parse($"t={PlainModelPath}=b256"), a, InferenceProvider.CPU, 0, 16);
             Assert.Same(first.Net, second.Net);
             Assert.Null(first.Leaves);
-            (first, second) = AgentSpec.Nets(a, c, InferenceProvider.Cpu, 0, 1);
+            (first, second) = AgentSpec.Nets(a, c, InferenceProvider.CPU, 0, 1);
             Assert.NotSame(first.Net, second.Net);
         }
 
@@ -221,7 +221,7 @@ namespace Tests
             AgentSpec a = AgentSpec.Parse($"a={PlainModelPath}"), b64 = AgentSpec.Parse($"b={PlainModelPath}=b64"), c = AgentSpec.Parse($"c={PolicyModelPath}");
 
             // The same file: one merging evaluator and one net for both sides, whatever their batch sizes
-            (SideNets first, SideNets second) = AgentSpec.Nets(a, b64, InferenceProvider.Cpu, 800, 4);
+            (SideNets first, SideNets second) = AgentSpec.Nets(a, b64, InferenceProvider.CPU, 800, 4);
             Assert.NotNull(first.Leaves);
             Assert.Same(first.Leaves, second.Leaves);
             Assert.Same(first.Net, second.Net);
@@ -233,12 +233,12 @@ namespace Tests
             MergedLeaves.Close(first, second);
 
             // A side's batches larger than a merged call set its size
-            (first, second) = AgentSpec.Nets(AgentSpec.Parse($"big={PlainModelPath}=b512"), a, InferenceProvider.Cpu, 800, 4);
+            (first, second) = AgentSpec.Nets(AgentSpec.Parse($"big={PlainModelPath}=b512"), a, InferenceProvider.CPU, 800, 4);
             Assert.Equal(512, first.Leaves!.MaxRows);
             MergedLeaves.Close(first, second);
 
             // Different files: one evaluator each, running its side's model
-            (first, second) = AgentSpec.Nets(a, c, InferenceProvider.Cpu, 800, 4);
+            (first, second) = AgentSpec.Nets(a, c, InferenceProvider.CPU, 800, 4);
             Assert.NotNull(first.Leaves);
             Assert.NotNull(second.Leaves);
             Assert.NotSame(first.Leaves, second.Leaves);
@@ -309,7 +309,7 @@ namespace Tests
             Assert.Equal(-10, settings.Elo0);
             Assert.Equal(20, settings.Elo1);
             Assert.Equal(TimeSpan.FromMinutes(90), settings.MaxDuration);
-            Assert.Equal(InferenceProvider.Cuda, settings.Provider);
+            Assert.Equal(InferenceProvider.CUDA, settings.Provider);
         }
 
         [Fact]
@@ -362,7 +362,7 @@ namespace Tests
 
             // The agent built from it offers as asked, with any search
             GameState start = new GameState(MapGenerator.GenerateRandomClassic(), 4);
-            var net = new StateValueNet(PlainModelPath, provider: InferenceProvider.Cpu);
+            var net = new StateValueNet(PlainModelPath, provider: InferenceProvider.CPU);
             foreach (string kind in new[] { "is", "d2", "c1.414" })
             {
                 Agent agent = AgentSpec.Parse($"T={PlainModelPath}={kind}=om0.02=on1=ow4=o22=am0.02=noco=o31=af0.5=oc2=op8=pf0.25").Create(1, start, net, 16, 0);
@@ -411,7 +411,7 @@ namespace Tests
             GroupStatistics strong = GroupStatistics.Of([.. Enumerable.Repeat(0.5, 40)], 0.25, 0.28);
             Assert.Equal(0.5, strong.Mean, 9);
             // No spread: the variance floor of 0.01
-            Assert.Equal(40 * 0.03 * (1 - 0.53) / 0.02, strong.Llr, 6);
+            Assert.Equal(40 * 0.03 * (1 - 0.53) / 0.02, strong.LLR, 6);
             Assert.Equal(1, strong.Verdict);
 
             double[] even = [.. Enumerable.Repeat(0.0, 15), .. Enumerable.Repeat(0.25, 10), .. Enumerable.Repeat(0.5, 10), .. Enumerable.Repeat(0.75, 5)];
@@ -432,7 +432,7 @@ namespace Tests
                 Iterations = 16,
                 MaxGames = 4,
                 SeedBase = 321,
-                Provider = InferenceProvider.Cpu,
+                Provider = InferenceProvider.CPU,
                 FreeTrade = true,
                 Elo0 = 0,
                 Elo1 = 3,
@@ -476,7 +476,7 @@ namespace Tests
             PairStatistics s = PairStatistics.Of(scores, 0, 40);
 
             Assert.Equal((104, 42, 7, 55), (s.Pairs, s.ChallengerTwice, s.BaselineTwice, s.Split));
-            Assert.Equal(9.211, s.Llr, 3);
+            Assert.Equal(9.211, s.LLR, 3);
             Assert.Equal(121.7, s.Elo, 1);
             Assert.True(s.EloLow > 0 && s.EloHigh > s.Elo);
             Assert.Equal(-2.944, s.LowerBound, 3);
@@ -491,7 +491,7 @@ namespace Tests
 
             PairStatistics s = PairStatistics.Of(scores, 0, 40);
 
-            Assert.Equal(-1.328, s.Llr, 3);
+            Assert.Equal(-1.328, s.LLR, 3);
             Assert.Equal(-13.4, s.Elo, 1);
             Assert.True(s.EloLow < 0 && s.EloHigh > 0);
             Assert.Equal(0, s.Verdict);
@@ -502,7 +502,7 @@ namespace Tests
         {
             Assert.Equal(0, PairStatistics.Of([0.5, 0.5], 0, 40).Verdict);
             PairStatistics tenSplits = PairStatistics.Of([.. Enumerable.Repeat(0.5, 10)], 0, 40);
-            Assert.InRange(tenSplits.Llr, tenSplits.LowerBound, 0);
+            Assert.InRange(tenSplits.LLR, tenSplits.LowerBound, 0);
             Assert.Equal(0, tenSplits.Verdict);
         }
 
@@ -512,7 +512,7 @@ namespace Tests
             PairStatistics s = PairStatistics.Of([1.0], 0, 40);
 
             Assert.Equal(1, s.Pairs);
-            Assert.Equal(0, s.Llr);
+            Assert.Equal(0, s.LLR);
             Assert.Equal(double.NegativeInfinity, s.EloLow);
             Assert.Equal(0, s.Verdict);
         }
@@ -527,7 +527,7 @@ namespace Tests
                 Iterations = 16,
                 MaxGames = 4,
                 SeedBase = 123,
-                Provider = InferenceProvider.Cpu,
+                Provider = InferenceProvider.CPU,
             };
             var log = new StringWriter();
 
@@ -569,7 +569,7 @@ namespace Tests
         public void OnlyTheSidesWithANetGetNetsAndSetTheGamesAtOnce()
         {
             AgentSpec hexfarer = AgentSpec.Parse($"H={PlainModelPath}"), external = AgentSpec.Parse("E=command:python x.py");
-            (SideNets challenger, SideNets baseline) = AgentSpec.Nets(hexfarer, external, InferenceProvider.Cpu, 800, 4);
+            (SideNets challenger, SideNets baseline) = AgentSpec.Nets(hexfarer, external, InferenceProvider.CPU, 800, 4);
             Assert.NotNull(challenger.Net);
             Assert.Null(baseline.Net);
             Assert.Null(baseline.Leaves);
@@ -598,7 +598,7 @@ namespace Tests
                 Iterations = 16,
                 MaxGames = 4,
                 SeedBase = 321,
-                Provider = InferenceProvider.Cpu,
+                Provider = InferenceProvider.CPU,
                 FreeTrade = false,
                 Elo0 = 0,
                 Elo1 = 3,
@@ -635,7 +635,7 @@ namespace Tests
                 Iterations = 16,
                 MaxGames = 4,
                 SeedBase = 77,
-                Provider = InferenceProvider.Cpu,
+                Provider = InferenceProvider.CPU,
                 FreeTrade = false,
             };
             var log = new StringWriter();
@@ -658,7 +658,7 @@ namespace Tests
                 Iterations = 16,
                 MaxGames = 2,
                 SeedBase = 123,
-                Provider = InferenceProvider.Cpu,
+                Provider = InferenceProvider.CPU,
             };
             var log = new StringWriter();
             PairStatistics result = new MirrorDuel(settings, log).Run();

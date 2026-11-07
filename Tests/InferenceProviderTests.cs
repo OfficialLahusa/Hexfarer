@@ -41,19 +41,19 @@ namespace Tests
         }
 
         [Fact]
-        public void TheCpuProviderRunsAnyBatchAsItIs()
+        public void TheCPUProviderRunsAnyBatchAsItIs()
         {
-            StateValueNet net = new(TinyModelPath, provider: InferenceProvider.Cpu);
-            Assert.Equal(InferenceProvider.Cpu, net.Provider);
+            StateValueNet net = new(TinyModelPath, provider: InferenceProvider.CPU);
+            Assert.Equal(InferenceProvider.CPU, net.Provider);
             Assert.Null(net.FixedBatchSize);
             Assert.Equal(3 * 4, net.Run(RandomGameBatch(3, 180)).Length);
         }
 
         [SkippableFact]
-        public void DirectMLGivesTheSameValuesAsTheCpu()
+        public void DirectMLGivesTheSameValuesAsTheCPU()
         {
             StateValueNet gpu = DirectMLOrSkip(TinyModelPath);
-            StateValueNet cpu = new(TinyModelPath, provider: InferenceProvider.Cpu);
+            StateValueNet cpu = new(TinyModelPath, provider: InferenceProvider.CPU);
             Assert.Equal(StateValueNet.DefaultFixedBatchSize, gpu.FixedBatchSize);
 
             // Exactly the fixed size, padded (1 and 37) and split (300 = 256 + 44)
@@ -78,7 +78,7 @@ namespace Tests
         {
             TestUtil.SkipWithoutModel();
             StateValueNet gpu = DirectMLOrSkip(TestUtil.ModelPath);
-            StateValueNet cpu = new(TestUtil.ModelPath, provider: InferenceProvider.Cpu);
+            StateValueNet cpu = new(TestUtil.ModelPath, provider: InferenceProvider.CPU);
 
             DenseTensor<float> batch = RandomGameBatch(50, 190, StateVectorizer.For(cpu));
             float[] expected = cpu.Run(batch), actual = gpu.Run(batch);

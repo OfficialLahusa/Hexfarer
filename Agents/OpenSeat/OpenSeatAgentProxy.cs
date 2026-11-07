@@ -1,6 +1,6 @@
 using Common;
 using Common.Actions;
-using Common.Osp;
+using Common.OSP;
 using System.Text.Json.Nodes;
 using Action = Common.Actions.Action;
 
@@ -21,7 +21,7 @@ namespace Agents.OpenSeat
     {
         private readonly IOpenSeatChannel _channel;
         private readonly string _baseId;
-        private readonly OspCodec _codec;
+        private readonly OSPCodec _codec;
         // The game as the moves told to the proxy left it, and what the seat knows of it (for worlds)
         private GameState _mirror;
         private BeliefTracker? _beliefs;
@@ -49,7 +49,7 @@ namespace Agents.OpenSeat
         {
             _channel = channel;
             _baseId = _gameId = gameId;
-            _codec = new OspCodec(start.Board);
+            _codec = new OSPCodec(start.Board);
             _mirror = new GameState(start);
             _random = seed is int s ? new Random(s) : new Random();
             try
@@ -74,7 +74,7 @@ namespace Agents.OpenSeat
             ["game_id"] = _gameId,
             ["seat"] = (int)PlayerIndex,
             ["players"] = start.Players.Length,
-            ["ruleset"] = OspCodec.Ruleset(start.Settings),
+            ["ruleset"] = OSPCodec.Ruleset(start.Settings),
             ["board"] = _codec.BoardJson(),
             ["state"] = StateFor(start),
         });
@@ -155,9 +155,9 @@ namespace Agents.OpenSeat
                 Fail($"The Open Seat Agent {Hello.Name} answered decision {n.ToJsonString()} when asked for {_moves}.");
 
             // The answer has to be one of the listed moves, as written there
-            string wanted = OspCodec.Canonical(answer["action"]);
+            string wanted = OSPCodec.Canonical(answer["action"]);
             for (int i = 0; i < moves.Count; i++)
-                if (OspCodec.Canonical(moves[i]) == wanted) return legal[i];
+                if (OSPCodec.Canonical(moves[i]) == wanted) return legal[i];
             Fail($"The Open Seat Agent {Hello.Name} answered {wanted}, which is not one of the legal moves.");
             return null!;
         }
@@ -175,7 +175,7 @@ namespace Agents.OpenSeat
                     ["seat"] = (int)action.PlayerIndex,
                     ["action"] = _codec.Move(action),
                     // An open-hand agent sees every result in full, the others as their seat may
-                    ["result"] = OspCodec.Result(action, Hello.Needs == OpenSeatNeeds.Truth ? null : PlayerIndex),
+                    ["result"] = OSPCodec.Result(action, Hello.Needs == OpenSeatNeeds.Truth ? null : PlayerIndex),
                 };
                 // The state before the move: the truth for an open-hand agent, the view for one that gets worlds
                 if (Hello.Needs == OpenSeatNeeds.Truth) step["state"] = _codec.State(_mirror);

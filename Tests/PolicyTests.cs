@@ -123,7 +123,7 @@ namespace Tests
         }
 
         [Fact]
-        public void PuctFollowsThePriorsAndThenTheValues()
+        public void PUCTFollowsThePriorsAndThenTheValues()
         {
             TestUtil.Seed(411);
             GameState state = TestUtil.EmptyNormalTurn(1);
@@ -184,11 +184,11 @@ namespace Tests
         [Fact]
         public void NetsWithAPolicyHeadGiveQueriesAndTheEmbeddingTable()
         {
-            StateValueNet net = new(PolicyModelPath, provider: InferenceProvider.Cpu);
+            StateValueNet net = new(PolicyModelPath, provider: InferenceProvider.CPU);
             Assert.NotNull(net.Policy);
             Assert.Equal(8, net.Policy!.Dim);
             Assert.Equal(ActionEncoding.VocabularySize * 8, net.Policy.Embeddings.Length);
-            Assert.Null(new StateValueNet(PlainModelPath, provider: InferenceProvider.Cpu).Policy);
+            Assert.Null(new StateValueNet(PlainModelPath, provider: InferenceProvider.CPU).Policy);
 
             TestUtil.Seed(412);
             GameState state = TestUtil.NewGame();
@@ -201,7 +201,7 @@ namespace Tests
         [Fact]
         public void SearchesWithAPolicyHeadPutPriorsOnTheTreeAndPlayValidMoves()
         {
-            StateValueNet net = new(PolicyModelPath, provider: InferenceProvider.Cpu);
+            StateValueNet net = new(PolicyModelPath, provider: InferenceProvider.CPU);
             TestUtil.Seed(413);
             GameState state = TestUtil.NewGame();
             TestUtil.PlayUntil(state, TestUtil.IsFreeTurn);
@@ -244,7 +244,7 @@ namespace Tests
         [Fact]
         public void TheBatchingEvaluatorHandsEachSearchItsQueries()
         {
-            StateValueNet net = new(PolicyModelPath, provider: InferenceProvider.Cpu);
+            StateValueNet net = new(PolicyModelPath, provider: InferenceProvider.CPU);
             using var evaluator = new BatchingEvaluator([net], 64);
             Assert.NotNull(evaluator.Policy);
 

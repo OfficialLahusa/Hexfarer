@@ -3,7 +3,7 @@ using Agents.Inference;
 using Agents.MCTS;
 using Common;
 using Common.Actions;
-using Common.Osp;
+using Common.OSP;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json.Nodes;
@@ -134,7 +134,7 @@ namespace OpenSeat
                     {
                         InferenceProvider provider = Option("--provider", "auto") switch
                         {
-                            "cpu" => InferenceProvider.Cpu, "dml" => InferenceProvider.DirectML, "cuda" => InferenceProvider.Cuda, _ => InferenceProvider.Auto,
+                            "cpu" => InferenceProvider.CPU, "dml" => InferenceProvider.DirectML, "cuda" => InferenceProvider.CUDA, _ => InferenceProvider.Auto,
                         };
                         double seconds = double.Parse(Option("--seconds", "0"), CultureInfo.InvariantCulture);
                         long iterations = seconds > 0 ? 0 : long.Parse(Option("--iterations", "5000"));
@@ -161,7 +161,7 @@ namespace OpenSeat
                             // As the Arena draws a map from its seed
                             Utils.Random.SeedCurrentThread(seedBase + i);
                             Board board = MapGenerator.GenerateRandomClassic();
-                            output.WriteLine(new JsonObject { ["seed"] = seedBase + i, ["board"] = new OspCodec(board).BoardJson() }.ToJsonString());
+                            output.WriteLine(new JsonObject { ["seed"] = seedBase + i, ["board"] = new OSPCodec(board).BoardJson() }.ToJsonString());
                         }
                         return 0;
                     }

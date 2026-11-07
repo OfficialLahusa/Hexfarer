@@ -18,7 +18,7 @@ import soc.game.SOCGame;
  * from the center hex gives every land hex its axial coordinate; a corner's key is its hex and the two neighbors on
  * either side of it. No coordinate tables are written down.
  */
-public final class OspBoard
+public final class OSPBoard
 {
     // The protocol's axial steps: east, south-east, south-west, west, north-west, north-east
     private static final int[][] STEPS = { {1, 0}, {0, 1}, {-1, 1}, {-1, 0}, {0, -1}, {1, -1} };
@@ -59,7 +59,7 @@ public final class OspBoard
     private final Map<Integer, List<Object>> edgePaths = new TreeMap<>();
     private final Map<String, Integer> edgeAt = new HashMap<>();
 
-    public OspBoard(SOCBoard board)
+    public OSPBoard(SOCBoard board)
     {
         this.board = board;
         landHexes = board.getLandHexCoords();
@@ -346,10 +346,10 @@ public final class OspBoard
     {
         if (args.length < 1 || ! args[0].equals("describe"))
         {
-            System.err.println("Usage: OspBoard describe SEED");
+            System.err.println("Usage: OSPBoard describe SEED");
             System.exit(2);
         }
-        OspBoard osp = new OspBoard(newGame("describe-" + (args.length > 1 ? args[1] : "0")).getBoard());
+        OSPBoard osp = new OSPBoard(newGame("describe-" + (args.length > 1 ? args[1] : "0")).getBoard());
         List<Object> hexes = new ArrayList<>();
         for (int hex : osp.landHexes)
         {

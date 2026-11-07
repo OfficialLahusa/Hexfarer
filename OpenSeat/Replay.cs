@@ -1,4 +1,4 @@
-using Common.Osp;
+using Common.OSP;
 using System.IO.Compression;
 using System.Text.Json.Nodes;
 
@@ -130,8 +130,8 @@ namespace OpenSeat
                 if (seat != decide["seat"]!.GetValue<int>()) { Diverge("seat", $"{at}: seat {decide["seat"]} acts, Hexfarer expects {seat}"); return; }
 
                 // The legal moves of both, as sets of protocol moves
-                HashSet<string> ours = _replica.Legal().Select(m => OspCodec.Canonical(m.move)).ToHashSet();
-                HashSet<string> theirs = decide["legal"]!.AsArray().Select(OspCodec.Canonical).ToHashSet();
+                HashSet<string> ours = _replica.Legal().Select(m => OSPCodec.Canonical(m.move)).ToHashSet();
+                HashSet<string> theirs = decide["legal"]!.AsArray().Select(OSPCodec.Canonical).ToHashSet();
                 string prompt = decide["state"]!["prompt"]!.GetValue<string>();
                 foreach (string missing in theirs.Except(ours))
                     Note($"legal: only the referee allows {Replica.MoveType(missing)} ({prompt})", $"{at}: {missing}");

@@ -159,12 +159,12 @@ namespace Common
         /// three hexes, sorted), paths (their two intersections, sorted) and the paths of the harbors. The same for every
         /// classic board; Bridges/osp/classic-board.json holds it, and every engine's adapter is tested against that file.
         /// </summary>
-        public sealed record OspShape(int[][] Land, int[][] Sea, int[][][] Intersections, int[][][][] Paths, int[][][][] Harbors);
+        public sealed record OSPShape(int[][] Land, int[][] Sea, int[][][] Intersections, int[][][][] Paths, int[][][][] Harbors);
 
         /// <summary>
-        /// The board's shape in the Open Seat Protocol's keys (see OspShape)
+        /// The board's shape in the Open Seat Protocol's keys (see OSPShape)
         /// </summary>
-        public static OspShape ShapeOf(Board board)
+        public static OSPShape ShapeOf(Board board)
         {
             Export export = Of(board);
             // The axial hex of a cube [q, r, s]
@@ -180,7 +180,7 @@ namespace Common
             IComparer<int[]> hex = Lexical<int>();
             IComparer<int[][]> intersection = Lexical(hex);
             IComparer<int[][][]> path = Lexical(intersection);
-            return new OspShape(land.Order(hex).ToArray(), sea.Order(hex).ToArray(), intersections.Order(intersection).ToArray(),
+            return new OSPShape(land.Order(hex).ToArray(), sea.Order(hex).ToArray(), intersections.Order(intersection).ToArray(),
                 paths.Order(path).ToArray(), harbors.Order(path).ToArray());
         }
 
@@ -188,7 +188,7 @@ namespace Common
         /// The shape as the reference file holds it: one hex, intersection or path per line, so that a difference shows
         /// where it is
         /// </summary>
-        public static string ToJson(OspShape shape)
+        public static string ToJson(OSPShape shape)
         {
             static string Lines<T>(string name, T[] items) =>
                 $"  \"{name}\": [\n" + string.Join(",\n", items.Select(item => "    " + System.Text.Json.JsonSerializer.Serialize(item))) + "\n  ]";

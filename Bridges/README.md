@@ -30,11 +30,11 @@ Contents:
     rebuilds a Catanatron game from the referee's state, the bot picks among the referee's legal moves.
   - `drive.py`: Hexfarer (or any Open Seat Agent) under Catanatron's referee.
 - `jsettlers/`: JSettlers in protocol terms (Java, built by `jsettlers.py` against JSettlers' jar into `build/`):
-  - `OspBoard`: its classic board in protocol keys, from its own adjacency; `OspGame`: states, legal moves by its own
+  - `OSPBoard`: its classic board in protocol keys, from its own adjacency; `OSPGame`: states, legal moves by its own
     rules and moves played through its game logic.
   - `Recorder --games N --out games.jsonl.gz [--ruleset jsettlers]`: random games by JSettlers' rules as referee
     messages, for Hexfarer's replay harness (the differences found are in PROTOCOL.md's ruleset table).
-  - `OspServer` with `OspRobotClient`: JSettlers' server whose robot seats include Open Seat Agents (-Dosp.agent=COMMAND,
+  - `OSPServer` with `OSPRobotClient`: JSettlers' server whose robot seats include Open Seat Agents (-Dosp.agent=COMMAND,
     started through jsettlers.bots.start3p). The robot runs inside the server and reads the game under the server's
     locks; an agent gets the true state or its seat's view, as it asks, and if it observes, every move of the game as
     a step from the game's start (`MoveLog`, which turns JSettlers' requests into protocol moves). -Dosp.log=DIR keeps

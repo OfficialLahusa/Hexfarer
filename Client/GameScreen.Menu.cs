@@ -134,7 +134,7 @@ namespace Client
         private void DrawMenu()
         {
             // The whole window, so the board behind takes no clicks
-            ImDrawListPtr dl = Theme.BeginHud("##mainmenu", Vector2.Zero, Display);
+            ImDrawListPtr dl = Theme.BeginHUD("##mainmenu", Vector2.Zero, Display);
             dl.AddRectFilled(new Vector2(-8), Display + new Vector2(8), Theme.U32(Theme.WithAlpha(Theme.Background, 0.78f)));
 
             float height = _menuPage switch

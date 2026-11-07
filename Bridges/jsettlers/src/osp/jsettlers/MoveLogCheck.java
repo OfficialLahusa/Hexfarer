@@ -25,8 +25,8 @@ public final class MoveLogCheck
     {
         for (long seed = 1; seed < 200; seed++)
         {
-            SOCGame game = OspBoard.newGame("discard-check-" + seed);
-            OspGame osp = new OspGame(game);
+            SOCGame game = OSPBoard.newGame("discard-check-" + seed);
+            OSPGame osp = new OSPGame(game);
             Random random = new Random(seed);
             // Players who hoard their cards: they roll and end their turns, and build only in the setup
             while (! osp.isOver() && game.getRoundCount() < 60)
@@ -56,7 +56,7 @@ public final class MoveLogCheck
             {
                 int seat = discarders.get(i), pn = osp.playerOf(seat);
                 List<Object> discard = (List<Object>) osp.discardMoves(seat).get(0);
-                SOCResourceSet set = OspGame.resourceSet(discard.get(1));
+                SOCResourceSet set = OSPGame.resourceSet(discard.get(1));
                 MoveLog.dispatchAs(log, (g, message, connection) ->
                 {
                     g.discard(pn, set);

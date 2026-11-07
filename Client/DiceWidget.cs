@@ -9,7 +9,7 @@ namespace Client
     {
         private RectangleShape _firstDie;
         private RectangleShape _secondDie;
-        // Size of a die in UI units (GuiImpl.UiScale pixels each)
+        // Size of a die in UI units (GUIImpl.UIScale pixels each)
         public const int Size = 120;
 
         // Between the two dice, in UI units
@@ -17,7 +17,7 @@ namespace Client
 
         // The HUD column the dice are centered in (UI units)
         private readonly float _columnWidth;
-        private static float _size => Size * GuiImpl.UiScale;
+        private static float _size => Size * GUIImpl.UIScale;
         private static readonly Color _inactiveColor = new Color(255, 255, 255, 85);
         private bool _active;
 
@@ -71,8 +71,8 @@ namespace Client
         private void UpdatePosition(RenderWindow window)
         {
             // At the bottom of the right HUD column, centered in it (the view's origin is the window's center)
-            float margin = 20 * GuiImpl.UiScale, gap = Gap * GuiImpl.UiScale;
-            float columnCenter = window.Size.X / 2 - margin - _columnWidth * GuiImpl.UiScale / 2;
+            float margin = 20 * GUIImpl.UIScale, gap = Gap * GUIImpl.UIScale;
+            float columnCenter = window.Size.X / 2 - margin - _columnWidth * GUIImpl.UIScale / 2;
             float left = MathF.Round(columnCenter - _size - gap / 2);
             _firstDie.Position = new Vector2f(left, window.Size.Y / 2 - _size - margin);
             _secondDie.Position = new Vector2f(left + _size + gap, window.Size.Y / 2 - _size - margin);

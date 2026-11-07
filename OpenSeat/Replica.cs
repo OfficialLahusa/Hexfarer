@@ -1,6 +1,6 @@
 using Common;
 using Common.Actions;
-using Common.Osp;
+using Common.OSP;
 using System.Text.Json.Nodes;
 using Action = Common.Actions.Action;
 
@@ -17,7 +17,7 @@ namespace OpenSeat
     internal sealed class Replica
     {
         public GameState State { get; private set; }
-        public OspCodec Codec { get; }
+        public OSPCodec Codec { get; }
 
         /// <summary>
         /// Whether the referee plays Catanatron's rules (its ruleset's preset), whose known deviations the differences name
@@ -35,8 +35,8 @@ namespace OpenSeat
 
         public Replica(JsonNode before)
         {
-            Board board = OspCodec.BuildBoard(before["board"]!);
-            Codec = new OspCodec(board);
+            Board board = OSPCodec.BuildBoard(before["board"]!);
+            Codec = new OSPCodec(board);
             State = new GameState(board, (uint)before["players"]!.GetValue<int>());
             // The ruleset's options, by default its preset's: Catanatron's narrow the moves, the rulebook's ("standard") don't
             JsonNode? ruleset = before["ruleset"];
@@ -49,14 +49,14 @@ namespace OpenSeat
 
         /// <summary>
         /// Takes the game from the referee's full state where following its moves can't (no steps came, or a rule
-        /// difference changed the board): the copy becomes that state, with what the legal moves tell (OspCodec.BuildState)
+        /// difference changed the board): the copy becomes that state, with what the legal moves tell (OSPCodec.BuildState)
         /// </summary>
         public void Rebuild(JsonNode state, JsonArray legal) => State = Codec.BuildState(state, legal);
 
         /// <summary>
         /// Whether the board as Hexfarer holds it writes back as the referee sent it
         /// </summary>
-        public bool BoardMatches(JsonNode before) => OspCodec.Canonical(Codec.BoardJson()) == OspCodec.Canonical(before["board"]);
+        public bool BoardMatches(JsonNode before) => OSPCodec.Canonical(Codec.BoardJson()) == OSPCodec.Canonical(before["board"]);
 
         /// <summary>
         /// The player who acts now: the lowest seat that can (as the agents and the Arena pick it), or -1
@@ -108,8 +108,8 @@ namespace OpenSeat
         /// </summary>
         public Action? Find(JsonNode move)
         {
-            string wanted = OspCodec.Canonical(move);
-            return Legal().Where(m => OspCodec.Canonical(m.move) == wanted).Select(m => m.action).FirstOrDefault();
+            string wanted = OSPCodec.Canonical(move);
+            return Legal().Where(m => OSPCodec.Canonical(m.move) == wanted).Select(m => m.action).FirstOrDefault();
         }
 
         /// <summary>
@@ -118,7 +118,7 @@ namespace OpenSeat
         public (string kind, string detail)? Follow(JsonNode step)
         {
             string at = $"move {step["n"]}";
-            string move = OspCodec.Canonical(step["action"]);
+            string move = OSPCodec.Canonical(step["action"]);
             Action? action = Find(step["action"]!);
             if (action == null) return ($"step: Hexfarer doesn't allow {MoveType(move)}", $"{at}: {move}");
 
@@ -145,9 +145,9 @@ namespace OpenSeat
             {
                 // Only the total of the dice counts for the game
                 RollAction => variants.Cast<RollAction>().FirstOrDefault(v => v.History!.RollResult.Total == result!["dice"]!.AsArray().Sum(d => d!.GetValue<int>())),
-                BuyDevelopmentCardAction => variants.Cast<BuyDevelopmentCardAction>().FirstOrDefault(v => OspCodec.CardNames[v.History!.DrawnType] == result!["card"]!.GetValue<string>()),
+                BuyDevelopmentCardAction => variants.Cast<BuyDevelopmentCardAction>().FirstOrDefault(v => OSPCodec.CardNames[v.History!.DrawnType] == result!["card"]!.GetValue<string>()),
                 // A robbery without a victim has no result or a null card
-                RobberAction => variants.Cast<RobberAction>().FirstOrDefault(v => (v.History!.StolenCard is ResourceCardType card ? OspCodec.ResourceNames[card] : null) == result?["stolen"]?.GetValue<string>()),
+                RobberAction => variants.Cast<RobberAction>().FirstOrDefault(v => (v.History!.StolenCard is ResourceCardType card ? OSPCodec.ResourceNames[card] : null) == result?["stolen"]?.GetValue<string>()),
                 _ => throw new NotSupportedException($"No forced outcome for {action.GetType().Name}."),
             };
         }
@@ -165,7 +165,7 @@ namespace OpenSeat
                 if (!Same(theirs[field], ours[field])) return ($"state: {field}", $"{at}: referee {theirs[field]?.ToJsonString()}, Hexfarer {ours[field]?.ToJsonString()}");
             foreach (string kind in new[] { "settlements", "cities", "roads" })
             {
-                HashSet<string> a = theirs["buildings"]![kind]!.AsArray().Select(OspCodec.Canonical).ToHashSet(), b = ours["buildings"]![kind]!.AsArray().Select(OspCodec.Canonical).ToHashSet();
+                HashSet<string> a = theirs["buildings"]![kind]!.AsArray().Select(OSPCodec.Canonical).ToHashSet(), b = ours["buildings"]![kind]!.AsArray().Select(OSPCodec.Canonical).ToHashSet();
                 if (!a.SetEquals(b)) return ($"state: {kind}", $"{at}: only the referee {string.Join(" ", a.Except(b))}; only Hexfarer {string.Join(" ", b.Except(a))}");
             }
             JsonNode bank = Bank(theirs);
@@ -173,7 +173,7 @@ namespace OpenSeat
             {
                 // Explained after a roll if Hexfarer emptied what the referee kept: the rulebook gives a single player owed a
                 // short resource the rest, Catanatron gives nobody anything
-                string[] differing = OspCodec.ResourceNames.Values.Where(n => !Same(bank[n], ours["bank"]![n])).ToArray();
+                string[] differing = OSPCodec.ResourceNames.Values.Where(n => !Same(bank[n], ours["bank"]![n])).ToArray();
                 bool shortage = Catanatron && LastMove == "roll" && differing.Length > 0 && differing.All(n => int.Parse(ours["bank"]![n]!.ToJsonString()) == 0);
                 return (shortage ? "state: bank (known: Catanatron gives nobody a short resource, even a single player owed it)" : "state: bank",
                     $"{at}: referee {theirs["bank"]!.ToJsonString()}, Hexfarer {ours["bank"]!.ToJsonString()}");
@@ -211,7 +211,7 @@ namespace OpenSeat
         public bool Patch(JsonNode theirs)
         {
             JsonNode bank = Bank(theirs);
-            foreach ((ResourceCardType type, string name) in OspCodec.ResourceNames)
+            foreach ((ResourceCardType type, string name) in OSPCodec.ResourceNames)
             {
                 State.ResourceBank.Remove(type, State.ResourceBank.Get(type));
                 State.ResourceBank.Add(type, uint.Parse(bank[name]!.ToJsonString()));
@@ -220,7 +220,7 @@ namespace OpenSeat
             {
                 JsonNode player = theirs["players"]![seat]!;
                 PlayerState ours = State.Players[seat];
-                foreach ((ResourceCardType type, string name) in OspCodec.ResourceNames)
+                foreach ((ResourceCardType type, string name) in OSPCodec.ResourceNames)
                 {
                     ours.ResourceCards.Remove(type, ours.ResourceCards.Get(type));
                     ours.ResourceCards.Add(type, uint.Parse(player["hand"]![name]!.ToJsonString()));
@@ -266,14 +266,14 @@ namespace OpenSeat
             return best;
         }
 
-        public static bool Same(JsonNode? a, JsonNode? b) => OspCodec.Canonical(a) == OspCodec.Canonical(b);
+        public static bool Same(JsonNode? a, JsonNode? b) => OSPCodec.Canonical(a) == OSPCodec.Canonical(b);
 
         // The referee's bank as Hexfarer holds one: an unlimited bank's count below 0 (the hands hold more than 19, as in
         // JSettlers) is an empty bank
         private static JsonNode Bank(JsonNode theirs)
         {
             JsonObject bank = theirs["bank"]!.DeepClone().AsObject();
-            foreach (string name in OspCodec.ResourceNames.Values)
+            foreach (string name in OSPCodec.ResourceNames.Values)
                 if (bank[name] is JsonNode count && int.Parse(count.ToJsonString()) < 0) bank[name] = 0;
             return bank;
         }

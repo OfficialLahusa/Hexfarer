@@ -13,7 +13,7 @@ namespace Tests
     public class ForcedMoveTests
     {
         private static readonly Lazy<StateValueNet> Net = new(() =>
-            new StateValueNet(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.Cpu));
+            new StateValueNet(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU));
 
         private static MCTSAgent NewSearch(GameState state) =>
             new MCTSAgent(0, state, valueNet: Net.Value, iterationLimit: 64, leavesPerBatch: 16, parallelSelection: false);
@@ -93,7 +93,7 @@ namespace Tests
         [Theory]
         [InlineData(true)]
         [InlineData(false)]
-        public void PimcPlaysTheOnlyLegalMoveAtOnceUnlessTheOldSearchIsAskedFor(bool atOnce)
+        public void PIMCPlaysTheOnlyLegalMoveAtOnceUnlessTheOldSearchIsAskedFor(bool atOnce)
         {
             GameState state = Position("roll");
             Action only = Assert.Single(MCTSTree.GetValidActions(state));

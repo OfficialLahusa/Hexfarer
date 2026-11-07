@@ -7,11 +7,11 @@ using Common;
 namespace Simulation
 {
     /// <summary>
-    /// Who plays a seat. The Pimc kinds are the MCTS presets: they see only what their seat can know and search its
-    /// information sets (see InformationSetMCTSAgent); the Mcts kinds are the open-hand presets, which see every hand. The
-    /// names stay as they were for saved seats.
+    /// Who plays a seat. The PIMC kinds are the MCTS presets: they see only what their seat can know and search its
+    /// information sets (see InformationSetMCTSAgent); the MCTS kinds are the open-hand presets, which see every hand. The
+    /// names travel in the messages, so renaming one needs a new Protocol.Version.
     /// </summary>
-    public enum SeatKind { Human, MctsEasy, MctsMedium, MctsHard, Greedy, Builder, Simple, Random, PimcEasy, PimcMedium, PimcHard, OpenSeatAgent }
+    public enum SeatKind { Human, MCTSEasy, MCTSMedium, MCTSHard, Greedy, Builder, Simple, Random, PIMCEasy, PIMCMedium, PIMCHard, OpenSeatAgent }
 
     /// <summary>
     /// What a connection may do: an admin controls the match (seats, undo, edits, playback), a player and an agent (bridge)
@@ -62,14 +62,14 @@ namespace Simulation
         /// </summary>
         public static readonly SeatKind[] Ordered =
         [
-            SeatKind.Human, SeatKind.PimcEasy, SeatKind.PimcMedium, SeatKind.PimcHard, SeatKind.MctsEasy, SeatKind.MctsMedium, SeatKind.MctsHard,
+            SeatKind.Human, SeatKind.PIMCEasy, SeatKind.PIMCMedium, SeatKind.PIMCHard, SeatKind.MCTSEasy, SeatKind.MCTSMedium, SeatKind.MCTSHard,
             SeatKind.Greedy, SeatKind.Builder, SeatKind.Simple, SeatKind.Random
         ];
 
         /// <summary>
         /// The bot a new game gets by default: the hard MCTS preset, or the builder without the value net
         /// </summary>
-        public static SeatKind DefaultBot(bool valueNetAvailable) => valueNetAvailable ? SeatKind.PimcHard : SeatKind.Builder;
+        public static SeatKind DefaultBot(bool valueNetAvailable) => valueNetAvailable ? SeatKind.PIMCHard : SeatKind.Builder;
 
         /// <summary>
         /// What a seat picker offers: the ordered kinds, then each Open Seat Agent the simulation has set up
@@ -91,16 +91,16 @@ namespace Simulation
         public static string Name(SeatKind kind) => kind switch
         {
             SeatKind.Human => "Human",
-            SeatKind.MctsEasy => "Open-hand MCTS Easy",
-            SeatKind.MctsMedium => "Open-hand MCTS Medium",
-            SeatKind.MctsHard => "Open-hand MCTS Hard",
+            SeatKind.MCTSEasy => "Open-hand MCTS Easy",
+            SeatKind.MCTSMedium => "Open-hand MCTS Medium",
+            SeatKind.MCTSHard => "Open-hand MCTS Hard",
             SeatKind.Greedy => "Greedy",
             SeatKind.Builder => "Builder",
             SeatKind.Simple => "Simple",
             SeatKind.Random => "Random",
-            SeatKind.PimcEasy => "MCTS Easy",
-            SeatKind.PimcMedium => "MCTS Medium",
-            SeatKind.PimcHard => "MCTS Hard",
+            SeatKind.PIMCEasy => "MCTS Easy",
+            SeatKind.PIMCMedium => "MCTS Medium",
+            SeatKind.PIMCHard => "MCTS Hard",
             SeatKind.OpenSeatAgent => "Open Seat Agent",
             _ => kind.ToString()
         };
@@ -108,15 +108,15 @@ namespace Simulation
         /// <summary>
         /// Whether the seat's agent evaluates states with the value net (a human seat's stand-in does)
         /// </summary>
-        public static bool NeedsValueNet(SeatKind kind) => kind is SeatKind.MctsEasy or SeatKind.MctsMedium or SeatKind.MctsHard or SeatKind.Greedy or SeatKind.Human
-            or SeatKind.PimcEasy or SeatKind.PimcMedium or SeatKind.PimcHard;
+        public static bool NeedsValueNet(SeatKind kind) => kind is SeatKind.MCTSEasy or SeatKind.MCTSMedium or SeatKind.MCTSHard or SeatKind.Greedy or SeatKind.Human
+            or SeatKind.PIMCEasy or SeatKind.PIMCMedium or SeatKind.PIMCHard;
 
-        public static bool IsFair(SeatKind kind) => kind is SeatKind.PimcEasy or SeatKind.PimcMedium or SeatKind.PimcHard;
+        public static bool IsFair(SeatKind kind) => kind is SeatKind.PIMCEasy or SeatKind.PIMCMedium or SeatKind.PIMCHard;
 
         public static double PresetSeconds(SeatKind kind) => kind switch
         {
-            SeatKind.MctsEasy or SeatKind.PimcEasy => 0.1,
-            SeatKind.MctsHard or SeatKind.PimcHard => 2,
+            SeatKind.MCTSEasy or SeatKind.PIMCEasy => 0.1,
+            SeatKind.MCTSHard or SeatKind.PIMCHard => 2,
             _ => 0.5
         };
 
@@ -125,7 +125,7 @@ namespace Simulation
         /// </summary>
         public static Agent CreateAgent(SeatKind kind, sbyte seat, GameState state, AgentSettings settings, bool valueNetAvailable)
         {
-            if (kind == SeatKind.Human) kind = valueNetAvailable ? SeatKind.MctsMedium : SeatKind.Builder;
+            if (kind == SeatKind.Human) kind = valueNetAvailable ? SeatKind.MCTSMedium : SeatKind.Builder;
             if (NeedsValueNet(kind) && !valueNetAvailable) kind = SeatKind.Builder;
 
             MCTSAgent Search() => new MCTSAgent(seat, state, timeLimitSeconds: settings.SecondsForAll ?? PresetSeconds(kind), opponentModel: settings.OpponentModel,

@@ -27,7 +27,7 @@ namespace Tests
             Assert.Equal(100, settings.FastIterations);
             Assert.Equal(0.5, settings.FullSearchProbability);
             Assert.Equal(10, settings.TemperatureMoves);
-            Assert.Equal(InferenceProvider.Cpu, settings.Provider);
+            Assert.Equal(InferenceProvider.CPU, settings.Provider);
             Assert.Equal(7UL, settings.Seed);
 
             Assert.Throws<ArgumentException>(() => SelfPlayCollector.CommandLine.Parse(["--full-probability", "1.5"]));
@@ -47,7 +47,7 @@ namespace Tests
                 SelfPlaySettings settings = new()
                 {
                     Games = 3, ConcurrentGames = 3, LeavesPerBatch = 8, FullIterations = 32, FastIterations = 16, FullSearchProbability = 0.5,
-                    TemperatureMoves = 10, MaxActions = 150, ModelPath = modelPath, Nets = 1, BatchRows = 64, Provider = InferenceProvider.Cpu,
+                    TemperatureMoves = 10, MaxActions = 150, ModelPath = modelPath, Nets = 1, BatchRows = 64, Provider = InferenceProvider.CPU,
                     Seed = 11, OutputDirectory = root, Name = "run",
                 };
                 SelfPlayCollector.SelfPlayCollector collector = new(settings, TextWriter.Null);
@@ -56,9 +56,9 @@ namespace Tests
                 Assert.Equal(3, result.Games);
 
                 string directory = collector.RunDirectory;
-                IStateVectorizer vectorizer = StateVectorizer.For(new StateValueNet(modelPath, provider: InferenceProvider.Cpu));
-                var games = ReadCsv(Path.Combine(directory, "games.csv"));
-                var samples = ReadCsv(Path.Combine(directory, "samples.csv"));
+                IStateVectorizer vectorizer = StateVectorizer.For(new StateValueNet(modelPath, provider: InferenceProvider.CPU));
+                var games = ReadCSV(Path.Combine(directory, "games.csv"));
+                var samples = ReadCSV(Path.Combine(directory, "samples.csv"));
                 Assert.Equal(new long[] { 0, 1, 2 }, games.Select(game => long.Parse(game["game"])).Order());
                 Assert.Equal(result.Positions, samples.Count);
                 Assert.True(samples.Count > 0);
@@ -127,7 +127,7 @@ namespace Tests
                 SelfPlaySettings settings = new()
                 {
                     Games = 3, ConcurrentGames = 3, LeavesPerBatch = 8, FullIterations = 32, FastIterations = 16, FullSearchProbability = 0.5,
-                    TemperatureMoves = 10, MaxActions = 400, ModelPath = modelPath, Nets = 1, BatchRows = 64, Provider = InferenceProvider.Cpu,
+                    TemperatureMoves = 10, MaxActions = 400, ModelPath = modelPath, Nets = 1, BatchRows = 64, Provider = InferenceProvider.CPU,
                     Seed = 13, OutputDirectory = root, Name = "run", HiddenInformation = true,
                 };
                 SelfPlayCollector.SelfPlayCollector collector = new(settings, TextWriter.Null);
@@ -136,12 +136,12 @@ namespace Tests
                 Assert.Contains($"\"feature_dim\": {ViewVectorizer.FeatureDim}", File.ReadAllText(Path.Combine(directory, "metadata.json")));
                 Assert.Contains("\"hidden_information\": true", File.ReadAllText(Path.Combine(directory, "metadata.json")));
 
-                var samples = ReadCsv(Path.Combine(directory, "samples.csv"));
+                var samples = ReadCSV(Path.Combine(directory, "samples.csv"));
                 Assert.NotEmpty(samples);
                 byte[] states = File.ReadAllBytes(Path.Combine(directory, "states_c0000.f16"));
                 Assert.Equal(samples.Count * ViewVectorizer.FeatureDim * sizeof(ushort), states.Length);
 
-                foreach (var game in ReadCsv(Path.Combine(directory, "games.csv")))
+                foreach (var game in ReadCSV(Path.Combine(directory, "games.csv")))
                 {
                     SaveFile saved = SelfPlayWriter.ReadRecord(directory, int.Parse(game["record_chunk"]), long.Parse(game["record_offset"]), int.Parse(game["record_length"]));
                     GameState state = SelfPlayGame.InitialState(ulong.Parse(game["seed"]), settings.CenterDesert);
@@ -192,13 +192,13 @@ namespace Tests
                 SelfPlaySettings settings = new()
                 {
                     Games = 3, ConcurrentGames = 3, LeavesPerBatch = 8, FullIterations = 32, FastIterations = 16, FullSearchProbability = 0.5,
-                    TemperatureMoves = 10, MaxActions = 300, ModelPath = modelPath, Nets = 1, BatchRows = 64, Provider = InferenceProvider.Cpu,
+                    TemperatureMoves = 10, MaxActions = 300, ModelPath = modelPath, Nets = 1, BatchRows = 64, Provider = InferenceProvider.CPU,
                     Seed = 12, OutputDirectory = root, Name = "run",
                 };
                 SelfPlayCollector.SelfPlayCollector collector = new(settings, TextWriter.Null);
                 Assert.Equal(0, collector.Collect().Errors);
                 string directory = collector.RunDirectory;
-                var samples = ReadCsv(Path.Combine(directory, "samples.csv"));
+                var samples = ReadCSV(Path.Combine(directory, "samples.csv"));
 
                 Assert.Equal(samples.Count, ViewFeatureWriter.ConvertRun(directory, TextWriter.Null));
                 byte[] views = File.ReadAllBytes(Path.Combine(directory, ViewFeatureWriter.FileName));
@@ -206,7 +206,7 @@ namespace Tests
 
                 // Row i is the i-th line of samples.csv: the position as its actor sees it, with its tracker's beliefs
                 var lineOf = samples.Select((sample, line) => (sample, line)).ToDictionary(x => (x.sample["game"], int.Parse(x.sample["action"])), x => x.line);
-                foreach (var game in ReadCsv(Path.Combine(directory, "games.csv")))
+                foreach (var game in ReadCSV(Path.Combine(directory, "games.csv")))
                 {
                     SaveFile saved = SelfPlayWriter.ReadRecord(directory, int.Parse(game["record_chunk"]), long.Parse(game["record_offset"]), int.Parse(game["record_length"]));
                     GameState state = SelfPlayGame.InitialState(ulong.Parse(game["seed"]), settings.CenterDesert);
@@ -269,7 +269,7 @@ namespace Tests
             return Enumerable.Range(0, bytes.Length / sizeof(int)).Select(i => BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(i * sizeof(int)))).ToArray();
         }
 
-        private static List<Dictionary<string, string>> ReadCsv(string path)
+        private static List<Dictionary<string, string>> ReadCSV(string path)
         {
             string[] lines = File.ReadAllLines(path);
             string[] header = lines[0].Split(',');

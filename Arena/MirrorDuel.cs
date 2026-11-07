@@ -222,7 +222,7 @@ namespace Arena
             string text = $"{_games} games {_wins}:{_losses} | {s.Pairs} pairs: won twice {s.ChallengerTwice}:{s.BaselineTwice}, split {s.Split}";
             if (s.Pairs < 2) return text;
             string verdict = s.Verdict switch { 1 => $"H1 accepted (gain >= {settings.Elo1:+0;-0;0} Elo)", -1 => $"H0 accepted (gain <= {settings.Elo0:+0;-0;0} Elo)", _ => "open" };
-            return FormattableString.Invariant($"{text} | {s.Elo:+0;-0;0} Elo [{s.EloLow:+0;-0;0}, {s.EloHigh:+0;-0;0}] | SPRT [{settings.Elo0:+0;-0;0}, {settings.Elo1:+0;-0;0}] LLR {s.Llr:+0.00;-0.00} ({s.LowerBound:0.00}, {s.UpperBound:0.00}) {verdict}");
+            return FormattableString.Invariant($"{text} | {s.Elo:+0;-0;0} Elo [{s.EloLow:+0;-0;0}, {s.EloHigh:+0;-0;0}] | SPRT [{settings.Elo0:+0;-0;0}, {settings.Elo1:+0;-0;0}] LLR {s.LLR:+0.00;-0.00} ({s.LowerBound:0.00}, {s.UpperBound:0.00}) {verdict}");
         }
 
         private void Write(string line)

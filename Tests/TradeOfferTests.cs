@@ -326,7 +326,7 @@ namespace Tests
             Assert.Equal(To(hiding, other), offer.Recipients);
         }
 
-        private static StateValueNet Net(string name) => new StateValueNet(TestUtil.FixturePath("ValueNet", name), provider: InferenceProvider.Cpu);
+        private static StateValueNet Net(string name) => new StateValueNet(TestUtil.FixturePath("ValueNet", name), provider: InferenceProvider.CPU);
 
         [Fact]
         public void TheValueNetJudgesManyPositionsInOneBatchAsEachAlone()

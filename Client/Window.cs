@@ -34,7 +34,7 @@ namespace Client
             int seed = int.Parse(Option("--seed") ?? "7", CultureInfo.InvariantCulture);
             string? size = Option("--size");
             if (Option("--mouse") is string mouse && mouse.Split(',') is [string mouseX, string mouseY])
-                GuiImpl.MouseOverride = new Vector2i(int.Parse(mouseX, CultureInfo.InvariantCulture), int.Parse(mouseY, CultureInfo.InvariantCulture));
+                GUIImpl.MouseOverride = new Vector2i(int.Parse(mouseX, CultureInfo.InvariantCulture), int.Parse(mouseY, CultureInfo.InvariantCulture));
 
             VideoMode mode = VideoMode.DesktopMode;
             if (size != null)
@@ -49,7 +49,7 @@ namespace Client
             if (size == null) ShowWindow(window.SystemHandle, 3);
 
             // Init ImGui
-            GuiImpl.Init(window);
+            GUIImpl.Init(window);
             // The HUD is laid out for a window about 1100 pixels high and scaled to the screen in quarter steps
             float uiScale = Math.Clamp(MathF.Round(window.Size.Y / 1100f * 4) / 4, 0.75f, 2f);
             UI.Theme.Init(uiScale);

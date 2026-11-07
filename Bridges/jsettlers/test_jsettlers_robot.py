@@ -1,6 +1,6 @@
 """
-A JSettlers robot whose decisions an Open Seat Agent makes (OspRobotBrain.java), in robot-only games on JSettlers' own
-server (OspServer.java) against JSettlers' robots: every game ends with a winner, the robot made its decisions through
+A JSettlers robot whose decisions an Open Seat Agent makes (OSPRobotBrain.java), in robot-only games on JSettlers' own
+server (OSPServer.java) against JSettlers' robots: every game ends with a winner, the robot made its decisions through
 the agent (here one that plays the first legal move) without a single fallback, and the agent got the game and its end.
 Needs a JDK and JSettlers' full jar in JSETTLERS_JAR. Run: python -m unittest test_jsettlers_robot
 """
@@ -30,7 +30,7 @@ def play(games, agent_command, logs, record=None):
     directory record, if given); the server's standard error"""
     properties = {
         "jsettlers.startrobots": "4",
-        "jsettlers.bots.start3p": "1,osp.jsettlers.OspRobotClient",
+        "jsettlers.bots.start3p": "1,osp.jsettlers.OSPRobotClient",
         "jsettlers.bots.percent3p": "100",
         "jsettlers.bots.botgames.total": str(games),
         "jsettlers.bots.botgames.parallel": "1",
@@ -41,7 +41,7 @@ def play(games, agent_command, logs, record=None):
         "jsettlers.gameopt.NT": "t",
         "jsettlers.allow.debug": "N",
     }
-    arguments = ["java", f"-Dosp.agent={agent_command}", f"-Dosp.log={logs}", "-Dosp.debug=true", "-cp", jsettlers.classpath(), "osp.jsettlers.OspServer"]
+    arguments = ["java", f"-Dosp.agent={agent_command}", f"-Dosp.log={logs}", "-Dosp.debug=true", "-cp", jsettlers.classpath(), "osp.jsettlers.OSPServer"]
     if record:
         arguments.insert(3, f"-Dosp.record={record}")
     properties["jsettlers.port"] = str(free_port())

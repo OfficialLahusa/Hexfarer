@@ -142,9 +142,9 @@ namespace Arena
                         {
                             Provider = Value() switch
                             {
-                                "cpu" => InferenceProvider.Cpu,
+                                "cpu" => InferenceProvider.CPU,
                                 "dml" => InferenceProvider.DirectML,
-                                "cuda" => InferenceProvider.Cuda,
+                                "cuda" => InferenceProvider.CUDA,
                                 string other => throw new ArgumentException($"Unknown provider \"{other}\" (cpu, dml or cuda)."),
                             }
                         };

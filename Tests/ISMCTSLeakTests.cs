@@ -44,7 +44,7 @@ namespace Tests
         // sensitive_tiny has large random weights: its values swing with every feature, so a hidden card that reaches a
         // decision through the net almost always changes it
         private static readonly Lazy<Dictionary<string, StateValueNet>> Nets = new(() => new[] { "plain_tiny.onnx", "view_tiny.onnx", "policy_tiny.onnx", "sensitive_tiny.onnx" }
-            .ToDictionary(name => name, name => new StateValueNet(TestUtil.FixturePath("ValueNet", name), provider: InferenceProvider.Cpu)));
+            .ToDictionary(name => name, name => new StateValueNet(TestUtil.FixturePath("ValueNet", name), provider: InferenceProvider.CPU)));
 
         #region Positions
         /// <summary>
@@ -297,7 +297,7 @@ namespace Tests
                         if (full.move.ToString() != DecideOffering(alternative, beliefs, net, fullKnowledge: true).move.ToString()) differingWithFullKnowledge++;
 
                         // PIMC judges its offers over worlds from the same beliefs
-                        Action pimc = DecidePimcOffer(truth, beliefs, net), pimcAlternative = DecidePimcOffer(alternative, beliefs, net);
+                        Action pimc = DecidePIMCOffer(truth, beliefs, net), pimcAlternative = DecidePIMCOffer(alternative, beliefs, net);
                         Assert.Equal(pimc is OfferTradeAction ? pimc.ToString() : "no offer", pimcAlternative is OfferTradeAction ? pimcAlternative.ToString() : "no offer");
                         compared++;
                     }
@@ -318,7 +318,7 @@ namespace Tests
             return (move, agent.LastTree is ISMCTSTree tree ? Shape(tree) : null);
         }
 
-        private static Action DecidePimcOffer(GameState truth, BeliefTracker beliefs, string net)
+        private static Action DecidePIMCOffer(GameState truth, BeliefTracker beliefs, string net)
         {
             MCTSAgent search = new MCTSAgent((sbyte)beliefs.Observer, truth, valueNet: Nets.Value[net], iterationLimit: 8, leavesPerBatch: 8, parallelSelection: false);
             search.Offers.Margin = 0;
@@ -329,7 +329,7 @@ namespace Tests
         }
 
         [Fact]
-        public void ThePimcAgentSearchesTheSameWorldsInEveryWorldTheSeatCantTellApart()
+        public void ThePIMCAgentSearchesTheSameWorldsInEveryWorldTheSeatCantTellApart()
         {
             // PIMC decides only by searching its worlds (and answers trades on them), so the worlds must depend on the view only
             int compared = 0;
@@ -337,17 +337,17 @@ namespace Tests
             {
                 foreach ((GameState truth, BeliefTracker beliefs) in Decisions(seat, 5, firstSeed: 1000 + seat * 60))
                 {
-                    DeterminizedMCTSAgent Pimc(GameState position)
+                    DeterminizedMCTSAgent PIMC(GameState position)
                     {
                         MCTSAgent search = new MCTSAgent((sbyte)seat, position, valueNet: Nets.Value["plain_tiny.onnx"], iterationLimit: 32, leavesPerBatch: 16);
                         DeterminizedMCTSAgent agent = new DeterminizedMCTSAgent(search, position, determinizations: 4, seed: 6);
                         agent.ResetTo(position, beliefs);
                         return agent;
                     }
-                    IReadOnlyList<GameState> worlds = Pimc(truth).Determinize(truth);
+                    IReadOnlyList<GameState> worlds = PIMC(truth).Determinize(truth);
                     foreach (GameState alternative in Alternatives(truth, beliefs, 3, seed: 30))
                     {
-                        Assert.Equal(worlds, Pimc(alternative).Determinize(alternative));
+                        Assert.Equal(worlds, PIMC(alternative).Determinize(alternative));
                         compared++;
                     }
                 }

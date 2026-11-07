@@ -369,7 +369,7 @@ namespace Tests
                 var reanalysis = new ReanalysisSettings
                 {
                     ModelPath = TestUtil.FixturePath("ValueNet", "policy_tiny.onnx"), Iterations = 48, ConcurrentSearches = 3, Nets = 1,
-                    BatchRows = 32, LeavesPerBatch = 8, Provider = Agents.Inference.InferenceProvider.Cpu, RunsPerBatch = runsPerBatch,
+                    BatchRows = 32, LeavesPerBatch = 8, Provider = Agents.Inference.InferenceProvider.CPU, RunsPerBatch = runsPerBatch,
                 };
                 string output = Path.Combine(datasetDirectory, "reanalysis");
                 ReanalysisResult result = Reanalysis.Run(index, states, output, reanalysis, settings, TextWriter.Null);
@@ -497,7 +497,7 @@ namespace Tests
             Assert.NotNull(commandLine.Reanalyze);
             (string index, string states, string output, ReanalysisSettings reanalysis) = commandLine.Reanalyze!.Value;
             Assert.Equal(("index.csv", "states.npy", "out", 20261025UL), (index, states, output, commandLine.Settings.Seed));
-            Assert.Equal(("net.onnx", 800, 10, 500, 64, 2, 256, 8, 1.0, Agents.Inference.InferenceProvider.Cuda),
+            Assert.Equal(("net.onnx", 800, 10, 500, 64, 2, 256, 8, 1.0, Agents.Inference.InferenceProvider.CUDA),
                 (reanalysis.ModelPath, reanalysis.Iterations, reanalysis.FirstRun, reanalysis.Runs, reanalysis.ConcurrentSearches, reanalysis.Nets,
                  reanalysis.BatchRows, reanalysis.LeavesPerBatch, reanalysis.Exploration, reanalysis.Provider));
             Assert.Null(CommandLine.Parse([]).Reanalyze);

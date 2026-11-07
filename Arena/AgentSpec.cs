@@ -122,7 +122,7 @@ namespace Arena
         /// and batches of 256 merged played 0.88x and 0.94x the games per hour at 800 and 5000 iterations)
         /// </summary>
         public static bool Merges(InferenceProvider provider, long iterations, params AgentSpec[] sides) =>
-            provider != InferenceProvider.Cuda || sides.Min(side => side.BatchFor(iterations)) < MergedRows;
+            provider != InferenceProvider.CUDA || sides.Min(side => side.BatchFor(iterations)) < MergedRows;
 
         /// <summary>
         /// Nets per merging evaluator: one runs a call while the next one is collected
@@ -161,7 +161,7 @@ namespace Arena
                         return new SideNets(first, null);
                     StateValueNet[] nets = [first, .. Enumerable.Range(1, MergingNets - 1).Select(_ => new StateValueNet(sides[0].ModelPath, provider: provider, fixedBatchSize: rows))];
                     // CUDA runs each call in the shape it gets, and its memory pool grows with every new shape: all calls get the full one
-                    BatchingEvaluator leaves = new(nets, rows, padToMaxRows: nets[0].Provider == InferenceProvider.Cuda);
+                    BatchingEvaluator leaves = new(nets, rows, padToMaxRows: nets[0].Provider == InferenceProvider.CUDA);
                     // The agents' own runs (encoding, trade judgments, single positions) go to the first worker's net
                     return new SideNets(nets[0], leaves);
                 }

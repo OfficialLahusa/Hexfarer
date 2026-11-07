@@ -3,7 +3,7 @@ using Agents.Inference;
 using Agents.MCTS;
 using Common;
 using Common.Actions;
-using Common.Osp;
+using Common.OSP;
 using System.Text.Json.Nodes;
 using Action = Common.Actions.Action;
 
@@ -186,7 +186,7 @@ namespace OpenSeat
         {
             _decisions++;
             JsonArray legal = decide["legal"]!.AsArray();
-            HashSet<string> allowed = legal.Select(OspCodec.Canonical).ToHashSet();
+            HashSet<string> allowed = legal.Select(OSPCodec.Canonical).ToHashSet();
             JsonNode Answer(JsonNode move) => new JsonObject { ["type"] = "decide", ["game_id"] = decide["game_id"]!.DeepClone(), ["n"] = decide["n"]!.DeepClone(), ["action"] = move.DeepClone() };
 
             if (!_lost && (_stale || _replica!.FirstDifference(decide["state"]!, $"move {decide["n"]}") is not null))
@@ -248,12 +248,12 @@ namespace OpenSeat
             // The protocol's move of one of Hexfarer's actions, as the referee's legal moves write it, or null if it isn't one
             JsonNode? Allowed(Action action)
             {
-                string wanted = OspCodec.Canonical(_replica!.Codec.Move(action));
+                string wanted = OSPCodec.Canonical(_replica!.Codec.Move(action));
                 foreach ((Action legalAction, JsonArray encoded) in _replica.Legal())
                 {
                     // Same decision, as the folded legal moves write it (a robber move against a victim without cards steals from nobody)
-                    if (OspCodec.Canonical(_replica.Codec.Move(legalAction)) != wanted) continue;
-                    string canonical = OspCodec.Canonical(encoded);
+                    if (OSPCodec.Canonical(_replica.Codec.Move(legalAction)) != wanted) continue;
+                    string canonical = OSPCodec.Canonical(encoded);
                     if (allowed.Contains(canonical)) return encoded;
                 }
                 return null;

@@ -42,7 +42,7 @@ namespace Client.UI
         {
             if (_fontsLoaded) return;
             _fontsLoaded = true;
-            GuiImpl.UiScale = uiScale;
+            GUIImpl.UIScale = uiScale;
 
             // Rasterized at the pixel size they end up at, laid out at their size in UI units
             ImGuiIOPtr io = ImGui.GetIO();
@@ -64,7 +64,7 @@ namespace Client.UI
             Bold22 = Load("OpenSans-Bold.ttf", 22);
             ExtraBold36 = Load("OpenSans-ExtraBold.ttf", 36);
             unsafe { io.NativePtr->FontDefault = Regular15.NativePtr; }
-            GuiImpl.UpdateFontTexture();
+            GUIImpl.UpdateFontTexture();
 
             // Small atlas icons need mipmaps, or they shimmer
             TextureAtlas.Texture.Smooth = true;
@@ -197,8 +197,8 @@ namespace Client.UI
             // The outline covers whole pixels on screen: snapped to the pixel grid and as many pixels thick as the scaled thickness
             // rounds to, so at a fractional UI scale a 1 unit border doesn't fall between two pixels and turn faint on some sides
             (min, max) = SnapToPixels(min, max);
-            float pixels = MathF.Max(1, MathF.Round(thickness * GuiImpl.UiScale));
-            thickness = pixels / GuiImpl.UiScale;
+            float pixels = MathF.Max(1, MathF.Round(thickness * GUIImpl.UIScale));
+            thickness = pixels / GUIImpl.UIScale;
             Vector2 half = new Vector2(thickness / 2);
             if (rounding <= 0 || corners == ImDrawCornerFlags.None)
             {
@@ -214,7 +214,7 @@ namespace Client.UI
         /// </summary>
         private static (Vector2 min, Vector2 max) SnapToPixels(Vector2 min, Vector2 max)
         {
-            float scale = GuiImpl.UiScale;
+            float scale = GUIImpl.UIScale;
             return (Vector2.Round(min * scale) / scale, Vector2.Round(max * scale) / scale);
         }
 
@@ -253,7 +253,7 @@ namespace Client.UI
                 dl.PathLineTo(center);
                 return;
             }
-            float pixels = radius * GuiImpl.UiScale;
+            float pixels = radius * GUIImpl.UIScale;
             float step = MathF.Acos(MathF.Max(0, 1 - 0.25f / pixels)) * 2;
             int segments = Math.Clamp((int)MathF.Ceiling((to - from) / step), 2, 32);
             dl.PathArcTo(center, radius, from, to, segments);
@@ -275,8 +275,8 @@ namespace Client.UI
         /// </summary>
         public static void Glow(ImDrawListPtr dl, Vector2 min, Vector2 max, Color color, float rounding = Rounding, float strength = 1f)
         {
-            float pixel = 1 / GuiImpl.UiScale;
-            int rings = Math.Max(1, (int)MathF.Round(10 * GuiImpl.UiScale));
+            float pixel = 1 / GUIImpl.UIScale;
+            int rings = Math.Max(1, (int)MathF.Round(10 * GUIImpl.UIScale));
             for (int i = 0; i < rings; i++)
             {
                 float fade = 1 - (i + 0.5f) / rings;
@@ -313,7 +313,7 @@ namespace Client.UI
             DrawText(dl, font, rightTop - new Vector2(size.X, 0), color, text);
         }
 
-        public static IntPtr AtlasId => GuiImpl.TextureId(TextureAtlas.Texture);
+        public static IntPtr AtlasId => GUIImpl.TextureId(TextureAtlas.Texture);
 
         /// <summary>
         /// An atlas sprite tinted with a color, like the board draws its icons
@@ -326,7 +326,7 @@ namespace Client.UI
             // The atlas is mipmapped and some icons fill their cell to the edge, so at small sizes the coarse levels blend the
             // neighbouring cell into the border (a thin line along the quad's edge). The UVs are pulled in by about one texel of
             // the level in use and the quad shrinks by the same amount, so the icon keeps its size and place.
-            float pixels = MathF.Max(1, (max.X - min.X) * GuiImpl.UiScale);
+            float pixels = MathF.Max(1, (max.X - min.X) * GUIImpl.UIScale);
             float inset = Math.Clamp(rect.Width / pixels, 0, rect.Width / 16f);
             Vector2 shrink = (max - min) * (inset / rect.Width);
             Vector2 uv0 = new Vector2(rect.Left + inset, rect.Top + inset) / size;
@@ -424,24 +424,24 @@ namespace Client.UI
         #endregion
 
         #region Windows
-        public const ImGuiWindowFlags HudFlags = ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoMove
+        public const ImGuiWindowFlags HUDFlags = ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoMove
             | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoBringToFrontOnFocus | ImGuiWindowFlags.NoNav;
 
-        private const float HudBleed = 4f;
+        private const float HUDBleed = 4f;
 
         /// <summary>
         /// Opens a borderless, transparent window covering a screen rect, for a panel drawn on its draw list; close with ImGui.End
         /// </summary>
-        public static ImDrawListPtr BeginHud(string id, Vector2 min, Vector2 size)
+        public static ImDrawListPtr BeginHUD(string id, Vector2 min, Vector2 size)
         {
             // The window reaches a few units past the rect, so outlines and their anti-aliased edges on the rect's border aren't
             // clipped (a panel drawn at the window's edge got a thinner top border); the cursor still starts at the rect
-            Vector2 bleed = new Vector2(HudBleed);
+            Vector2 bleed = new Vector2(HUDBleed);
             ImGui.SetNextWindowPos(min - bleed);
             ImGui.SetNextWindowSize(size + 2 * bleed);
             ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
             ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0f);
-            ImGui.Begin(id, HudFlags);
+            ImGui.Begin(id, HUDFlags);
             ImGui.PopStyleVar(2);
             ImGui.SetCursorScreenPos(min);
             return ImGui.GetWindowDrawList();

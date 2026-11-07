@@ -114,7 +114,7 @@ namespace Tests
             Skip.IfNot(Seats.ValueNetAvailable, "The value net is missing.");
             Utils.Random.SeedCurrentThread(8);
             using Match match = new Match(new GameState(MapGenerator.GenerateRandomClassic(), 4),
-                [SeatKind.PimcEasy, SeatKind.MctsEasy, SeatKind.PimcEasy, SeatKind.MctsEasy]);
+                [SeatKind.PIMCEasy, SeatKind.MCTSEasy, SeatKind.PIMCEasy, SeatKind.MCTSEasy]);
             SessionInfo admin = new("admin", "Admin", Role.Admin, null);
             match.Handle(admin, new ConfigureAgents(new AgentSettings(null, 256, Agents.MCTS.OpponentModel.MaxN)));
             match.Handle(admin, new SetPlayback(new PlaybackState(false, false, 0.05f)));
@@ -133,7 +133,7 @@ namespace Tests
             Utils.Random.SeedCurrentThread(7);
             GameState state = new GameState(MapGenerator.GenerateRandomClassic(), 4);
             int moves = MCTSTree.GetValidActions(new GameState(state)).Count;
-            using Match match = new Match(state, [SeatKind.MctsEasy, SeatKind.Human, SeatKind.Human, SeatKind.Human]);
+            using Match match = new Match(state, [SeatKind.MCTSEasy, SeatKind.Human, SeatKind.Human, SeatKind.Human]);
 
             // A long search for the first settlement, so the analysis reads it several times
             SessionInfo admin = new("admin", "Admin", Role.Admin, null);

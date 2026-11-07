@@ -1,5 +1,5 @@
 """
-Every move of a JSettlers game as a protocol step (OspServer.java, MoveLog.java): JSettlers' server hands a robot's agent
+Every move of a JSettlers game as a protocol step (OSPServer.java, MoveLog.java): JSettlers' server hands a robot's agent
 that observes every move by every seat, with its result and the state before it, numbered by the game's moves, so an
 agent can follow the game (Hexfarer's fair agent does) instead of taking it from each decision's state. The server also
 writes each game as a referee log (-Dosp.record=DIR), which Hexfarer's replay harness and relay read, while it is played.

@@ -42,7 +42,7 @@ namespace Client
 
         private Vector2 Display => ImGui.GetIO().DisplaySize;
 
-        private void DrawHud()
+        private void DrawHUD()
         {
             // The menu covers the board; loading a game from it still needs the file dialog
             if (_menuOpen)
@@ -99,7 +99,7 @@ namespace Client
         #region Top bar
         private void DrawTopBar()
         {
-            ImDrawListPtr dl = Theme.BeginHud("##topbar", new Vector2(Margin, Margin), new Vector2(860, 50));
+            ImDrawListPtr dl = Theme.BeginHUD("##topbar", new Vector2(Margin, Margin), new Vector2(860, 50));
             Vector2 o = new Vector2(Margin, Margin);
 
             // Menu button
@@ -183,7 +183,7 @@ namespace Client
             int acting = ActingPlayer;
             int? viewer = Viewer;
             float height = SeatTop + PLAYER_COUNT * (SeatHeight + SeatGap);
-            ImDrawListPtr dl = Theme.BeginHud("##seats", new Vector2(Margin, SeatTop - 8), new Vector2(ColumnWidth + 16, height));
+            ImDrawListPtr dl = Theme.BeginHUD("##seats", new Vector2(Margin, SeatTop - 8), new Vector2(ColumnWidth + 16, height));
 
             for (int seat = 0; seat < PLAYER_COUNT; seat++)
             {
@@ -393,7 +393,7 @@ namespace Client
             float slot = (size.X - 22 - labelWidth) / slots;
             Vector2 min = new Vector2(Display.X - Margin - ColumnWidth, top);
 
-            ImDrawListPtr dl = Theme.BeginHud("##bank", min, size);
+            ImDrawListPtr dl = Theme.BeginHUD("##bank", min, size);
             Theme.DrawPanel(dl, min, min + size, Theme.Border, 10, new Color(15, 33, 86, 235));
             float midY = min.Y + size.Y / 2;
             Theme.DrawText(dl, Theme.SemiBold15, new Vector2(min.X + 14, midY - Theme.TextSize(Theme.SemiBold15, "Bank").Y / 2), Theme.TextMuted, "Bank");
@@ -457,7 +457,7 @@ namespace Client
             else if (_sim.Game.ThinkingSeat is int thinkingSeat)
             {
                 headline = $"{Theme.PlayerName(thinkingSeat)} is thinking";
-                string agent = Seats[thinkingSeat] == SeatKind.Human ? Simulation.Seats.Name(SeatKind.MctsMedium) : SeatName(thinkingSeat);
+                string agent = Seats[thinkingSeat] == SeatKind.Human ? Simulation.Seats.Name(SeatKind.MCTSMedium) : SeatName(thinkingSeat);
                 long iterations = CurrentSearch is SearchEvent search && search.Seat == thinkingSeat ? search.Iterations : 0;
                 detail = _mode == InteractionMode.Spectate && iterations > 0 ? $" ({agent}, {iterations / 1000.0:0.#}k iterations)" : $" ({agent})";
                 chip = $"{_thinkingClock.Elapsed.TotalSeconds:0.0} s";
@@ -479,7 +479,7 @@ namespace Client
             Vector2 min = new Vector2(Display.X / 2 - width / 2, 8);
             Vector2 size = new Vector2(width, 50);
 
-            ImDrawListPtr dl = Theme.BeginHud("##banner", min - new Vector2(10, 4), size + new Vector2(20, 16));
+            ImDrawListPtr dl = Theme.BeginHUD("##banner", min - new Vector2(10, 4), size + new Vector2(20, 16));
             Color color = Theme.PlayerColor(colorSeat);
             Theme.DrawPanel(dl, min, min + size, color, 25, null, 2.5f);
             Vector2 dot = min + new Vector2(30, 25);
@@ -514,7 +514,7 @@ namespace Client
             Vector2 min = new Vector2(x, top);
             Vector2 size = new Vector2(ColumnWidth, bottom - top);
 
-            ImDrawListPtr dl = Theme.BeginHud("##log", min, size + new Vector2(0, 8));
+            ImDrawListPtr dl = Theme.BeginHUD("##log", min, size + new Vector2(0, 8));
             Theme.DrawPanel(dl, min, min + size);
             Theme.DrawText(dl, Theme.Bold17, min + new Vector2(20, 14), Theme.Text, "Game log");
             Theme.TextRight(dl, Theme.Regular13, min + new Vector2(size.X - 20, 18), Theme.TextMuted, $"Round {State.Turn.RoundCounter}");
@@ -541,7 +541,7 @@ namespace Client
             int? human = HumanToAct;
             int player = human ?? (Viewer is int viewing && viewing >= 0 ? viewing : 0);
 
-            ImDrawListPtr dl = Theme.BeginHud("##actions", new Vector2(x - 8, buildTop - 26), new Vector2(ColumnWidth + 16, endTop + 72 - (buildTop - 26)));
+            ImDrawListPtr dl = Theme.BeginHUD("##actions", new Vector2(x - 8, buildTop - 26), new Vector2(ColumnWidth + 16, endTop + 72 - (buildTop - 26)));
             Theme.TextCentered(dl, Theme.Regular13, new Vector2(x + ColumnWidth / 2, buildTop - 12), Theme.TextFaint, "Build (keys 1-4)");
 
             (string label, TextureAtlas.Sprite sprite, ResourceCardType[] cost, bool available, bool active, System.Action onClick)[] buttons =
@@ -624,7 +624,7 @@ namespace Client
             float x = Display.X - Margin - ColumnWidth / 2;
             Vector2 center = new Vector2(x, Display.Y - Margin - DiceWidget.Size - 18);
 
-            ImDrawListPtr dl = Theme.BeginHud("##rolllabel", center - new Vector2(140, 14), new Vector2(280, 28));
+            ImDrawListPtr dl = Theme.BeginHUD("##rolllabel", center - new Vector2(140, 14), new Vector2(280, 28));
             string text = $"{who} rolled ";
             string number = State.Turn.LastRoll.Total.ToString();
             float tw = Theme.TextSize(Theme.Regular17, text).X, nw = Theme.TextSize(Theme.Bold17, number).X;
@@ -725,7 +725,7 @@ namespace Client
             float shift = extra == 0 ? 16 : Math.Clamp((maxWidth - fixedWidth) / extra, 4, 16);
             size.X = Math.Clamp(fixedWidth + extra * shift, size.X, maxWidth);
 
-            ImDrawListPtr dl = Theme.BeginHud("##hand", min - new Vector2(0, 30), size + new Vector2(0, 38));
+            ImDrawListPtr dl = Theme.BeginHUD("##hand", min - new Vector2(0, 30), size + new Vector2(0, 38));
             Theme.DrawPanel(dl, min, min + size, Theme.PlayerColor(seat), 16, null, 2);
             dl.AddCircleFilled(min + new Vector2(26, 28), 10, Theme.U32(Theme.PlayerColor(seat)), 24);
             dl.AddCircle(min + new Vector2(26, 28), 10, Theme.U32(Color.White), 24, 2);
@@ -805,7 +805,7 @@ namespace Client
         /// </summary>
         private void DrawCurtain(Vector2 min, Vector2 size, int next)
         {
-            ImDrawListPtr dl = Theme.BeginHud("##curtain", min, size + new Vector2(0, 8));
+            ImDrawListPtr dl = Theme.BeginHUD("##curtain", min, size + new Vector2(0, 8));
             Theme.DrawPanel(dl, min, min + size, Theme.PlayerColor(next), 16, null, 2);
             Theme.DrawText(dl, Theme.Bold22, min + new Vector2(24, 22), Theme.Text, $"Pass the screen to {Theme.PlayerName(next)}");
             Theme.DrawText(dl, Theme.Regular15, min + new Vector2(24, 56), Theme.TextMuted, "The hands stay hidden until the next player is ready.");
@@ -862,7 +862,7 @@ namespace Client
 
             Vector2f mapPos = _overlay.Position(State.Board, hovered);
             Vector2i pixel = _window.MapCoordsToPixel(mapPos, _mapView);
-            Vector2 anchor = new Vector2(pixel.X, pixel.Y) / GuiImpl.UiScale;
+            Vector2 anchor = new Vector2(pixel.X, pixel.Y) / GUIImpl.UIScale;
             float costWidth = cost.Length * 19;
             float width = Math.Max(Theme.TextSize(Theme.Bold15, title).X, Theme.TextSize(Theme.Regular13, detail).X + (cost.Length > 0 ? costWidth + 6 : 0)) + 28;
             Vector2 min = anchor + new Vector2(22, -48);
@@ -908,7 +908,7 @@ namespace Client
         private ImDrawListPtr BeginDialog(string id, Vector2 size, string title, string? subtitle, int? colorSeat, out Vector2 min)
         {
             min = new Vector2(Display.X / 2 - size.X / 2, Display.Y / 2 - size.Y / 2 - 20);
-            ImDrawListPtr dl = Theme.BeginHud(id, min - new Vector2(16), size + new Vector2(32));
+            ImDrawListPtr dl = Theme.BeginHUD(id, min - new Vector2(16), size + new Vector2(32));
             // Stay in front of the other HUD windows, but not of a combo's list opened in the dialog
             if (!ImGui.IsPopupOpen("", ImGuiPopupFlags.AnyPopupId)) ImGui.SetWindowFocus();
             Color border = colorSeat is int s ? Theme.PlayerColor(s) : Theme.BorderLight;
@@ -1343,14 +1343,14 @@ namespace Client
 
                 ImGui.Separator();
                 ImGui.SetNextItemWidth(140);
-                if (ImGui.Combo("MCTS budget", ref _selectedMctsBudget, _mctsBudgetTypes, _mctsBudgetTypes.Length)) Send(new ConfigureAgents(AgentSettingsFromTools));
+                if (ImGui.Combo("MCTS budget", ref _selectedMCTSBudget, _mctsBudgetTypes, _mctsBudgetTypes.Length)) Send(new ConfigureAgents(AgentSettingsFromTools));
                 ImGui.SetNextItemWidth(140);
-                if (_selectedMctsBudget == 1 && ImGui.InputFloat("Thinking time (s)", ref _mctsThinkingSeconds, 0.5f, 5f, "%.2f"))
+                if (_selectedMCTSBudget == 1 && ImGui.InputFloat("Thinking time (s)", ref _mctsThinkingSeconds, 0.5f, 5f, "%.2f"))
                 {
                     _mctsThinkingSeconds = Math.Clamp(_mctsThinkingSeconds, 0.05f, 600f);
                     Send(new ConfigureAgents(AgentSettingsFromTools));
                 }
-                else if (_selectedMctsBudget == 2 && ImGui.InputInt("Iterations", ref _mctsIterations, 10_000, 100_000))
+                else if (_selectedMCTSBudget == 2 && ImGui.InputInt("Iterations", ref _mctsIterations, 10_000, 100_000))
                 {
                     _mctsIterations = Math.Clamp(_mctsIterations, 256, 100_000_000);
                     Send(new ConfigureAgents(AgentSettingsFromTools));

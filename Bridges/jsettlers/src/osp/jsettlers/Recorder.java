@@ -67,7 +67,7 @@ public final class Recorder
             for (int g = 0; g < games; g++)
             {
                 String id = "jsettlers-" + (seed + g);
-                if (record(OspBoard.newGame(id), id, new Random(seed + g), ruleset, writer))
+                if (record(OSPBoard.newGame(id), id, new Random(seed + g), ruleset, writer))
                     won++;
                 System.err.println("game " + (g + 1) + "/" + games + ": " + id);
             }
@@ -78,7 +78,7 @@ public final class Recorder
     /** Plays the game to its end and writes its messages; returns whether someone won */
     public static boolean record(SOCGame game, String id, Random random, Map<String, Object> ruleset, Writer writer) throws IOException
     {
-        OspGame osp = new OspGame(game);
+        OSPGame osp = new OSPGame(game);
         write(writer, Json.object("type", "before", "game_id", id, "players", (long) game.maxPlayers, "jsettlers_first", (long) osp.first,
             "ruleset", ruleset, "board", osp.board.boardJson(), "state", osp.state(-1)));
         long n = 0;

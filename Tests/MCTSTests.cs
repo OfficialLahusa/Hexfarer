@@ -30,7 +30,7 @@ namespace Tests
         }
 
         [Fact]
-        public void UctPrefersUnvisitedChildrenAndUsesNormalizedValues()
+        public void UCTPrefersUnvisitedChildrenAndUsesNormalizedValues()
         {
             MCTSNode root = new(0);
             MCTSNode visited = new(0, root);

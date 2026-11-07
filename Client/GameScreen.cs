@@ -94,7 +94,7 @@ namespace Client
         // (~250k iterations per second on the GPU)
         private float _mctsThinkingSeconds = 0.5f;
         private readonly string[] _mctsBudgetTypes = ["Seat presets", "Time", "Iterations"];
-        private int _selectedMctsBudget = 0;
+        private int _selectedMCTSBudget = 0;
         private int _mctsIterations = 125_000;
         private readonly string[] _opponentModels = Enum.GetNames<OpponentModel>();
         private int _selectedOpponentModel = (int)OpponentModel.MaxN;
@@ -244,8 +244,8 @@ namespace Client
         /// <summary>
         /// The agent settings of the developer tools
         /// </summary>
-        private AgentSettings AgentSettingsFromTools => new(_selectedMctsBudget == 1 ? _mctsThinkingSeconds : null,
-            _selectedMctsBudget == 2 ? _mctsIterations : 0, (OpponentModel)_selectedOpponentModel, (string?[])_seatAgents.Clone());
+        private AgentSettings AgentSettingsFromTools => new(_selectedMCTSBudget == 1 ? _mctsThinkingSeconds : null,
+            _selectedMCTSBudget == 2 ? _mctsIterations : 0, (OpponentModel)_selectedOpponentModel, (string?[])_seatAgents.Clone());
 
         // The Open Seat Agent each seat of a local game plays, by name (null for the other seats)
         private readonly string?[] _seatAgents = new string?[PLAYER_COUNT];
@@ -270,9 +270,9 @@ namespace Client
             _window.SetView(_uiView);
             _window.Draw(_diceWidget);
 
-            DrawHud();
+            DrawHUD();
 
-            GuiImpl.Render(_window);
+            GUIImpl.Render(_window);
             CaptureScreenshot();
 
             _window.Display();
@@ -316,7 +316,7 @@ namespace Client
             }
 
             _window.DispatchEvents();
-            GuiImpl.Update(_window, deltaTime);
+            GUIImpl.Update(_window, deltaTime);
 
             _overlay.Update(seconds);
             _particles.Update(seconds);
@@ -948,7 +948,7 @@ namespace Client
             if (minX > maxX) return;
 
             // The space between the seat panels and the right column, in pixels
-            float scale = GuiImpl.UiScale;
+            float scale = GUIImpl.UIScale;
             float columns = 2 * (Margin + ColumnWidth + 8) * scale;
             float width = Math.Max(200, _window.Size.X - columns);
             float height = Math.Max(200, _window.Size.Y - 16 * scale);
@@ -1113,7 +1113,7 @@ namespace Client
         private System.Numerics.Vector2 ScreenPosition(Vector2f mapPoint)
         {
             Vector2i pixel = _window.MapCoordsToPixel(mapPoint, _mapView);
-            return new System.Numerics.Vector2(pixel.X, pixel.Y) / GuiImpl.UiScale;
+            return new System.Numerics.Vector2(pixel.X, pixel.Y) / GUIImpl.UIScale;
         }
 
         /// <summary>

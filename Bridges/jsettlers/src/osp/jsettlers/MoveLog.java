@@ -36,14 +36,14 @@ import soc.server.genericServer.Connection;
 /**
  * Every move of a JSettlers game on this process's server as Open Seat Protocol steps (see ../../PROTOCOL.md), with its
  * result as the referee knows it and the true state before it. JSettlers' server hands each player's request to its
- * message handler on one thread; OspServer's handler passes it through dispatch here, which reads the game before and
+ * message handler on one thread; OSPServer's handler passes it through dispatch here, which reads the game before and
  * after JSettlers handles it and turns the change into a step: one protocol move where JSettlers takes two requests (a
  * bought piece and its place, a card and its resources, a robber move and its victim), and the discards after a 7, which
  * JSettlers' players make at the same time, one after another from the lowest seat, each with the state the protocol's
  * order gives it. A change no request made (the server ending a slow player's turn, say) counts as a gap: the next step
  * then starts from another state than the last one ended in.
  *
- * The log's monitor is the lock for reading the game: a robot's brain that reads under it (OspServer.read) sees no move
+ * The log's monitor is the lock for reading the game: a robot's brain that reads under it (OSPServer.read) sees no move
  * half handled. With the system property osp.record set, each game is also written there as a referee log while it
  * runs (GAME.jsonl: before, a decide and a step per move, after), the input of Hexfarer's replay harness and relay. At its
  * end each game writes one line to standard error: the players by seat, the winner, and per seat its moves, those with a
@@ -53,7 +53,7 @@ final class MoveLog
 {
     final String gameId;
     final SOCGame game;
-    final OspGame osp;
+    final OSPGame osp;
 
     // The steps so far: read without the log's lock by a brain finishing its game (which may hold its own lock)
     private final List<Map<String, Object>> steps = new CopyOnWriteArrayList<>();
@@ -81,7 +81,7 @@ final class MoveLog
     {
         this.game = game;
         this.gameId = game.getName();
-        this.osp = new OspGame(game);
+        this.osp = new OSPGame(game);
         this.start = start;
         this.last = start;
         this.moves = new int[game.maxPlayers];
@@ -95,7 +95,7 @@ final class MoveLog
                 String name = gameId.replaceAll("[^A-Za-z0-9._-]", "_");
                 record = new OutputStreamWriter(new FileOutputStream(new File(dir, name + ".jsonl")), StandardCharsets.UTF_8);
                 write(Json.object("type", "before", "game_id", gameId, "players", (long) game.maxPlayers, "jsettlers_first", (long) osp.first,
-                    "ruleset", OspRobotBrain.RULESET, "board", osp.board.boardJson(), "state", start));
+                    "ruleset", OSPRobotBrain.RULESET, "board", osp.board.boardJson(), "state", start));
             }
             catch (IOException e)
             {
@@ -151,11 +151,11 @@ final class MoveLog
     /**
      * JSettlers' handling of one request, with the step it makes: the game is read before and after (under its
      * monitor, which JSettlers' handler takes itself in between). A robot-only game's last move ends inside it: JSettlers
-     * destroys the game before the handler returns, and OspServer lets the log read the end first (gameDestroyed).
+     * destroys the game before the handler returns, and OSPServer lets the log read the end first (gameDestroyed).
      */
     static boolean dispatch(GameMessageHandler inner, SOCGame game, SOCMessageForGame message, Connection connection) throws Exception
     {
-        MoveLog log = game.getGameState() >= SOCGame.START1A ? OspServer.logOf(game) : null;
+        MoveLog log = game.getGameState() >= SOCGame.START1A ? OSPServer.logOf(game) : null;
         if (log == null)
             return inner.dispatch(game, message, connection);
         SOCPlayer player = connection == null ? null : game.getPlayer(connection.getData());
@@ -259,7 +259,7 @@ final class MoveLog
     }
 
     /**
-     * JSettlers is destroying the game (OspServer, on its message thread while it still handles the game's last request,
+     * JSettlers is destroying the game (OSPServer, on its message thread while it still handles the game's last request,
      * whose monitor it may hold): the last move and the end are read first, then the record is closed
      */
     synchronized void gameDestroyed()
@@ -339,7 +339,7 @@ final class MoveLog
                 ResourceSet picked = ((SOCPickResources) message).getResources();
                 List<Object> names = new ArrayList<>();
                 for (String name : new String[] {"brick", "lumber", "ore", "grain", "wool"})
-                    for (int i = 0; i < picked.getAmount(OspGame.resourceType(name)); i++)
+                    for (int i = 0; i < picked.getAmount(OSPGame.resourceType(name)); i++)
                         names.add(name);
                 names.sort(null);
                 step(seat, Json.array("play_year_of_plenty", names), null, pendingBefore, pendingLegal);
@@ -348,7 +348,7 @@ final class MoveLog
         case SOCMessage.PICKRESOURCETYPE:
             if ("play_monopoly".equals(pendingKind))
             {
-                String resource = OspGame.resourceName(((SOCPickResourceType) message).getResourceType());
+                String resource = OSPGame.resourceName(((SOCPickResourceType) message).getResourceType());
                 Map<String, Object> taken = new LinkedHashMap<>();
                 for (int other = 0; other < game.maxPlayers; other++)
                     if (other != seat)
@@ -381,8 +381,8 @@ final class MoveLog
             ResourceSet set = ((SOCDiscard) message).getResources();
             int[] counts = new int[soc.game.SOCResourceConstants.WOOD + 1];
             for (String name : new String[] {"brick", "lumber", "ore", "grain", "wool"})
-                counts[OspGame.resourceType(name)] = set.getAmount(OspGame.resourceType(name));
-            discarded.put(seat, new Object[] {OspGame.cardSet(counts), legal});
+                counts[OSPGame.resourceType(name)] = set.getAmount(OSPGame.resourceType(name));
+            discarded.put(seat, new Object[] {OSPGame.cardSet(counts), legal});
             // In the protocol's order, as far as the seats before have discarded
             while (discardsDone < discarders.size() && discarded.containsKey(discarders.get(discardsDone)))
             {
@@ -443,8 +443,8 @@ final class MoveLog
     {
         int[] counts = new int[soc.game.SOCResourceConstants.WOOD + 1];
         for (String name : new String[] {"brick", "lumber", "ore", "grain", "wool"})
-            counts[OspGame.resourceType(name)] = set.getAmount(OspGame.resourceType(name));
-        return OspGame.cardSet(counts);
+            counts[OSPGame.resourceType(name)] = set.getAmount(OSPGame.resourceType(name));
+        return OSPGame.cardSet(counts);
     }
 
     @SuppressWarnings("unchecked")
@@ -474,7 +474,7 @@ final class MoveLog
     @SuppressWarnings("unchecked")
     private Map<String, Object> discardState(int done)
     {
-        Map<String, Object> state = OspGame.copy(discardStart);
+        Map<String, Object> state = OSPGame.copy(discardStart);
         Map<String, Object> bank = (Map<String, Object>) state.get("bank");
         for (int i = 0; i < done; i++)
         {

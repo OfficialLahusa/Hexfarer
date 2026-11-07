@@ -14,7 +14,7 @@ namespace Tests
     public class SetupBudgetTests
     {
         private static readonly Lazy<StateValueNet> Net = new(() =>
-            new StateValueNet(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.Cpu));
+            new StateValueNet(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU));
 
         private static string ModelPath => TestUtil.FixturePath("ValueNet", "plain_tiny.onnx");
 

@@ -247,7 +247,7 @@ namespace Tests
         public void TheAgentPlaysLegalMovesUnderHiddenInformation()
         {
             GameState state = NewGame(36);
-            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.Cpu);
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.CPU);
             InformationSetMCTSAgent agent = new(new MCTSAgent(1, state, valueNet: net, iterationLimit: 256, leavesPerBatch: 16), state, seed: 2);
             Agent[] agents = TestUtil.RandomAgents();
             int decisions = 0;
@@ -273,7 +273,7 @@ namespace Tests
             // The agent follows the game down its last tree: at its next decision the search starts at the node the game
             // reached, cut off from the old tree, with the visits it had, and still plays legal moves
             GameState state = NewGame(36);
-            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.Cpu);
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.CPU);
             InformationSetMCTSAgent agent = new(new MCTSAgent(1, state, valueNet: net, iterationLimit: 256, leavesPerBatch: 16, parallelSelection: false), state, seed: 2);
             Assert.True(agent.ReuseTree);
             Agent[] agents = TestUtil.RandomAgents();
@@ -339,7 +339,7 @@ namespace Tests
         public void TheAgentDecaysTheSubtreeItGoesOnWith()
         {
             GameState state = NewGame(36);
-            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.Cpu);
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.CPU);
             InformationSetMCTSAgent agent = new(new MCTSAgent(1, state, valueNet: net, iterationLimit: 256, leavesPerBatch: 16, parallelSelection: false), state, seed: 2)
             {
                 ReuseDecay = 0.5
@@ -378,7 +378,7 @@ namespace Tests
         public void TheDecayIsAboveZeroAndAtMostOne(double decay)
         {
             GameState state = NewGame(36);
-            MCTSAgent search = new(1, state, valueNet: new StateValueNet(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.Cpu));
+            MCTSAgent search = new(1, state, valueNet: new StateValueNet(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.CPU));
             Assert.Throws<ArgumentOutOfRangeException>(() => new InformationSetMCTSAgent(search, state) { ReuseDecay = decay });
             Assert.Equal(1, new InformationSetMCTSAgent(search, state).ReuseDecay);
         }
@@ -387,7 +387,7 @@ namespace Tests
         public void WithoutReuseEveryDecisionStartsANewTree()
         {
             GameState state = NewGame(36);
-            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.Cpu);
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.CPU);
             MCTSAgent search = new(1, state, valueNet: net, iterationLimit: 64, leavesPerBatch: 16) { ReuseTree = false };
             InformationSetMCTSAgent agent = new(search, state, seed: 2);
             Agent[] agents = TestUtil.RandomAgents();
@@ -412,7 +412,7 @@ namespace Tests
         public void AResetOrAMoveOutsideTheTreeEndsTheReuse()
         {
             (GameState truth, BeliefTracker beliefs) = Decisions(0, 1).First();
-            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.Cpu);
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "view_tiny.onnx"), provider: InferenceProvider.CPU);
             InformationSetMCTSAgent agent = new(new MCTSAgent(0, truth, valueNet: net, iterationLimit: 64, leavesPerBatch: 16), truth, seed: 2);
             agent.ResetTo(truth, beliefs);
             agent.Act(new GameState(truth));

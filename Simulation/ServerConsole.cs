@@ -191,12 +191,12 @@ namespace Simulation
         /// </summary>
         public static SeatKind? ParseKind(string word) => word.ToLowerInvariant() switch
         {
-            "easy" or "fair-easy" => SeatKind.PimcEasy,
-            "medium" or "fair-medium" => SeatKind.PimcMedium,
-            "hard" or "fair-hard" => SeatKind.PimcHard,
-            "open-hand-easy" => SeatKind.MctsEasy,
-            "open-hand-medium" => SeatKind.MctsMedium,
-            "open-hand-hard" => SeatKind.MctsHard,
+            "easy" or "fair-easy" => SeatKind.PIMCEasy,
+            "medium" or "fair-medium" => SeatKind.PIMCMedium,
+            "hard" or "fair-hard" => SeatKind.PIMCHard,
+            "open-hand-easy" => SeatKind.MCTSEasy,
+            "open-hand-medium" => SeatKind.MCTSMedium,
+            "open-hand-hard" => SeatKind.MCTSHard,
             _ => Enum.TryParse(word, true, out SeatKind kind) ? kind : null
         };
     }

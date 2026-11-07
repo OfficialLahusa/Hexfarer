@@ -134,7 +134,7 @@ namespace Tests
         }
 
         private static Agents.Inference.StateValueNet Net(string name) =>
-            new(TestUtil.FixturePath("ValueNet", name), provider: Agents.Inference.InferenceProvider.Cpu);
+            new(TestUtil.FixturePath("ValueNet", name), provider: Agents.Inference.InferenceProvider.CPU);
 
         [Fact]
         public void ANetOfTheViewLayoutGetsItsSeatsView()

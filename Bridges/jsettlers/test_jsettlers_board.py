@@ -1,5 +1,5 @@
 """
-JSettlers' classic board in Open Seat Protocol keys (OspBoard.java), tested against the protocol's reference shape of the
+JSettlers' classic board in Open Seat Protocol keys (OSPBoard.java), tested against the protocol's reference shape of the
 classic board (../osp/classic-board.json) and anchored to the meaning of the compass directions (JSettlers numbers a
 hex's corners clockwise from north), so that a mirrored or rotated mapping, which keeps the board's shape, can't pass;
 the tiles and harbors keep their resources. Needs a JDK and JSettlers' full jar in JSETTLERS_JAR.
@@ -42,7 +42,7 @@ class BoardTests(unittest.TestCase):
         with open(REFERENCE, encoding="utf-8") as file:
             cls.reference = json.load(file)
         # Several random classic boards
-        cls.boards = [json.loads(jsettlers.run("osp.jsettlers.OspBoard", "describe", str(seed))) for seed in range(1, 6)]
+        cls.boards = [json.loads(jsettlers.run("osp.jsettlers.OSPBoard", "describe", str(seed))) for seed in range(1, 6)]
 
     def test_every_board_has_the_reference_shape(self):
         for board in self.boards:

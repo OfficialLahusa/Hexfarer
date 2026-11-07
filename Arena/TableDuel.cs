@@ -225,7 +225,7 @@ namespace Arena
             string text = $"{_games} games, challenger won {_wins} | {s.Groups} groups";
             if (s.Groups < 2) return $"{text} | {trades}";
             string verdict = s.Verdict switch { 1 => $"H1 accepted (win rate >= {S1:P1})", -1 => $"H0 accepted (win rate <= {S0:P1})", _ => "open" };
-            return FormattableString.Invariant($"{text}: win rate {s.Mean:P1} [{s.Low:P1}, {s.High:P1}] | SPRT [{S0:P1}, {S1:P1}] LLR {s.Llr:+0.00;-0.00} ({s.LowerBound:0.00}, {s.UpperBound:0.00}) {verdict} | {trades}");
+            return FormattableString.Invariant($"{text}: win rate {s.Mean:P1} [{s.Low:P1}, {s.High:P1}] | SPRT [{S0:P1}, {S1:P1}] LLR {s.LLR:+0.00;-0.00} ({s.LowerBound:0.00}, {s.UpperBound:0.00}) {verdict} | {trades}");
         }
 
         private void Write(string line)
@@ -243,12 +243,12 @@ namespace Arena
     /// with its 95% interval, and the SPRT between H0 "the mean is S0" and H1 "the mean is S1" in the normal approximation
     /// (as PairStatistics), deciding only from MinGroups on and with a floor under the variance
     /// </summary>
-    internal sealed record GroupStatistics(int Groups, double Mean, double Low, double High, double Llr, double LowerBound, double UpperBound)
+    internal sealed record GroupStatistics(int Groups, double Mean, double Low, double High, double LLR, double LowerBound, double UpperBound)
     {
         public const int MinGroups = 30;
         public const double MinVariance = 0.01;
 
-        public int Verdict => Groups < MinGroups ? 0 : Llr >= UpperBound ? 1 : Llr <= LowerBound ? -1 : 0;
+        public int Verdict => Groups < MinGroups ? 0 : LLR >= UpperBound ? 1 : LLR <= LowerBound ? -1 : 0;
 
         public static GroupStatistics Of(IReadOnlyList<double> scores, double s0, double s1, double alpha = 0.05, double beta = 0.05)
         {

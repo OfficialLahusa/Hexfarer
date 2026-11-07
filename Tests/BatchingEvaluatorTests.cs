@@ -15,13 +15,13 @@ namespace Tests
     {
         private static string TinyModelPath => TestUtil.FixturePath("ValueNet", "placements_tiny.onnx");
 
-        private static StateValueNet CpuNet() => new(TinyModelPath, intraOpThreads: 2, provider: InferenceProvider.Cpu);
+        private static StateValueNet CPUNet() => new(TinyModelPath, intraOpThreads: 2, provider: InferenceProvider.CPU);
 
         [Fact]
         public async Task ConcurrentRequestsGetTheirOwnRowsBack()
         {
-            StateValueNet reference = CpuNet();
-            using BatchingEvaluator evaluator = new([CpuNet(), CpuNet()], maxRows: 64);
+            StateValueNet reference = CPUNet();
+            using BatchingEvaluator evaluator = new([CPUNet(), CPUNet()], maxRows: 64);
             Random random = new(3);
 
             // Requests of different sizes, half with placements, sent at once from many threads
@@ -59,9 +59,9 @@ namespace Tests
         [Fact]
         public async Task PaddedBatchesRunTheFullShapeAndKeepEachRequestsRows()
         {
-            StateValueNet reference = CpuNet();
+            StateValueNet reference = CPUNet();
             const int MaxRows = 48;
-            using BatchingEvaluator evaluator = new([CpuNet(), CpuNet()], maxRows: MaxRows, padToMaxRows: true);
+            using BatchingEvaluator evaluator = new([CPUNet(), CPUNet()], maxRows: MaxRows, padToMaxRows: true);
             Random random = new(11);
 
             // Requests of different sizes at once: every net run has all 48 rows, the unused ones left over from earlier runs
@@ -90,9 +90,9 @@ namespace Tests
             // Its leaf batches go to the shared evaluator instead of its own net: each of the 48 iterations is a row there, in
             // three requests of 16
             TestUtil.Seed(151);
-            using BatchingEvaluator evaluator = new([CpuNet()], maxRows: 16);
+            using BatchingEvaluator evaluator = new([CPUNet()], maxRows: 16);
             GameState state = TestUtil.NewGame();
-            MCTSAgent agent = new(TestUtil.ActingPlayer(state), state, valueNet: CpuNet(), iterationLimit: 48, leavesPerBatch: 16,
+            MCTSAgent agent = new(TestUtil.ActingPlayer(state), state, valueNet: CPUNet(), iterationLimit: 48, leavesPerBatch: 16,
                 parallelSelection: false, evaluator: evaluator);
 
             Action move = agent.Act(state);
@@ -107,16 +107,16 @@ namespace Tests
         public void AnEvaluatorOfAnotherModelIsRejected()
         {
             // The agent encodes its positions for its own net, so the evaluator has to run that model
-            using BatchingEvaluator policyEvaluator = new([new StateValueNet(TestUtil.FixturePath("ValueNet", "policy_tiny.onnx"), provider: InferenceProvider.Cpu)], maxRows: 16);
+            using BatchingEvaluator policyEvaluator = new([new StateValueNet(TestUtil.FixturePath("ValueNet", "policy_tiny.onnx"), provider: InferenceProvider.CPU)], maxRows: 16);
             GameState state = TestUtil.NewGame();
-            Assert.Throws<ArgumentException>(() => new MCTSAgent(0, state, valueNet: CpuNet(), evaluator: policyEvaluator));
+            Assert.Throws<ArgumentException>(() => new MCTSAgent(0, state, valueNet: CPUNet(), evaluator: policyEvaluator));
         }
 
         [Fact]
         public async Task ResultsGoIntoTheBuffersARequestBrings()
         {
-            StateValueNet reference = CpuNet();
-            using BatchingEvaluator evaluator = new([CpuNet()], maxRows: 64);
+            StateValueNet reference = CPUNet();
+            using BatchingEvaluator evaluator = new([CPUNet()], maxRows: 64);
             Random random = new(5);
             LeafValues buffer = LeafValues.Allocate(8, withPlacements: true, queryLength: 0);
 
@@ -143,7 +143,7 @@ namespace Tests
         [Fact]
         public void RequestsLargerThanABatchAreRejected()
         {
-            StateValueNet net = CpuNet();
+            StateValueNet net = CPUNet();
             using BatchingEvaluator evaluator = new([net], maxRows: 16);
             // Rejected right away, not through the task
             Assert.Throws<ArgumentException>(() => { _ = evaluator.EvaluateAsync(new DenseTensor<float>([17, net.InputDim]), false); });
@@ -153,8 +153,8 @@ namespace Tests
         public async Task SearchesSharingTheEvaluatorPlayValidMoves()
         {
             TestUtil.Seed(149);
-            using BatchingEvaluator evaluator = new([CpuNet()], maxRows: 128);
-            IStateVectorizer vectorizer = StateVectorizer.For(CpuNet());
+            using BatchingEvaluator evaluator = new([CPUNet()], maxRows: 128);
+            IStateVectorizer vectorizer = StateVectorizer.For(CPUNet());
 
             // Positions from the setup to the middle of the game, each searched on its own thread with small batches
             GameState[] positions = Enumerable.Range(0, 8).Select(i =>

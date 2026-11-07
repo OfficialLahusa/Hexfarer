@@ -14,7 +14,7 @@ namespace Tests
     public class SmallBudgetTests
     {
         private static readonly Lazy<StateValueNet> Net = new(() =>
-            new StateValueNet(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.Cpu));
+            new StateValueNet(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU));
 
         /// <summary>
         /// Positions of a random game where the acting player has a choice, the first placement among them

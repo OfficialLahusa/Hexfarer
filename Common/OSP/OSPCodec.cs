@@ -5,14 +5,14 @@ using static Common.BoardGeometry;
 using static Common.Tile;
 using Action = Common.Actions.Action;
 
-namespace Common.Osp
+namespace Common.OSP
 {
     /// <summary>
     /// Hexfarer's boards, moves and states in the Open Seat Protocol (see Bridges/PROTOCOL.md): hexes as axial [q, r], an
     /// intersection as its three hexes, a path as its two intersections, cards by name. Seats are Hexfarer's player
     /// indices, which are the turn order. One codec per board, since the keys depend only on its geometry.
     /// </summary>
-    public sealed class OspCodec
+    public sealed class OSPCodec
     {
         public static readonly IReadOnlyDictionary<ResourceCardType, string> ResourceNames = new Dictionary<ResourceCardType, string>
         {
@@ -47,7 +47,7 @@ namespace Common.Osp
         private readonly string[] _intersections, _paths;
         private readonly Dictionary<string, int> _intersectionIndex = [], _pathIndex = [];
 
-        public OspCodec(Board board)
+        public OSPCodec(Board board)
         {
             Board = board;
             Cube[][] keys = IntersectionKeys(board);

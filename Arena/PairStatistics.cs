@@ -9,7 +9,7 @@ namespace Arena
     /// variance of 0 would otherwise accept a hypothesis at once.
     /// </summary>
     internal sealed record PairStatistics(int Pairs, int ChallengerTwice, int BaselineTwice, double Elo, double EloLow, double EloHigh,
-        double Llr, double LowerBound, double UpperBound)
+        double LLR, double LowerBound, double UpperBound)
     {
         public const int MinPairs = 30;
         public const double MinVariance = 0.01;
@@ -19,7 +19,7 @@ namespace Arena
         /// <summary>
         /// 1 if H1 is accepted, -1 if H0 is accepted, 0 while the test is open (always before MinPairs)
         /// </summary>
-        public int Verdict => Pairs < MinPairs ? 0 : Llr >= UpperBound ? 1 : Llr <= LowerBound ? -1 : 0;
+        public int Verdict => Pairs < MinPairs ? 0 : LLR >= UpperBound ? 1 : LLR <= LowerBound ? -1 : 0;
 
         public static PairStatistics Of(IReadOnlyList<double> scores, double elo0, double elo1, double alpha = 0.05, double beta = 0.05)
         {

@@ -1,5 +1,5 @@
 """
-JSettlers' games in the Open Seat Protocol (OspGame.java) and the recorder (Recorder.java), which plays random games by
+JSettlers' games in the Open Seat Protocol (OSPGame.java) and the recorder (Recorder.java), which plays random games by
 JSettlers' own rules (its SOCGame) and writes them as a referee's messages, the input of Hexfarer's replay harness: every
 decision lists distinct legal moves, the move played is one of them, results and states keep the protocol's shape and
 add up (pieces, cards), every kind of decision and move comes up, and a game ends with a winner at 10 points.

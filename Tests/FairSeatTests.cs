@@ -19,24 +19,24 @@ namespace Tests
         [Fact]
         public void FairSeatsHaveTheirNamesAndTimes()
         {
-            Assert.Equal("MCTS Easy", Seats.Name(SeatKind.PimcEasy));
-            Assert.Equal("MCTS Medium", Seats.Name(SeatKind.PimcMedium));
-            Assert.Equal("MCTS Hard", Seats.Name(SeatKind.PimcHard));
-            Assert.Equal("Open-hand MCTS Hard", Seats.Name(SeatKind.MctsHard));
-            foreach ((SeatKind fair, SeatKind plain) in new[] { (SeatKind.PimcEasy, SeatKind.MctsEasy), (SeatKind.PimcMedium, SeatKind.MctsMedium), (SeatKind.PimcHard, SeatKind.MctsHard) })
+            Assert.Equal("MCTS Easy", Seats.Name(SeatKind.PIMCEasy));
+            Assert.Equal("MCTS Medium", Seats.Name(SeatKind.PIMCMedium));
+            Assert.Equal("MCTS Hard", Seats.Name(SeatKind.PIMCHard));
+            Assert.Equal("Open-hand MCTS Hard", Seats.Name(SeatKind.MCTSHard));
+            foreach ((SeatKind fair, SeatKind plain) in new[] { (SeatKind.PIMCEasy, SeatKind.MCTSEasy), (SeatKind.PIMCMedium, SeatKind.MCTSMedium), (SeatKind.PIMCHard, SeatKind.MCTSHard) })
             {
                 Assert.True(Seats.NeedsValueNet(fair));
                 Assert.Equal(Seats.PresetSeconds(plain), Seats.PresetSeconds(fair));
             }
 
             // The presets are the fair ones; the open-hand ones are asked for by name
-            Assert.Equal(SeatKind.PimcHard, ServerConsole.ParseKind("hard"));
-            Assert.Equal(SeatKind.PimcHard, ServerConsole.ParseKind("fair-hard"));
-            Assert.Equal(SeatKind.MctsHard, ServerConsole.ParseKind("open-hand-hard"));
-            Assert.Equal(SeatKind.PimcEasy, ServerConsole.ParseKind("PimcEasy"));
+            Assert.Equal(SeatKind.PIMCHard, ServerConsole.ParseKind("hard"));
+            Assert.Equal(SeatKind.PIMCHard, ServerConsole.ParseKind("fair-hard"));
+            Assert.Equal(SeatKind.MCTSHard, ServerConsole.ParseKind("open-hand-hard"));
+            Assert.Equal(SeatKind.PIMCEasy, ServerConsole.ParseKind("PIMCEasy"));
 
             // New games get the hard fair preset, the builder without the value net
-            Assert.Equal(SeatKind.PimcHard, Seats.DefaultBot(valueNetAvailable: true));
+            Assert.Equal(SeatKind.PIMCHard, Seats.DefaultBot(valueNetAvailable: true));
             Assert.Equal(SeatKind.Builder, Seats.DefaultBot(valueNetAvailable: false));
         }
 
@@ -45,16 +45,16 @@ namespace Tests
         {
             TestUtil.SkipWithoutModel();
             GameState state = TestUtil.NewGame();
-            InformationSetMCTSAgent hard = Assert.IsType<InformationSetMCTSAgent>(Seats.CreateAgent(SeatKind.PimcHard, 2, state, AgentSettings.Default, true));
+            InformationSetMCTSAgent hard = Assert.IsType<InformationSetMCTSAgent>(Seats.CreateAgent(SeatKind.PIMCHard, 2, state, AgentSettings.Default, true));
             Assert.Equal(2, hard.PlayerIndex);
             Assert.False(hard.FullKnowledge);
             Assert.Equal(2, hard.Search.TimeLimitSeconds);
 
-            InformationSetMCTSAgent easy = Assert.IsType<InformationSetMCTSAgent>(Seats.CreateAgent(SeatKind.PimcEasy, 1, state, new AgentSettings(null, 500, OpponentModel.MaxN), true));
+            InformationSetMCTSAgent easy = Assert.IsType<InformationSetMCTSAgent>(Seats.CreateAgent(SeatKind.PIMCEasy, 1, state, new AgentSettings(null, 500, OpponentModel.MaxN), true));
             Assert.Equal(500, easy.Search.IterationLimit);
 
             // Without the net they fall back to the builder, like the other seats that need it
-            Assert.IsType<BuilderAgent>(Seats.CreateAgent(SeatKind.PimcMedium, 0, state, AgentSettings.Default, false));
+            Assert.IsType<BuilderAgent>(Seats.CreateAgent(SeatKind.PIMCMedium, 0, state, AgentSettings.Default, false));
         }
 
         [SkippableFact]
@@ -63,7 +63,7 @@ namespace Tests
             // The client's path: the match runs the four fair agents with its runner until the game ends
             TestUtil.SkipWithoutModel();
             TestUtil.Seed(43);
-            SeatKind[] fair = [SeatKind.PimcEasy, SeatKind.PimcMedium, SeatKind.PimcHard, SeatKind.PimcEasy];
+            SeatKind[] fair = [SeatKind.PIMCEasy, SeatKind.PIMCMedium, SeatKind.PIMCHard, SeatKind.PIMCEasy];
             using Match match = new Match(TestUtil.NewGame(), fair, valueNetAvailable: true);
             match.Handle(Admin, new ConfigureAgents(new AgentSettings(null, 256, OpponentModel.MaxN)));
             match.Handle(Admin, new SetPlayback(new PlaybackState(false, false, 0)));
@@ -81,7 +81,7 @@ namespace Tests
         {
             TestUtil.SkipWithoutModel();
             TestUtil.Seed(41);
-            using Match match = new Match(TestUtil.NewGame(), [SeatKind.PimcMedium, SeatKind.Human, SeatKind.PimcEasy, SeatKind.Human], valueNetAvailable: true);
+            using Match match = new Match(TestUtil.NewGame(), [SeatKind.PIMCMedium, SeatKind.Human, SeatKind.PIMCEasy, SeatKind.Human], valueNetAvailable: true);
             Random random = new Random(41);
 
             void AssertBeliefs()
@@ -108,7 +108,7 @@ namespace Tests
             }
 
             // A seat that turns fair in the middle of the game knows only what the seat could know
-            match.Handle(Admin, new SetSeat(1, SeatKind.PimcHard));
+            match.Handle(Admin, new SetSeat(1, SeatKind.PIMCHard));
             Assert.IsType<InformationSetMCTSAgent>(match.AgentOf(1));
             AssertBeliefs();
 

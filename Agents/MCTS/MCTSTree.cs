@@ -226,11 +226,11 @@ namespace Agents.MCTS
 
             int best = Array.IndexOf(visits, visits.Max());
             double sqrtVisits = Math.Sqrt(Math.Max(RootNode.VisitCount, 1));
-            double bestPuct = Mean(children[best]) + _explorationParameter * cleanPriors[best] * sqrtVisits / (1 + visits[best]);
+            double bestPUCT = Mean(children[best]) + _explorationParameter * cleanPriors[best] * sqrtVisits / (1 + visits[best]);
             for (int i = 0; i < children.Length; i++)
             {
                 if (i == best || visits[i] == 0) continue;
-                double gap = bestPuct - Mean(children[i]);
+                double gap = bestPUCT - Mean(children[i]);
                 if (gap <= 0) continue;
                 // PUCT keeps choosing the move while c * P * sqrt(N) / (1 + n) >= gap, i.e. for n up to this bound
                 double bound = _explorationParameter * cleanPriors[i] * sqrtVisits / gap - 1;

@@ -10,15 +10,15 @@ import soc.util.SOCFeatureSet;
 import soc.util.SOCRobotParameters;
 
 /**
- * A JSettlers robot whose decisions an Open Seat Agent makes (see OspRobotBrain). JSettlers' server starts it like its
+ * A JSettlers robot whose decisions an Open Seat Agent makes (see OSPRobotBrain). JSettlers' server starts it like its
  * other third-party robots (jsettlers.bots.start3p); it plays classic 4-player games only.
  */
-public class OspRobotClient extends SOCRobotClient
+public class OSPRobotClient extends SOCRobotClient
 {
-    public OspRobotClient(final ServerConnectInfo sci, final String nn, final String pw)
+    public OSPRobotClient(final ServerConnectInfo sci, final String nn, final String pw)
     {
         super(sci, nn, pw);
-        rbclass = OspRobotClient.class.getName();
+        rbclass = OSPRobotClient.class.getName();
     }
 
     @Override
@@ -31,6 +31,6 @@ public class OspRobotClient extends SOCRobotClient
     @Override
     public SOCRobotBrain createBrain(final SOCRobotParameters params, final SOCGame ga, final CappedQueue<SOCMessage> mq)
     {
-        return new OspRobotBrain(this, params, ga, mq);
+        return new OSPRobotBrain(this, params, ga, mq);
     }
 }
