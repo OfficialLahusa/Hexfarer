@@ -53,6 +53,19 @@ namespace Tests
         }
 
         [Fact]
+        public void KnownDifferencesAreNamedOnlyForTheEngineThatHasThem()
+        {
+            // The same games announced under the rulebook's ruleset: Catanatron's known deviations are differences like
+            // any other there (a JSettlers log, say, has none of them)
+            List<JsonNode> messages = Replay.Read(Fixture).ToList();
+            foreach (JsonNode before in messages.Where(m => m["type"]!.GetValue<string>() == "before"))
+                before["ruleset"] = new JsonObject { ["preset"] = "standard", ["player_trading"] = "none" };
+            Replay.Report report = new Replay().Run(messages);
+            Assert.NotEqual(0, report.Diverged);
+            Assert.DoesNotContain(report.Counts.Keys, kind => kind.Contains("Catanatron"));
+        }
+
+        [Fact]
         public void ALogCutShortReadsUpToTheCut()
         {
             // A stopped writer leaves a gzip stream cut off, its last line half written: read up to there, no failure

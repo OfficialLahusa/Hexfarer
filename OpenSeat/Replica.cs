@@ -20,6 +20,11 @@ namespace OpenSeat
         public OspCodec Codec { get; }
 
         /// <summary>
+        /// Whether the referee plays Catanatron's rules (its ruleset's preset), whose known deviations the differences name
+        /// </summary>
+        public bool Catanatron { get; }
+
+        /// <summary>
         /// The type of the last move followed, for explaining a difference it caused
         /// </summary>
         public string LastMove { get; private set; } = "";
@@ -35,7 +40,7 @@ namespace OpenSeat
             State = new GameState(board, (uint)before["players"]!.GetValue<int>());
             // The ruleset's options, by default its preset's: Catanatron's narrow the moves, the rulebook's ("standard") don't
             JsonNode? ruleset = before["ruleset"];
-            bool catanatron = ruleset?["preset"]?.GetValue<string>() == "catanatron";
+            bool catanatron = Catanatron = ruleset?["preset"]?.GetValue<string>() == "catanatron";
             string Option(string name, string rulebook, string catanatrons) => ruleset?[name]?.GetValue<string>() ?? (catanatron ? catanatrons : rulebook);
             _robbedNeedCards = Option("robber_victims", "adjacent", "with_cards") == "with_cards";
             _bestBankRateOnly = Option("bank_rates", "all", "best_only") == "best_only";
@@ -168,7 +173,7 @@ namespace OpenSeat
                 // Explained after a roll if Hexfarer emptied what the referee kept: the rulebook gives a single player owed a
                 // short resource the rest, Catanatron gives nobody anything
                 string[] differing = OspCodec.ResourceNames.Values.Where(n => !Same(bank[n], ours["bank"]![n])).ToArray();
-                bool shortage = LastMove == "roll" && differing.Length > 0 && differing.All(n => int.Parse(ours["bank"]![n]!.ToJsonString()) == 0);
+                bool shortage = Catanatron && LastMove == "roll" && differing.Length > 0 && differing.All(n => int.Parse(ours["bank"]![n]!.ToJsonString()) == 0);
                 return (shortage ? "state: bank (known: Catanatron gives nobody a short resource, even a single player owed it)" : "state: bank",
                     $"{at}: referee {theirs["bank"]!.ToJsonString()}, Hexfarer {ours["bank"]!.ToJsonString()}");
             }
@@ -181,9 +186,9 @@ namespace OpenSeat
                 {
                     // Explained if some road counts differently at an opponent's building, or if the award changed after a
                     // settlement cut a road (Catanatron then gives it to whoever is longest, ties by its own order, even under 5)
-                    bool countsDiffer = Enumerable.Range(0, State.Players.Length).Any(s => LongestRoad(s, enterOpponents: true) != LongestRoad(s, enterOpponents: false));
+                    bool countsDiffer = Catanatron && Enumerable.Range(0, State.Players.Length).Any(s => LongestRoad(s, enterOpponents: true) != LongestRoad(s, enterOpponents: false));
                     string kind = countsDiffer ? "state: Longest Road (known: Catanatron doesn't count a road's segment ending at an opponent's building)"
-                        : LastMove == "build_settlement" ? "state: Longest Road (known: Catanatron's recount after a settlement cuts a road)"
+                        : Catanatron && LastMove == "build_settlement" ? "state: Longest Road (known: Catanatron's recount after a settlement cuts a road)"
                         : "state: Longest Road";
                     return (kind, $"{at}, seat {seat}: referee {a["has_longest_road"]}, Hexfarer {b["has_longest_road"]}");
                 }

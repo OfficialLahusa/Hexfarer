@@ -151,7 +151,7 @@ namespace OpenSeat
                 int? ours = _replica.State.HasEnded ? _replica.State.Turn.PlayerIndex : null;
                 if (winner == ours) return;
                 // Explained if the referee's winner isn't the player on turn: Catanatron lets anyone win at any time
-                bool offTurn = winner != null && ours == null && winner != int.Parse(after["state"]!["current"]!.ToJsonString());
+                bool offTurn = _replica.Catanatron && winner != null && ours == null && winner != int.Parse(after["state"]!["current"]!.ToJsonString());
                 Diverge(offTurn ? "winner (known: Catanatron counts a win outside the winner's own turn)" : "winner",
                     $"the referee's winner is seat {winner?.ToString() ?? "none"}, Hexfarer's {ours?.ToString() ?? "none"}");
             }
