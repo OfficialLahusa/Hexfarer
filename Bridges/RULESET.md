@@ -9,8 +9,8 @@ The rules of an Open Seat Protocol game (see `PROTOCOL.md`) are a set of options
 
 - Every option has a default that matches the rulebook. A new option gets one too, so agents written before it keep
   playing the `standard` preset.
-- An agent names the presets it can play in its answer to `hello` (`rulesets`). A referee sends an agent only games
-  of a preset it named.
+- An agent names the presets it can play in its handshake (`rulesets`). A referee sends an agent only games of a
+  preset it named, and the agent turns a game down at `before` if it can't play one of its options.
 - Values are JSON strings, numbers or booleans as listed; an option the agent doesn't know is one it doesn't play.
 
 ## Presets
@@ -31,11 +31,11 @@ The rules of an Open Seat Protocol game (see `PROTOCOL.md`) are a set of options
 | `bank_rates` | `all` | `best_only` | `best_only` |
 | `road_building` | `optional` | `forced` | `forced` |
 | `turn_limit` | none | 1000 | none |
-| `decide_timeout_ms` | none | none | the server's robot turn limit |
+| `offer_limit` | none | none (no trading) | not measured (our robot plays without trades) |
 
 The JSettlers column comes from replaying 100 random JSettlers games through Hexfarer's rules (`Recorder` and
 `OpenSeat replay`). Its `unlimited` bank and its Largest Army timing are what its engine does, not values an agent
-can ask for.
+can ask for; its robot names the bank in the ruleset, so an agent that can't play it turns the game down.
 
 ## Options
 
@@ -54,8 +54,8 @@ can ask for.
   - `rulebook` (default): nobody gets the short resource, unless a single player is owed it; that player gets what is
     left.
   - `nobody`: nobody gets the short resource.
-  - `unlimited`: there is no resource bank; every production is paid. The state's `bank` then counts each resource as
-    19 less what the hands hold, which goes below 0 once the hands hold more than 19.
+  - `unlimited`: there is no resource bank; every production is paid. The state's `bank` counts each resource as 19
+    less what the hands hold and stops at 0, also when the hands hold more.
 - **`win_timing`**: when the points win.
   - `own_turn` (default): a player wins during their own turn, as soon as they hold the points.
   - `any_time`: a player wins as soon as they hold the points, also on another player's turn.
@@ -70,14 +70,17 @@ can ask for.
   - `forced`: both roads are placed if there is room; the card can be played only with a road left and a place for
     it.
 - **`turn_limit`** (number or none, default none): after this many player turns the game ends as a draw.
-- **`decide_timeout_ms`** (number or none, default none): how long the agent may take for a decision.
+- **`offer_limit`** (number or none, default none): the trade offers a player may make per turn (only with
+  `player_trading` `rulebook`).
+
+How long an agent may think is no rule of the game: it is the game's budget in `before` (see `PROTOCOL.md`).
 
 ## Who plays what
 
 | | Presets | Options it sets or follows |
 |---|---|---|
-| Hexfarer as referee (client, server, Arena) | `standard` | sets `player_trading` (`rulebook`, `none`), `victory_points` and `discard_limit`; the rest at the default. It also limits offers to 10 per turn, which is no option yet |
+| Hexfarer as referee (client, server, Arena) | `standard` | sets `player_trading` (`rulebook`, `none`), `victory_points`, `discard_limit` and `offer_limit` (10 unless set otherwise); the rest at the default |
 | Hexfarer's agent (`OpenSeat agent`) | `standard`, `catanatron` | follows `robber_victims`, `bank_rates` and `road_building` by narrowing its legal moves; takes the referee's bank, hands and Longest Road where its own rules would differ |
 | Catanatron's referee (`drive.py`) | `catanatron` | |
 | Catanatron's agent (`open_seat_agent.py`) | `standard`, `catanatron` | rebuilds its game from the referee's state at each decision |
-| JSettlers' server with our robot | `standard` | sends `player_trading` `none`, `bank_rates` `best_only`, `robber_victims` `with_cards`, `road_building` `forced` |
+| JSettlers' server with our robot | `standard` | sends `player_trading` `none`, `bank_shortage` `unlimited`, `bank_rates` `best_only`, `robber_victims` `with_cards`, `road_building` `forced` |

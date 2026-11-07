@@ -1,19 +1,20 @@
 # Open Seat Protocol (OSP)
 
-Draft, version 1. One protocol through which a bot of any CATAN engine plays a seat under the referee of any other
+Draft, version 2. One protocol through which a bot of any CATAN engine plays a seat under the referee of any other
 engine, with the rules as an option of each game.
 
 ## Not another standard
 
 OSP invents as little as possible:
 - **Lifecycle** from Catanatron's protocol for bots in other languages (version 1, `catanatron/protocol.py`): one JSON
-  object per line, the messages `hello`, `before`, `decide`, `step` and `after`, only `hello` and `decide` answered, and
-  an answer that must be one of the legal moves the referee listed.
+  object per line, a handshake, then `before`, `decide`, `step` and `after` per game, and an answer that must be one of
+  the legal moves the referee listed.
 - **Board coordinates** from the Settlers Game Notation (SGN 1.0, github.com/dnmfarrell/Settlers-Game-Notation): hexes in
   axial coordinates including the sea, an intersection as its three hexes, a path (edge) as its two intersections,
   harbors on paths, SGN's tile and harbor codes.
-- **New in OSP:** the ruleset as explicit options, an engine-neutral move list and state view. Catanatron's version 1
-  carries its own node numbers and rules.
+- **New in OSP:** the ruleset as explicit options, an engine-neutral move list and state view, a time budget per game,
+  one way to report failures, decisions that send only a hash of the state, and one result record per game.
+  Catanatron's version 1 carries its own node numbers and rules.
 
 The goal is one adapter per engine, not one per pair of engines. If Catanatron takes OSP up as its next protocol
 version, its adapter disappears.
@@ -27,7 +28,8 @@ version, its adapter disappears.
   under other engines' referees.
 - **Transport:** UTF-8 JSON objects, one per line, over the agent's standard input and output (or any line-based stream).
   The referee speaks first. Nothing but protocol lines on standard output; logs go to standard error. A referee may start
-  an agent as a process per game and seat (Hexfarer's Arena does) or keep one for many games (Catanatron's driver does).
+  an agent as a process per game and seat (Hexfarer's Arena does) or keep one for many games (Catanatron's driver does);
+  then the handshake comes once and `before` to `after` repeats.
 - **Seats:** numbered in turn order, seat 0 is the player who starts. An engine that draws who starts (JSettlers) numbers
   its players from that one.
 
@@ -35,49 +37,141 @@ version, its adapter disappears.
 
 | Message | From | Answer | Content |
 |---|---|---|---|
-| `hello` | referee | `hello` | protocol name and version |
-| `before` | referee | none | a new game: seat, ruleset, board, the seat's view of the start |
-| `decide` | referee | `decide` | the seat's view now and its legal moves |
-| `step` | referee | none | a move someone made, with its result as the seat may see it (only to agents that asked to observe) |
-| `after` | referee | none | the end of a game |
+| `handshake` | referee | `handshake` | protocol name and version; the answer says what the agent plays and wants |
+| `before` | referee | `ready` | a new game: seat, ruleset, budget, seed, board, the seat's state at the start |
+| `decide` | referee | `decide` or `resync` | the seat's state (or only its hash) and its legal moves |
+| `step` | referee | none | a move someone made, with its result as the seat may see it (only to agents that observe) |
+| `after` | referee | none | the end of a game, with its result record |
+| `failure` | either | none | what went wrong; ends the game for the agent |
+
+Every message that is answered may also be answered with `failure`.
 
 ```
-→ {"type":"hello","protocol":"osp","version":1}
-← {"type":"hello","protocol":"osp","version":1,"name":"hexfarer-ismcts","rulesets":["standard","catanatron"],
-   "observe":true,"needs":"view"}
-→ {"type":"before","game_id":"g17","seat":2,"players":4,"ruleset":{"preset":"standard","player_trading":"rulebook"},
-   "board":{...},"state":{...}}
+→ {"type":"handshake","protocol":"osp","version":2}
+← {"type":"handshake","protocol":"osp","version":2,"name":"hexfarer-ismcts","rulesets":["standard","catanatron"],
+   "observe":true,"needs":"view","lean":true}
+→ {"type":"before","game_id":"g17","seat":2,"players":4,"ruleset":{"preset":"standard","player_trading":"none"},
+   "budget":{"decide_ms":5000,"game_ms":null,"threads":1,"gpu":false},"seed":1817,"board":{...},"state":{...}}
+← {"type":"ready","game_id":"g17"}
 → {"type":"step","game_id":"g17","n":143,"seat":1,"action":["move_robber",{"hex":[0,-1],"victim":2}],
    "result":{"stolen":"ore"}}
-→ {"type":"decide","game_id":"g17","n":144,"seat":2,"state":{...},"legal":[["roll"],["play_knight"]]}
+→ {"type":"decide","game_id":"g17","n":144,"seat":2,"hash":"3fa0c9e1b27d4c58","legal":[["roll"],["play_knight"]]}
 ← {"type":"decide","game_id":"g17","n":144,"action":["roll"]}
-→ {"type":"after","game_id":"g17","winner":2,"vp":[7,8,10,6],"truncated":false}
+→ {"type":"after","game_id":"g17","winner":2,"vp":[7,8,10,6],"truncated":false,"result":{...}}
 ```
 
-- **`hello` answer:**
+### `handshake`
+
+- The referee names the protocol and its version; the agent answers with the same, or with a `failure` (`version`).
+  The versions have to match exactly.
+- The answer:
+  - `name`: the agent's name, for the results.
   - `rulesets`: the presets the agent can play (see `RULESET.md`).
-  - `options`: optionally, the values of single options it supports beyond them.
   - `observe`: whether it wants `step`.
   - `needs`: `view` (default; only what its seat sees), `world` (a full game drawn by the referee from the seat's view)
     or `truth` (every hand, for open-hand agents).
-  - A referee that can't serve a game the agent supports, or won't hand out what it needs, doesn't start the game. It
-    labels every game with what each seat received.
-  - Under `truth`, every `step` also carries `state`: the state before the move, with every hand. An agent that keeps its
-    own copy of the game can then check it before following each move, and take over the referee's state where the two
-    engines' rules differ (the referee decides the game). Under `world` a step carries the seat's view: worlds are drawn
-    for decisions only.
-  - Under `truth` the results show everything (another seat's bought card, a steal between two others); otherwise as
-    the seat sees them.
-  - A referee that can't follow moves for an agent sends it no steps: the agent then has to take the game from each
-    decision's state. JSettlers' robot sends steps; its server makes them from the players' requests, in the protocol's
-    order (simultaneous discards from the lowest seat up, each with the state that order gives it). A change the server
-    makes on its own (a slow player's turn ended) comes as no step; the next step's state shows it.
-- **`n`:** counts the moves of the game, so answers and steps can't be mixed up.
-- **`decide` answer:** a copy of one entry of `legal`. The referee matches it against its own list, as Catanatron's does,
-  so an encoding that only looks right can't slip through.
-- **Errors:** an answer that isn't legal, or a version the other side doesn't speak, ends the game for that agent with
-  `{"type":"error","message":...}`.
-- **Timeouts:** only if the ruleset sets `decide_timeout_ms`; evaluations run without one.
+  - `lean` (default false): whether `decide` may leave the state out and send only its hash. Only together with
+    `observe`, and with `view` or `truth`.
+- The referee serves `needs`, `observe` and `lean` as asked, or answers with a `failure` (`unsupported`) and starts no
+  game. It never sends something else instead. It labels every game with what each seat received (the result record).
+- Under `truth`, every `step` also carries `state`: the state before the move, with every hand. An agent that keeps its
+  own copy of the game can then check it before following each move, and take over the referee's state where the two
+  engines' rules differ (the referee decides the game). Under `world` a step carries the seat's view: worlds are drawn
+  for decisions only.
+- Under `truth` the results show everything (another seat's bought card, a steal between two others); otherwise as the
+  seat sees them.
+- JSettlers' robot sends steps; its server makes them from the players' requests, in the protocol's order (simultaneous
+  discards from the lowest seat up, each with the state that order gives it). A change the server makes on its own (a
+  slow player's turn ended) comes as no step; the next decision then carries the full state (see lean decisions).
+
+### `before` and `ready`
+
+- `before` starts a game: `game_id`, `seat`, `players`, `ruleset`, `budget`, `seed`, `board` and `state`, the seat's
+  state at the start as `needs` says.
+- `seed`: a number from 0 to 2^31 - 1 for the agent's own randomness (drawn worlds, tie breaks). An agent that seeds
+  from it plays the same game the same way, and the referee logs it, so every game replays exactly.
+- The agent takes the game with `{"type":"ready","game_id":"g17"}`, or turns it down with a `failure` (`unsupported`)
+  whose `detail` names what it can't play: `{"preset":"catanatron"}` or `{"option":"road_building","value":"optional"}`.
+  A referee sends only games of a preset the agent named, but an option can still be one it doesn't play.
+
+### The budget
+
+`"budget":{"decide_ms":5000,"game_ms":null,"threads":1,"gpu":false}` in every `before`:
+- `decide_ms` (required): the time from sending `decide` until the referee reads the answer. Past it, the referee
+  sends a `failure` (`timeout`). Agents keep their own margin for the transport.
+- `game_ms` (or null): a clock for the whole game; each `decide` then carries `clock_ms`, the time the agent has left.
+- `threads` (or null for no limit): the CPU threads the agent may use, for equal compute. A referee that pins the agent
+  to cores enforces it; the others state it.
+- `gpu`: whether the agent may use a GPU.
+- The answers to `handshake` and `before` have 60 s, for starting a process and loading a net.
+- Defaults, where whoever starts the game sets none: Hexfarer's referee 300 000 ms, Catanatron's driver 300 000 ms,
+  JSettlers' robot 120 000 ms (its server also ends a robot's turn after its own limit).
+
+### `decide`, lean decisions and `resync`
+
+- `decide` carries `game_id`, `n`, `seat`, `legal`, `hash`, and `state` unless the agent is lean; with a game clock
+  also `clock_ms`.
+- `hash`: the first 16 hex digits (lowercase) of the SHA-256 of the state's canonical JSON: keys sorted, no whitespace,
+  UTF-8. The state holds only integers, booleans, null, lists, objects and strings of ASCII letters, digits and
+  underscores, so its canonical form is unique. It is the hash of the state the agent would get: its view under `view`,
+  the true state under `truth`.
+- A lean agent keeps its own game from the steps and checks it against `hash`. If they differ, or it lost track, it
+  answers `{"type":"resync","game_id":"g17","n":144}` and the referee sends the same decision again, with `state`.
+- The referee may send `state` in any decision on its own (a forced resync), for example after a change no step
+  explains. An agent that isn't lean gets `state` every time.
+- The answer: `{"type":"decide","game_id":"g17","n":144,"action":...}`, a copy of one entry of `legal`. The referee
+  matches it against its own list, as Catanatron's does, so an encoding that only looks right can't slip through.
+- `n` counts the moves of the game, so answers and steps can't be mixed up.
+
+### `after` and the result record
+
+`after` ends a game for the agent: `game_id`, `winner` (a seat or null), `vp` per seat, `truncated` (the game was cut
+short: an undo, a reset, a shutdown, a failure) and `result`, the game's result record. The referee writes the same
+record into its log, the one result line of every referee:
+
+```
+"result":{"seed":1817,"moves":512,"turns":63,
+          "seats":[{"seat":0,"agent":"hexfarer-ismcts","needs":"view","observe":true,"lean":true,
+                    "decisions":118,"time_ms":5230,"max_ms":410,"resyncs":0,"fallbacks":0,"failures":[]},
+                   {"seat":1,"agent":null,...},...]}
+```
+
+- `agent` is null for a seat the referee's own players play; their counts are the referee's own, where it has them.
+- `time_ms` and `max_ms`: the total and the longest time of the seat's decisions, as the referee measured them.
+- `fallbacks`: moves the referee chose for the seat after a failure, where it keeps a seat going.
+- `failures`: each as `{"n":144,"code":"timeout","by":"referee","message":"..."}`.
+
+### `failure`
+
+`{"type":"failure","game_id":"g17","n":144,"code":"illegal","message":"...","detail":{...}}`. `game_id` is null before
+a game, `n` outside a decision, `detail` optional. After a failure neither side sends more for that game; a failure
+without a game ends the connection. The referee records every failure in the game's result record.
+
+| Code | Sent by | When |
+|---|---|---|
+| `version` | either | the other side's protocol or version isn't one it speaks |
+| `unsupported` | either | the referee can't serve the agent's `needs`, `observe` or `lean`; the agent can't play the game's preset or an option |
+| `illegal` | referee | an answer that isn't one of the listed legal moves, or has another `n` |
+| `malformed` | either | a line that isn't JSON, or a message without a field it needs |
+| `timeout` | referee | no answer within the budget |
+| `ended` | referee (recorded only) | the agent's process ended or closed its output, so it can't be told |
+| `internal` | either | the side's own error, say an exception in the agent's search |
+
+What happens to the seat is the referee's choice, recorded with the result: a Hexfarer match pauses (resuming starts
+the agent again), the Arena drops the game, Catanatron's driver ends the game, and JSettlers' robot plays on with the
+first legal move (as `fallbacks`).
+
+### Trades between players
+
+Where the ruleset allows them (`player_trading` `rulebook`), trades are decisions like any other:
+1. The player on turn, after the roll, may play `offer` (`{"give":set,"get":set,"to":[seats]}`), at most `offer_limit`
+   times per turn.
+2. Each seat the offer goes to then gets a decision with the prompt `answer_offer`, one after another starting from the
+   offerer's left: `respond` (`{"accept":true or false}`) or, with `counteroffers`, `counter` in the offerer's terms.
+   The state's `offer` shows the answers so far.
+3. When all have answered, the offerer gets the prompt `pick_partner`: `confirm` (`{"partner":seat}`) with a seat that
+   accepted (on the offer's terms) or countered (on the counteroffer's terms), or `cancel`.
+4. Every answer is a decision with the game's budget, and the steps tell observers each one.
 
 ## Coordinates (SGN)
 
@@ -155,8 +249,8 @@ the ruleset allows trading between players.
   card type is listed, 0 included. `played` may count only knights (Hexfarer's engine keeps no other).
 - A `world` fills them with a game the referee drew from the seat's view and says so (`"drawn":true`).
 - Under `truth` they are the real ones.
-- `bank` counts each resource as 19 less what the hands hold. A referee without a resource bank (`bank_shortage`
-  `unlimited`) may send counts below 0, once the hands hold more than 19; Hexfarer reads them as an empty bank.
+- `bank` counts each resource as 19 less what the hands hold, never below 0. A game without a resource bank says so in
+  its ruleset (`bank_shortage` `unlimited`): its counts stop at 0, but every production is paid.
 
 ## Ruleset
 
@@ -168,3 +262,6 @@ playing `standard`. Every option, its values and which engine plays what: `RULES
 
 `version` is raised only when a change would break agents written for the old shape. New options and moves for rules
 an agent didn't declare don't count: a referee never sends them to an agent that doesn't support them.
+- Version 2: `hello` became `handshake` (without `options`), `before` is answered with `ready`, `failure` replaced
+  `error`, and `budget`, `seed`, `lean`, `hash`, `resync` and the result record are new. `decide_timeout_ms` left the
+  ruleset for the budget.
