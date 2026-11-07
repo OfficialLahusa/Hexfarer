@@ -258,7 +258,7 @@
 		- Umgesetzt (OspRobotClient/OspRobotBrain im Server-JVM, liest unter den Sperren des Servers; MoveLog macht aus JSettlers' Anfragen Schritte, also auch fair): 5k ohne Handel gegen 3 smarte Robots open-hand 79,8 %, fair 81,0 % [76,9, 84,5], 2v2 fair 93,5 % (je 400 Partien); gleiche Rechenzeit (ein Kern, 4 It. 3,9 ms gegen 3,3 ms pro Entscheidung) 50,7 % [45,9, 55,6], mehr Suche auf dem Kern 8 It. 60,2 %, 16 It. 63,2 %, 64 It. 72,8 %; offen: Handel
 	- 6. JSettlers-Bots in der Hexfarer-Sim nur über eine Emulation ihres Server-Protokolls (~1-2 Wochen, fragil); sonst gemischte Partien auf ihrem Server laufen lassen und per Relay verfolgen
 		- Gemischte Partien laufen über Stufe 5 auf ihrem Server; -Dosp.record schreibt Serverpartien live als Log (Replay, Relay, Live-Relay); Catanatrons AB:2 als Robot-Agent gegen 3 smarte Robots 21,5 % (erster Vergleich der beiden Bot-Familien)
-	- 7. Stärkere Gegner aus der JSettlers-Familie: StacSettlers (Edinburgher Fork von JSettlers 1.1.x) mit Stac-Agent und Dobres MCTS-Agenten mit Belief-Modellen (POMCP, ISMCTS; 53,65 % gegen Stac bei 40k It., 2-3 s pro Entscheidung) => stärkste veröffentlichte Gegner; braucht unseren Robot auf ihrem alten Server oder ihre Agenten als Open Seat Agent (~1 Woche)
+	- 7. Stärkere Gegner aus der JSettlers-Familie: StacSettlers (Fork von JSettlers 1.1.x der Universität Edinburgh) mit Stac-Agent und Dobres MCTS-Agenten mit Belief-Modellen (POMCP, ISMCTS; 53,65 % gegen Stac bei 40k It., 2-3 s pro Entscheidung) => stärkste veröffentlichte Gegner; braucht unseren Robot auf ihrem alten Server oder ihre Agenten als Open Seat Agent (~1 Woche)
 - Interface für JSettlers Agents/Server
 - Tabletalking über LLMs
 	- Zusätzlich zu Value Functions von einem Basisbot
