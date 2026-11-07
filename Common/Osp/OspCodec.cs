@@ -430,9 +430,11 @@ namespace Common.Osp
                 "setup_road" => settlementsOnTurn == 1 ? TurnState.RoundType.FirstInitial : TurnState.RoundType.SecondInitial,
                 _ => TurnState.RoundType.Normal,
             };
-            // The rounds the setup counts; in play only the first roll of the game matters (the value net's features)
+            // The rounds the setup counts; in play only the first roll of the game matters (the value net's features). The
+            // sizes of a hand: as the state gives them, or (from older referees) as its cards add up
+            int Size(JsonNode p, string size, string cards) => p[size] is JsonNode n ? Number(n) : p[cards]!.AsObject().Sum(c => Number(c.Value));
             bool untouched = players.All(p => Number(p!["pieces_left"]!["settlements"]) == BuildingStock.MAX_SETTLEMENTS - 2
-                && Number(p!["pieces_left"]!["roads"]) == BuildingStock.MAX_ROADS - 2 && Number(p!["hand_size"]) + Number(p!["development_size"]) <= 3);
+                && Number(p!["pieces_left"]!["roads"]) == BuildingStock.MAX_ROADS - 2 && Size(p!, "hand_size", "hand") + Size(p!, "development_size", "development") <= 3);
             t.RoundCounter = t.TypeOfRound switch
             {
                 TurnState.RoundType.FirstInitial => 0,
@@ -445,7 +447,8 @@ namespace Common.Osp
             t.MustMoveRobber = prompt == "move_robber";
             if (prompt == "discard") t.AwaitedPlayerDiscards[current] = true;
 
-            // Hands, development cards, played knights, pieces, Longest Road and Largest Army
+            // Hands, development cards, played knights, pieces, Longest Road and Largest Army; the cards held or played count
+            // against the deck (of the played ones the referee may count only knights, as Hexfarer does)
             uint[] heldCards = new uint[Enum.GetValues<DevelopmentCardType>().Length];
             for (int seat = 0; seat < players.Count; seat++)
             {
@@ -460,7 +463,8 @@ namespace Common.Osp
                     heldCards[(int)type] += count;
                 }
                 player.PlayedKnights = (uint)Number(p["played"]!["knight"]);
-                player.LongestRoadLength = (uint)Number(p["longest_road"]);
+                foreach ((DevelopmentCardType type, string name) in CardNames)
+                    if (p["played"]![name] is JsonNode played) heldCards[(int)type] += (uint)Number(played);
                 player.VictoryPoints.LongestRoadPoints = (byte)(p["has_longest_road"]!.GetValue<bool>() ? 2 : 0);
                 player.VictoryPoints.LargestArmyPoints = (byte)(p["has_largest_army"]!.GetValue<bool>() ? 2 : 0);
                 player.VictoryPoints.DevelopmentCardPoints = (byte)player.DevelopmentCards.Get(DevelopmentCardType.VictoryPoint);
@@ -487,19 +491,21 @@ namespace Common.Osp
             game.ResourceBank = new CardSet<ResourceCardType>();
             foreach ((ResourceCardType type, string name) in ResourceNames)
                 game.ResourceBank.Add(type, (uint)Math.Max(0, Number(state["bank"]![name])));
-            uint knightsPlayed = (uint)game.Players.Sum(p => (long)p.PlayedKnights);
             List<DevelopmentCardType> deck = [];
             foreach ((DevelopmentCardType type, uint total) in DevelopmentDeck)
-            {
-                uint used = heldCards[(int)type] + (type == DevelopmentCardType.Knight ? knightsPlayed : 0);
-                for (uint i = used; i < total; i++) deck.Add(type);
-            }
+                for (uint i = heldCards[(int)type]; i < total; i++) deck.Add(type);
             int size = Number(state["bank"]!["development"]);
             // Unknown plays (only knights are counted) leave the deck too large: the non-knight cards go first
             deck = deck.OrderBy(type => type == DevelopmentCardType.Knight ? 1 : 0).Skip(Math.Max(0, deck.Count - size)).ToList();
             while (deck.Count < size) deck.Add(DevelopmentCardType.Knight);
             game.DevelopmentBank = new CardSet<DevelopmentCardType>();
             foreach (DevelopmentCardType type in deck) game.DevelopmentBank.Add(type, 1);
+
+            // Each road's length by Hexfarer's count, as every move from here on counts it (a referee may count differently);
+            // the award stays the referee's
+            for (int seat = 0; seat < players.Count; seat++) game.CalculateLongestRoad(seat);
+            for (int seat = 0; seat < players.Count; seat++)
+                game.Players[seat].VictoryPoints.LongestRoadPoints = (byte)(players[seat]!["has_longest_road"]!.GetValue<bool>() ? 2 : 0);
             return game;
         }
 

@@ -480,6 +480,74 @@ namespace Tests
             Assert.Superset(new HashSet<string> { "setup_settlement", "setup_road", "roll", "main", "discard", "move_robber" }, prompts);
         }
 
+        // A state through text, as it comes in a message, with the codec it was written by
+        private static (OspCodec codec, JsonNode state, JsonArray legal) Message(GameState game)
+        {
+            OspCodec codec = new(OspCodec.BuildBoard(new OspCodec(game.Board).BoardJson()));
+            sbyte acting = TestUtil.ActingPlayer(game);
+            JsonArray legal = new(LegalActionProvider.GetActionsForState(game, acting).Select(a => JsonNode.Parse(codec.Move(a).ToJsonString())).ToArray());
+            return (codec, JsonNode.Parse(codec.State(game).ToJsonString())!, legal);
+        }
+
+        [Fact]
+        public void AStateWithoutHandSizesRebuildsFromTheHands()
+        {
+            // Older referees (and logs) send no hand_size and development_size: the hands give them
+            foreach ((GameState game, _, _) in RandomMoves(games: 2, firstSeed: 5).Where((_, i) => i < 40 || i % 20 == 0))
+            {
+                (OspCodec codec, JsonNode state, JsonArray legal) = Message(game);
+                string expected = OspCodec.Canonical(codec.State(codec.BuildState(state, legal)));
+                foreach (JsonNode? player in state["players"]!.AsArray())
+                {
+                    player!.AsObject().Remove("hand_size");
+                    player.AsObject().Remove("development_size");
+                }
+                Assert.Equal(expected, OspCodec.Canonical(codec.State(codec.BuildState(state, legal))));
+            }
+        }
+
+        [Fact]
+        public void ARebuiltDeckLeavesOutEveryCardTheRefereeCountsAsPlayed()
+        {
+            // A referee that counts every card played (Catanatron does): a road building, a year of plenty and a monopoly
+            // card left the deck by being played, not just by being drawn
+            GameState game = RandomMoves(games: 1, firstSeed: 6).Select(m => m.before).Skip(40).First(s =>
+                s.DevelopmentBank.Get(DevelopmentCardType.RoadBuilding) > 0 && s.DevelopmentBank.Get(DevelopmentCardType.YearOfPlenty) > 0
+                && s.DevelopmentBank.Get(DevelopmentCardType.Monopoly) > 0);
+            (OspCodec codec, JsonNode state, JsonArray legal) = Message(game);
+            JsonNode played = state["players"]![1]!["played"]!;
+            played["road_building"] = 1;
+            played["year_of_plenty"] = 1;
+            played["monopoly"] = 1;
+            state["bank"]!["development"] = Int(state["bank"]!["development"]) - 3;
+            state = JsonNode.Parse(state.ToJsonString())!;
+
+            GameState rebuilt = codec.BuildState(state, legal);
+            foreach (DevelopmentCardType type in Enum.GetValues<DevelopmentCardType>())
+            {
+                uint expected = game.DevelopmentBank.Get(type) - (type is DevelopmentCardType.RoadBuilding or DevelopmentCardType.YearOfPlenty or DevelopmentCardType.Monopoly ? 1u : 0u);
+                Assert.True(expected == rebuilt.DevelopmentBank.Get(type), $"{type}: {rebuilt.DevelopmentBank.Get(type)} in the deck, {expected} expected");
+            }
+        }
+
+        [Fact]
+        public void ARebuiltGameCountsItsRoadsByHexfarersRules()
+        {
+            // A referee that counts a road's length differently (Catanatron, at an opponent's building): the rebuilt game
+            // counts by its own rules, as every move after it will, and takes the award from the referee
+            GameState game = RandomMoves(games: 1, firstSeed: 7).Select(m => m.before).First(s => s.Players.Any(p => p.LongestRoadLength >= 3)
+                && s.Players.All(p => p.VictoryPoints.LongestRoadPoints == 0));
+            int seat = Array.FindIndex(game.Players, p => p.LongestRoadLength >= 3);
+            (OspCodec codec, JsonNode state, JsonArray legal) = Message(game);
+            state["players"]![seat]!["longest_road"] = (int)game.Players[seat].LongestRoadLength - 1;
+            state["players"]![(seat + 1) % 4]!["has_longest_road"] = true;
+            state = JsonNode.Parse(state.ToJsonString())!;
+
+            GameState rebuilt = codec.BuildState(state, legal);
+            Assert.Equal(game.Players.Select(p => p.LongestRoadLength), rebuilt.Players.Select(p => p.LongestRoadLength));
+            Assert.Equal(Enumerable.Range(0, 4).Select(s => s == (seat + 1) % 4 ? 2 : 0).ToArray(), rebuilt.Players.Select(p => (int)p.VictoryPoints.LongestRoadPoints).ToArray());
+        }
+
         [Fact]
         public void ARebuiltGameKnowsWhichCardsWereBoughtThisTurn()
         {
@@ -553,7 +621,8 @@ namespace Tests
             OpenSeatAgentProcess process = OpenSeatAgentProcess.Start($"dotnet \"{Path.Combine(AppContext.BaseDirectory, "OpenSeat.dll")}\" no-such-mode", TimeSpan.FromSeconds(60));
             OpenSeatException error = Assert.Throws<OpenSeatException>(() => OpenSeatHello.Exchange(process));
             Assert.Contains("ended", error.Message);
-            Assert.Contains("Usage", error.Message);
+            // The end of the help, which the error keeps
+            Assert.Contains("bench: plays N random games", error.Message);
             process.Dispose();
         }
 
@@ -564,7 +633,7 @@ namespace Tests
             OpenSeatAgentProcess process = OpenSeatAgentProcess.Start($"dotnet \"{Path.Combine(AppContext.BaseDirectory, "OpenSeat.dll")}\" --help", TimeSpan.FromSeconds(60));
             OpenSeatException error = Assert.Throws<OpenSeatException>(() => OpenSeatHello.Exchange(process));
             Assert.Contains("ended", error.Message);
-            Assert.Contains("OpenSeat replay", error.Message);
+            Assert.Contains("bench: plays N random games", error.Message);
             process.Dispose();
         }
 
