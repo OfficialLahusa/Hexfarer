@@ -11,6 +11,7 @@ import java.util.TreeSet;
 import soc.game.SOCCity;
 import soc.game.SOCDevCardConstants;
 import soc.game.SOCGame;
+import soc.game.SOCPlayer;
 import soc.game.SOCPlayingPiece;
 import soc.game.SOCRoad;
 import soc.game.SOCSettlement;
@@ -165,7 +166,9 @@ public class OspRobotBrain extends SOCRobotBrain
         int seat = osp.seatOf(ourPlayerNumber);
         if (osp.isOver())
         {
-            finish(seat);
+            // JSettlers ends the game a moment before it names the winner: the line waits for the name (the next ping)
+            if (truthGame.getPlayerWithWin() != null)
+                finish(seat);
             return;
         }
         // The server's thread changes the game while this one reads it: the state, the situation and the legal moves are
@@ -396,7 +399,11 @@ public class OspRobotBrain extends SOCRobotBrain
         List<Object> vp = Json.array();
         for (int s = 0; s < truthGame.maxPlayers; s++)
             vp.add(truthGame.getPlayer(osp.playerOf(s)) == null ? null : (Object) (long) truthGame.getPlayer(osp.playerOf(s)).getTotalVP());
-        Object winner = truthGame.getPlayerWithWin() == null ? null : (Object) (long) osp.seatOf(truthGame.getPlayerWithWin().getPlayerNumber());
+        // The winner, or (ended by the server before it named one) the player on turn with the points to win
+        SOCPlayer won = truthGame.getPlayerWithWin();
+        if (won == null && osp.isOver() && truthGame.getPlayer(truthGame.getCurrentPlayerNumber()).getTotalVP() >= truthGame.vp_winner)
+            won = truthGame.getPlayer(truthGame.getCurrentPlayerNumber());
+        Object winner = won == null ? null : (Object) (long) osp.seatOf(won.getPlayerNumber());
         try
         {
             if (agent != null)

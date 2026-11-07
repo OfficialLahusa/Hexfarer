@@ -60,8 +60,9 @@ class RobotTests(unittest.TestCase):
     def test_every_game_ends_with_a_winner_and_the_robots_line(self):
         self.assertEqual(2, len(self.stats), self.output[-3000:])
         for stats in self.stats:
+            # The line names the winner (JSettlers names it a moment after the game ended), the seat with the points
             self.assertIsNotNone(stats["winner"], stats)
-            self.assertGreaterEqual(max(stats["vp"]), 10, stats)
+            self.assertGreaterEqual(stats["vp"][stats["winner"]], 10, stats)
 
     def test_the_server_never_has_to_end_the_robots_turn(self):
         # JSettlers ends a robot's turn when it stops answering, e.g. after a bought piece it doesn't place (its own robots
