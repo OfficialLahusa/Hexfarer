@@ -39,6 +39,7 @@ namespace Simulation
             KickSession => "close connections",
             CreateToken or RevokeToken => "manage tokens",
             SetServerOptions => "change the server's options",
+            RelayMove => "relay a referee's moves",
             _ => "do that"
         };
     }

@@ -13,6 +13,12 @@ namespace Simulation
     /// A move for a seat the sender may play
     /// </summary>
     public sealed record PlayMove(Action Action) : Command;
+
+    /// <summary>
+    /// A move an outside referee played, with its outcome (dice, drawn and stolen cards), which the match keeps (admins
+    /// only: OpenSeat's live relay)
+    /// </summary>
+    public sealed record RelayMove(Action Action) : Command;
     public sealed record UndoCommand : Command;
     public sealed record RedoCommand : Command;
 

@@ -289,6 +289,10 @@ namespace Simulation
                         positionChanged = PlayLocked(move.Action, sender);
                         break;
 
+                    case RelayMove relay:
+                        positionChanged = PlayLocked(relay.Action, sender, keepOutcome: true);
+                        break;
+
                     case UndoCommand:
                         if (Record.History.Count == 0) { Publish(new ErrorEvent("There is nothing to undo."), sender.Id); return; }
                         UndoLocked();
@@ -408,12 +412,12 @@ namespace Simulation
             }
         }
 
-        private bool PlayLocked(Action action, SessionInfo sender)
+        private bool PlayLocked(Action action, SessionInfo sender, bool keepOutcome = false)
         {
             // The match decides the random outcomes (dice, drawn and stolen cards) and what undo restores: a history that came
-            // with the move is dropped, or a client could pick its own dice
+            // with the move is dropped, or a client could pick its own dice; a relayed move keeps the referee's
             Action played = action.Clone();
-            if (played is IReplayAction replay) replay.ClearHistory();
+            if (!keepOutcome && played is IReplayAction replay) replay.ClearHistory();
             if (played.PlayerIndex is < 0 or >= 4 || Record.State.HasEnded || !Record.State.CanPlayerAct(played.PlayerIndex) || !played.IsValidFor(Record.State))
             {
                 Publish(new ErrorEvent($"{action.GetType().Name} is not a legal move now."), sender.Id);

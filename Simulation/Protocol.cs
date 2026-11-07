@@ -171,6 +171,7 @@ namespace Simulation
             JsonObject json = command switch
             {
                 PlayMove m => new JsonObject { ["action"] = Yaml(m.Action) },
+                RelayMove r => new JsonObject { ["action"] = Yaml(r.Action) },
                 UndoCommand => [],
                 RedoCommand => [],
                 ApplyEdit e => new JsonObject { ["edit"] = Edit(e.Edit) },
@@ -197,6 +198,7 @@ namespace Simulation
             return (string?)json["type"] switch
             {
                 nameof(PlayMove) => new PlayMove(Action(json["action"])),
+                nameof(RelayMove) => new RelayMove(Action(json["action"])),
                 nameof(UndoCommand) => new UndoCommand(),
                 nameof(RedoCommand) => new RedoCommand(),
                 nameof(ApplyEdit) => new ApplyEdit(Edit(json["edit"])),

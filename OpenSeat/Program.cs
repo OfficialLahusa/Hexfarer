@@ -20,6 +20,7 @@ namespace OpenSeat
         public const string Usage = """
             Usage: OpenSeat replay LOG [LOG ...] [--max-games N] [--examples K]
                    OpenSeat relay LOG [LOG ...] --save DIR [--max-games N]
+                   OpenSeat relay LOG|DIR --live [--port P] [--bind ADDRESS] [--delay S]
                    OpenSeat agent [--net MODEL.onnx] [--iterations N | --seconds S] [--provider auto|cpu|dml|cuda] [--leaves-per-batch B]
                                   [--threads T] [--serial] [--fair]
                    OpenSeat boards --seed-base S --count N --out FILE
@@ -34,6 +35,10 @@ namespace OpenSeat
             through Hexfarer's rules with the recorded results. Where the rules part (a state Hexfarer holds differently, a
             move it doesn't allow), the file ends and GAME-part2.yaml etc. go on from the referee's state; each file holds
             where its part ended and the moves since it began. Prints where and why a part started from the referee's state.
+            With --live it shows the games while they are played instead: it follows the log as the referee writes it (or,
+            for a directory, the newest game in it, as JSettlers' server writes them with -Dosp.record) and hosts them for
+            the client on ws://ADDRESS:P (default 127.0.0.1:17018; in the client Join, role Watch, no token), each move
+            with the referee's outcome, at most one move per S seconds (default 0).
 
             agent: plays one seat for a referee over the protocol on standard input and output, with open-hand MCTS and the
             value net (default: the deployed net, 5000 iterations per decision; budgets round up to whole batches of B leaves,
@@ -76,6 +81,28 @@ namespace OpenSeat
                         foreach (string log in logs) replay.Run(Replay.Read(log), int.Parse(Option("--max-games", int.MaxValue.ToString())));
                         Console.WriteLine(replay.Result);
                         return replay.Result.Diverged == 0 ? 0 : 1;
+                    }
+                case "relay" when args.Contains("--live"):
+                    {
+                        string? source = args.Skip(1).FirstOrDefault(a => !a.StartsWith("--"));
+                        if (source == null)
+                        {
+                            Console.WriteLine(Usage);
+                            return 2;
+                        }
+                        Simulation.ServerConfig config = new()
+                        {
+                            Port = int.Parse(Option("--port", "17018")),
+                            BindAddress = Option("--bind", "127.0.0.1"),
+                            AllowAnonymousSpectators = true,
+                        };
+                        LiveRelay live = LiveRelay.StartAsync(source, config, double.Parse(Option("--delay", "0"), CultureInfo.InvariantCulture), log: Console.Out).GetAwaiter().GetResult();
+                        Console.WriteLine($"Relaying {source} on ws://{config.BindAddress}:{live.Port}: in the client Join, role Watch, address {(config.BindAddress == "0.0.0.0" ? "THIS-COMPUTER" : config.BindAddress)}:{live.Port}. Ctrl+C stops.");
+                        using ManualResetEventSlim stopped = new();
+                        Console.CancelKeyPress += (_, e) => { e.Cancel = true; stopped.Set(); };
+                        stopped.Wait();
+                        live.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                        return 0;
                     }
                 case "relay":
                     {
