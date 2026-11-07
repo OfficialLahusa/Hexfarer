@@ -5,6 +5,7 @@ using Agents.OpenSeat;
 using Arena;
 using Common;
 using Microsoft.ML.OnnxRuntime.Tensors;
+using System.Text.Json.Nodes;
 
 namespace Tests
 {
@@ -617,6 +618,16 @@ namespace Tests
             Assert.All(text.Split('\n').Where(line => line.Contains(" done): ")), line => Assert.Contains("offers C 0 (0 traded), B 0", line));
             Assert.Equal(1, result.Groups);
             Assert.Contains("all games played: 4 games", text);
+            // One result record per game: the baseline's seats with the agent and its decisions, the challenger's without
+            List<JsonNode> results = text.Split('\n').Where(line => line.Contains("result {")).Select(line => JsonNode.Parse(line[line.IndexOf('{')..])!).ToList();
+            Assert.Equal(4, results.Count);
+            foreach (JsonNode record in results)
+            {
+                JsonArray seats = record["seats"]!.AsArray();
+                Assert.Equal(3, seats.Count(s => s!["agent"] != null && (int)s!["decisions"]! > 0 && s!["failures"]!.AsArray().Count == 0));
+                Assert.Single(seats, s => s!["agent"] == null);
+            }
+            Assert.Equal(4, results.Select(r => (int)r["seed"]!).Distinct().Count());
         }
 
         [Theory]

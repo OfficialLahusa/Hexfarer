@@ -293,6 +293,36 @@ class Agent:
         return legal[0]
 
 
+# Every option of RULESET.md with the values it takes (None: a number); the rebuild plays them with Catanatron's engine
+OPTIONS = {"victory_points": None, "discard_limit": None, "turn_limit": None, "offer_limit": None,
+           "player_trading": ("rulebook", "none"), "counteroffers": (True, False), "bank_shortage": ("rulebook", "nobody", "unlimited"),
+           "win_timing": ("own_turn", "any_time"), "robber_victims": ("adjacent", "with_cards"), "bank_rates": ("all", "best_only"),
+           "road_building": ("optional", "forced")}
+
+
+def unsupported(ruleset):
+    """What of a ruleset this agent can't play, as a failure's detail, or None"""
+    for name, value in (ruleset or {}).items():
+        if name == "preset":
+            if value not in ("standard", "catanatron"):
+                return {"preset": value}
+            continue
+        if name not in OPTIONS:
+            return {"option": name, "value": value}
+        values = OPTIONS[name]
+        number = isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        if values is None and not (value is None or number) or values is not None and value not in values:
+            return {"option": name, "value": value}
+    return None
+
+
+def failure(game_id, n, code, message, detail=None):
+    answer = {"type": "failure", "game_id": game_id, "n": n, "code": code, "message": message}
+    if detail is not None:
+        answer["detail"] = detail
+    return json.dumps(answer)
+
+
 def run(lines, bot, needs="world"):
     """Answers the referee's messages (one JSON object per line); returns the answers as lines"""
     return list(serve(lines, bot, needs))
@@ -306,16 +336,32 @@ def serve(lines, bot, needs="world", log=sys.stderr):
             continue
         message = json.loads(line)
         kind = message.get("type")
-        if kind == "hello":
-            yield json.dumps({"type": "hello", "protocol": "osp", "version": 1, "name": f"catanatron-{bot}",
-                              "rulesets": ["standard", "catanatron"], "observe": False, "needs": needs})
+        if kind == "handshake":
+            if message.get("protocol") != "osp" or message.get("version") != 2:
+                yield failure(None, None, "version", f"This agent speaks protocol osp version 2, not {message}")
+                continue
+            yield json.dumps({"type": "handshake", "protocol": "osp", "version": 2, "name": f"catanatron-{bot}",
+                              "rulesets": ["standard", "catanatron"], "observe": False, "needs": needs, "lean": False})
         elif kind == "before":
+            # A ruleset it can't play is turned down
+            detail = unsupported(message.get("ruleset"))
+            if detail is not None:
+                yield failure(message.get("game_id"), None, "unsupported", f"This agent can't play {detail}", detail)
+                continue
             games[message["game_id"]] = message
             agent.decisions = agent.fallbacks = 0
             agent.seconds = 0.0
+            # The game's seed seeds the bot's randomness, so it plays the same game the same way
+            if isinstance(message.get("seed"), int):
+                random.seed(message["seed"])
+            yield json.dumps({"type": "ready", "game_id": message["game_id"]})
         elif kind == "decide":
             before = games.get(message["game_id"], {})
             legal = message["legal"]
+            # It rebuilds its game from every decision's state: without one it asks for it
+            if message.get("state") is None:
+                yield json.dumps({"type": "resync", "game_id": message["game_id"], "n": message.get("n")})
+                continue
             try:
                 move = agent.choose(before["board"], message["state"], legal, before.get("ruleset", {"preset": "standard"}), message["seat"])
             except Exception as error:  # noqa: BLE001 (any failure still gets a legal answer)
@@ -327,8 +373,9 @@ def serve(lines, bot, needs="world", log=sys.stderr):
             print(json.dumps({"type": "stats", "game_id": message.get("game_id"), "bot": bot, "decisions": agent.decisions,
                               "fallbacks": agent.fallbacks, "seconds": round(agent.seconds, 3)}), file=log, flush=True)
             games.pop(message.get("game_id"), None)
-        elif kind == "error":
-            print(f"referee: {message.get('message')}", file=log, flush=True)
+        elif kind == "failure":
+            print(f"referee: {message.get('code')}: {message.get('message')}", file=log, flush=True)
+            games.pop(message.get("game_id"), None)
 
 
 def main():

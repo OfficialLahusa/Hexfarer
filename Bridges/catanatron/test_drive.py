@@ -9,6 +9,7 @@ import json
 import os
 import random
 import sys
+import subprocess
 import tempfile
 import unittest
 
@@ -103,7 +104,85 @@ class SeatingTests(unittest.TestCase):
             self.assertTrue(all(r == rolls[0] for r in rolls))
 
 
+def fake_agent(seen, needs="truth", mode=""):
+    return f'"{sys.executable}" "{os.path.join(HERE, "fake_open_seat_agent.py").replace(os.sep, "/")}" "{seen.replace(os.sep, "/")}" {needs} {mode}'.strip()
+
+
+def read_lines(path):
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8") as file:
+        return [json.loads(line) for line in file]
+
+
 class DriveTests(unittest.TestCase):
+    def drive(self, needs="truth", mode="", maps="0:1", decide_ms=None):
+        """One map (4 rotations) with the stand-in agent in the lineup's first entry: what it got, the results, the log"""
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        boards = os.path.join(directory, "boards.jsonl")
+        with open(boards, "w", encoding="utf-8") as file:
+            for seed in (5, 6):
+                file.write(json.dumps({"seed": 900 + seed, "board": random_board(seed)[0]}) + "\n")
+        seen, out, log = (os.path.join(directory, name) for name in ("seen.jsonl", "results.jsonl", "games.jsonl.gz"))
+        arguments = ["--boards", boards, "--lineup", "open-seat-agent,R,W,R", "--open-seat-agent", fake_agent(seen, needs, mode), "--maps", maps, "--out", out, "--log", log]
+        if decide_ms:
+            arguments += ["--decide-ms", str(decide_ms)]
+        drive.main(arguments)
+        return read_lines(seen), read_lines(out), read_lines(log)
+
+    def test_a_view_agent_sees_only_its_seat_and_a_world_agent_is_refused(self):
+        messages, results, logged = self.drive(needs="view")
+        for message in messages:
+            if message["type"] in ("before", "decide"):
+                for player in message["state"]["players"]:
+                    if player["seat"] != message["seat"]:
+                        self.assertEqual((None, None, None), (player["hand"], player["development"], player["vp"]))
+            if message["type"] == "step":
+                # No state with a step under view, and another's bought card stays unknown
+                self.assertNotIn("state", message)
+                seat = next(m["seat"] for m in messages if m["type"] == "before" and m["game_id"] == message["game_id"])
+                if message["action"][0] == "buy_development" and message["seat"] != seat:
+                    self.assertEqual({"card": None}, message["result"])
+        self.assertTrue(all(r["result"]["seats"][r["rotation"]]["needs"] == "view" for r in results))
+
+        with tempfile.TemporaryDirectory() as directory:
+            seen = os.path.join(directory, "seen.jsonl")
+            with self.assertRaises(drive.AgentFailure) as refused:
+                drive.OpenSeatAgent(fake_agent(seen, "world"), subprocess.DEVNULL)
+            self.assertEqual("unsupported", refused.exception.code)
+            self.assertEqual("unsupported", read_lines(seen)[-1]["code"])
+
+    def test_an_agent_that_doesnt_observe_gets_no_steps(self):
+        messages, results, logged = self.drive(mode="blind")
+        self.assertEqual([], [m for m in messages if m["type"] == "step"])
+        self.assertTrue(any(m["type"] == "decide" for m in messages))
+        self.assertTrue(all(r["result"]["seats"][r["rotation"]]["observe"] is False for r in results))
+
+    def test_a_lean_agent_gets_the_hash_and_the_state_when_it_asks(self):
+        messages, results, logged = self.drive(mode="lean")
+        truths = {(m["game_id"], m["n"]): m["state"] for m in logged if m["type"] == "decide"}
+        decides = [m for m in messages if m["type"] == "decide"]
+        for decide in decides:
+            self.assertEqual(drive.state_hash(truths[(decide["game_id"], decide["n"])]), decide["hash"])
+            if "state" in decide:
+                self.assertEqual(0, decide["n"] % 5)
+        asked = sum(1 for d in decides if "state" in d)
+        self.assertGreater(asked, 0)
+        self.assertEqual(asked, sum(r["result"]["seats"][r["rotation"]]["resyncs"] for r in results))
+
+    def test_a_failure_ends_the_game_is_recorded_and_the_run_goes_on(self):
+        for mode, code, by, decide_ms in (("illegal", "illegal", "referee", None), ("slow", "timeout", "referee", 500), ("refuse", "unsupported", "agent", None)):
+            messages, results, logged = self.drive(mode=mode, decide_ms=decide_ms)
+            # Every game of the map was played and cut short at the failure, which the result record names
+            self.assertEqual(4, len(results), mode)
+            for result in results:
+                self.assertTrue(result["truncated"], mode)
+                failure = result["result"]["seats"][result["rotation"]]["failures"]
+                self.assertEqual([(code, by)], [(f["code"], f["by"]) for f in failure], mode)
+            self.assertEqual(4, sum(1 for m in logged if m["type"] == "failure"), mode)
+            # The referee told the agent, except for the agent's own failure
+            told = [m for m in messages if m["type"] == "failure"]
+            self.assertEqual(0 if by == "agent" else 4, len(told), mode)
+
     def test_a_match_with_a_stand_in_agent(self):
         with tempfile.TemporaryDirectory() as directory:
             boards = os.path.join(directory, "boards.jsonl")

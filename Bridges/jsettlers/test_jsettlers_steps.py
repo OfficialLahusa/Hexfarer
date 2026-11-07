@@ -161,7 +161,7 @@ class StepTests(unittest.TestCase):
         self.assertEqual(2, len(self.games), self.output[-3000:])
         for messages in self.games:
             kinds = [m["type"] for m in messages]
-            self.assertEqual(["hello", "before"], kinds[:2])
+            self.assertEqual(["handshake", "before"], kinds[:2])
             self.assertEqual("after", kinds[-1])
             steps = [m for m in messages if m["type"] == "step"]
             self.assertEqual(list(range(len(steps))), [s["n"] for s in steps])
@@ -243,10 +243,20 @@ class StepTests(unittest.TestCase):
             self.assertGreaterEqual(messages[-1]["vp"][messages[-1]["winner"]], 10)
 
     def test_a_recorded_games_line_counts_the_decisions_with_a_choice(self):
-        lines = [json.loads(line[line.index("{"):]) for line in self.output.splitlines() if '"osp-game"' in line]
+        lines = [json.loads(line[line.index("{"):]) for line in self.output.splitlines() if '"osp-result"' in line]
         self.assertEqual(2, len(lines), self.output[-3000:])
         for line in lines:
-            self.assertTrue(all(0 < choices <= moves for choices, moves in zip(line["choices"], line["moves"])), line)
+            self.assertTrue(all(0 < seat["choices"] <= seat["moves"] for seat in line["result"]["seats"]), line)
+        # The record ends with the same result as its after line
+        for messages in self.recorded:
+            self.assertIn(messages[-1]["result"], [line["result"] for line in lines])
+
+    def test_the_bank_is_named_unlimited_and_never_counts_below_0(self):
+        for messages in self.recorded:
+            self.assertEqual("unlimited", messages[0]["ruleset"]["bank_shortage"])
+            for message in messages:
+                if "state" in message:
+                    self.assertTrue(all(count >= 0 for count in message["state"]["bank"].values()), message["state"]["bank"])
 
     def test_a_recorded_game_is_the_one_the_agent_saw(self):
         agent = {m["game_id"]: [s["action"] for s in self.games[i] if s["type"] == "step"] for i, m in enumerate(g[1] for g in self.games)}
@@ -275,6 +285,15 @@ class LockTests(unittest.TestCase):
         self.assertIn("waited for the game's monitor", output)
         self.assertIn("waited for the move log", output)
         self.assertIn("destroyed beside a waiting read", output)
+
+
+@unittest.skipUnless(jsettlers.available(), "needs a JDK and JSettlers' jar in JSETTLERS_JAR")
+class BankTests(unittest.TestCase):
+    """JSettlers has no resource bank: with more than 19 of a resource in the hands its count stops at 0 (BankCheck.java)"""
+
+    def test_a_bank_without_cards_counts_0_not_below(self):
+        jsettlers.build()
+        self.assertIn("the bank stops at 0", jsettlers.run("osp.jsettlers.BankCheck"))
 
 
 @unittest.skipUnless(jsettlers.available(), "needs a JDK and JSettlers' jar in JSETTLERS_JAR")

@@ -5,6 +5,7 @@ using Agents.OpenSeat;
 using Common;
 using System.Globalization;
 using System.Numerics;
+using System.Text.Json.Nodes;
 
 namespace Arena
 {
@@ -46,9 +47,9 @@ namespace Arena
         public bool IsOpenSeatAgent => Command != null;
 
         /// <summary>
-        /// How long an Open Seat Agent may take for an answer before its game fails
+        /// The time budget of an Open Seat Agent's games in a duel: 5 minutes per decision (OpenSeatBudget.Default)
         /// </summary>
-        public static readonly TimeSpan OpenSeatAgentTimeout = TimeSpan.FromMinutes(5);
+        public static readonly OpenSeatBudget OpenSeatAgentBudget = OpenSeatBudget.Default;
 
         /// <summary>
         /// Tree updates per decision that the default batch size keeps with an iteration budget: the tree takes in the
@@ -276,12 +277,15 @@ namespace Arena
         }
 
         /// <summary>
-        /// The agent for a seat, searching with the given net and budget (iterations, or seconds if 0)
+        /// The agent for a seat, searching with the given net and budget (iterations, or seconds if 0); an Open Seat Agent
+        /// gets the game's seed
         /// </summary>
-        public Agent Create(sbyte seat, GameState start, StateValueNet? net, long iterations, double seconds, ILeafEvaluator? leaves = null, string gameId = "game")
+        public Agent Create(sbyte seat, GameState start, StateValueNet? net, long iterations, double seconds, ILeafEvaluator? leaves = null, string gameId = "game",
+            int? seed = null)
         {
-            // An Open Seat Agent plays the seat as a process of its own, one per game and seat
-            if (IsOpenSeatAgent) return new OpenSeatAgentProxy(seat, start, OpenSeatAgentProcess.Start(Command!, OpenSeatAgentTimeout), gameId);
+            // An Open Seat Agent plays the seat as a process of its own, one per game and seat; the proxy keeps to its budget
+            if (IsOpenSeatAgent)
+                return new OpenSeatAgentProxy(seat, start, OpenSeatAgentProcess.Start(Command!, Timeout.InfiniteTimeSpan), gameId, seed: seed, budget: OpenSeatAgentBudget);
             if (net == null) throw new ArgumentNullException(nameof(net), $"Agent {Name} needs a net.");
 
             // The agent picks the encoding of its net (see Vectorizers): a belief-aware net sees its seat's view; its search's
@@ -332,7 +336,8 @@ namespace Arena
 
     /// <summary>
     /// A game's agents: created seat by seat (if one fails, those already made are closed), closed after the game (an
-    /// Open Seat Agent hears the end and its process stops), and the Open Seat Agents named once per side in the log
+    /// Open Seat Agent hears the end with the game's result record and its process stops), and the Open Seat Agents named
+    /// once per side in the log
     /// </summary>
     internal sealed class Seating
     {
@@ -359,6 +364,23 @@ namespace Arena
         }
 
         /// <summary>
+        /// Closes a game's agents; with an Open Seat Agent among them, the game's result record (see Bridges/PROTOCOL.md)
+        /// goes to each of them in their after and into the log as one line
+        /// </summary>
+        public static void Close(Agent[] agents, int seed, Action<string> write)
+        {
+            OpenSeatAgentProxy[] proxies = agents.OfType<OpenSeatAgentProxy>().ToArray();
+            if (proxies.Length > 0)
+            {
+                JsonObject result = OpenSeatSeatRecord.Result(seed, proxies.Max(p => p.Moves), proxies.Max(p => p.Turns),
+                    agents.Select((agent, seat) => agent is OpenSeatAgentProxy proxy ? proxy.Record : new OpenSeatSeatRecord(seat)));
+                foreach (OpenSeatAgentProxy proxy in proxies) proxy.Result = result;
+                write($"result {result.ToJsonString()}");
+            }
+            Close(agents);
+        }
+
+        /// <summary>
         /// The line naming a side's Open Seat Agent (its name, what it needs, its rulesets, whether it observes), the first
         /// time the side's agent answered, else null
         /// </summary>
@@ -367,9 +389,9 @@ namespace Arena
             if (agent is not OpenSeatAgentProxy proxy) return null;
             lock (_named)
                 if (!_named.Add(side)) return null;
-            OpenSeatHello hello = proxy.Hello;
-            return $"Open Seat Agent {side}: {hello.Name}, needs {hello.Needs.ToString().ToLowerInvariant()}, rulesets {string.Join(" ", hello.Rulesets)}"
-                + (hello.Observe ? ", observes every move" : "");
+            OpenSeatHandshake handshake = proxy.Handshake;
+            return $"Open Seat Agent {side}: {handshake.Name}, needs {handshake.Needs.ToString().ToLowerInvariant()}, rulesets {string.Join(" ", handshake.Rulesets)}"
+                + (handshake.Observe ? ", observes every move" : "") + (handshake.Lean ? ", lean" : "");
         }
     }
 

@@ -45,10 +45,11 @@ import soc.server.genericServer.Connection;
  * The log's monitor is the lock for reading the game: a robot's brain that reads under it (OSPServer.read) sees no move
  * half handled. With the system property osp.record set, each game is also written there as a referee log while it
  * runs (GAME.jsonl, or GAME-2.jsonl and so on if an earlier server run wrote that game's name: before, a decide and a step
- * per move, after), the input of Hexfarer's replay harness and relay. At its end each game writes one line to standard
- * error: the players by seat, the winner, and per seat its moves, those with a choice (only for a recorded game: the
- * legal moves are listed only for its decide lines, to spare the server's message thread) and the CPU time of its
- * robot's brain thread in this game.
+ * per move, after with the result record), the input of Hexfarer's replay harness and relay. At its end each game writes
+ * its result record (see PROTOCOL.md) as one osp-result line to standard error: the players by seat, the winner, and per
+ * seat the agent and its decisions, their time, resyncs, fallbacks and failures (filled in by the seat's brain), its
+ * moves, those with a choice (only for a recorded game: the legal moves are listed only for its decide lines, to spare
+ * the server's message thread) and the CPU time of its robot's brain thread in this game.
  */
 final class MoveLog
 {
@@ -75,6 +76,11 @@ final class MoveLog
     private int gaps;
     private boolean ended;
     private final int[] moves, choices;
+    // Each seat's line of the result record, and the seed every agent of the game gets; the record once the game ended
+    private final SeatRecord[] records;
+    final int seed = new java.util.Random().nextInt(Integer.MAX_VALUE);
+    private int turns;
+    private volatile Map<String, Object> result;
     // Whether the game is recorded (osp.record), and its record while it is open
     private final boolean recording;
     private Writer record;
@@ -88,6 +94,9 @@ final class MoveLog
         this.last = start;
         this.moves = new int[game.maxPlayers];
         this.choices = new int[game.maxPlayers];
+        this.records = new SeatRecord[game.maxPlayers];
+        for (int seat = 0; seat < game.maxPlayers; seat++)
+            records[seat] = new SeatRecord();
         String dir = System.getProperty("osp.record");
         recording = dir != null;
         if (dir != null)
@@ -102,7 +111,7 @@ final class MoveLog
                     file = new File(dir, name + "-" + copy + ".jsonl");
                 record = new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8);
                 write(Json.object("type", "before", "game_id", gameId, "players", (long) game.maxPlayers, "jsettlers_first", (long) osp.first,
-                    "ruleset", OSPRobotBrain.RULESET, "board", osp.board.boardJson(), "state", start));
+                    "ruleset", OSPRobotBrain.RULESET, "seed", (long) seed, "board", osp.board.boardJson(), "state", start));
             }
             catch (IOException e)
             {
@@ -110,6 +119,74 @@ final class MoveLog
                 record = null;
             }
         }
+    }
+
+    /**
+     * A seat's line in the game's result record (see PROTOCOL.md): the brain of an Open Seat Agent's robot fills it in
+     * (the agent, what it received, its decisions and their time, resyncs, fallbacks, failures, and the robot's own
+     * decisions); JSettlers' own robots leave it empty
+     */
+    static final class SeatRecord
+    {
+        private String agent, needs;
+        private Boolean observe, lean;
+        private int decisions, resyncs, fallbacks, robotDecisions;
+        private long timeMs, maxMs;
+        private final List<Object> failures = new ArrayList<>();
+
+        synchronized void agent(String name, String needs, boolean observe, boolean lean)
+        {
+            this.agent = name;
+            this.needs = needs;
+            this.observe = observe;
+            this.lean = lean;
+        }
+
+        synchronized void decided(long ms)
+        {
+            decisions++;
+            timeMs += ms;
+            maxMs = Math.max(maxMs, ms);
+        }
+
+        synchronized void resynced()
+        {
+            resyncs++;
+        }
+
+        synchronized void fellBack()
+        {
+            fallbacks++;
+        }
+
+        synchronized void robotDecided()
+        {
+            robotDecisions++;
+        }
+
+        synchronized void failed(Long n, String code, boolean byAgent, String message)
+        {
+            failures.add(Json.object("n", n, "code", code, "by", byAgent ? "agent" : "referee", "message", message));
+        }
+
+        synchronized Map<String, Object> json(int seat)
+        {
+            return Json.object("seat", (long) seat, "agent", agent, "needs", needs, "observe", observe, "lean", lean,
+                "decisions", (long) decisions, "time_ms", timeMs, "max_ms", maxMs, "resyncs", (long) resyncs, "fallbacks", (long) fallbacks,
+                "failures", new ArrayList<>(failures), "robot_decisions", (long) robotDecisions);
+        }
+    }
+
+    /** A seat's line in the result record */
+    SeatRecord seatRecord(int seat)
+    {
+        return records[seat];
+    }
+
+    /** The game's result record once it ended with a winner, else null */
+    Map<String, Object> result()
+    {
+        return result;
     }
 
     /** The state before the game's first move */
@@ -508,6 +585,8 @@ final class MoveLog
         moves[seat]++;
         if (legal != null && legal.size() > 1)
             choices[seat]++;
+        if ("end_turn".equals(action.get(0)))
+            turns++;
         write(Json.object("type", "decide", "game_id", gameId, "n", n, "seat", (long) seat, "state", before, "legal", legal));
         write(Json.object("type", "step", "game_id", gameId, "n", n, "seat", (long) seat, "action", action, "result", result));
     }
@@ -528,18 +607,22 @@ final class MoveLog
         }
         SOCPlayer won = game.getPlayerWithWin();
         Object winner = won == null ? null : (Object) (long) osp.seatOf(won.getPlayerNumber());
-        write(Json.object("type", "after", "game_id", gameId, "winner", winner, "vp", vp, "truncated", winner == null,
-            "rounds", (long) game.getRoundCount(), "state", state));
-        List<Object> moveCounts = Json.array(), choiceCounts = Json.array(), cpu = Json.array();
+        // The result record: each seat's line with its moves, choices and brain time added
+        List<Object> seats = Json.array();
         Map<String, Long> millis = brainMillis();
         for (int seat = 0; seat < game.maxPlayers; seat++)
         {
-            moveCounts.add((long) moves[seat]);
-            choiceCounts.add((long) choices[seat]);
-            cpu.add(millis.get((String) players.get(seat)));
+            Map<String, Object> line = records[seat].json(seat);
+            line.put("moves", (long) moves[seat]);
+            line.put("choices", recording ? (Object) (long) choices[seat] : null);
+            line.put("brain_cpu_ms", millis.get((String) players.get(seat)));
+            seats.add(line);
         }
-        System.err.println(Json.write(Json.object("type", "osp-game", "game_id", gameId, "players", players, "winner", winner, "vp", vp,
-            "rounds", (long) game.getRoundCount(), "moves", moveCounts, "choices", recording ? choiceCounts : null, "brain_cpu_ms", cpu, "gaps", (long) gaps)));
+        result = Json.object("seed", (long) seed, "moves", (long) steps.size(), "turns", (long) turns, "seats", seats);
+        write(Json.object("type", "after", "game_id", gameId, "winner", winner, "vp", vp, "truncated", winner == null,
+            "rounds", (long) game.getRoundCount(), "result", result, "state", state));
+        System.err.println(Json.write(Json.object("type", "osp-result", "game_id", gameId, "players", players, "winner", winner, "vp", vp,
+            "rounds", (long) game.getRoundCount(), "gaps", (long) gaps, "result", result)));
         close();
     }
 

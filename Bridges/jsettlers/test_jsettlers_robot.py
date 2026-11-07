@@ -5,6 +5,7 @@ the agent (here one that plays the first legal move) without a single fallback, 
 Needs a JDK and JSettlers' full jar in JSETTLERS_JAR. Run: python -m unittest test_jsettlers_robot
 """
 
+import hashlib
 import json
 import os
 import re
@@ -50,6 +51,16 @@ def play(games, agent_command, logs, record=None):
     return result.stdout + result.stderr
 
 
+def results(output):
+    """The games' result records (osp-result lines), and in each the line of the seat an Open Seat Agent plays"""
+    lines = [json.loads(line[line.index("{"):]) for line in output.splitlines() if '"osp-result"' in line]
+    return lines, [next(seat for seat in line["result"]["seats"] if seat["agent"] is not None) for line in lines]
+
+
+def agent_command(*flags):
+    return f'"{sys.executable}" "{os.path.join(HERE, "first_move_agent.py")}" ' + " ".join(flags)
+
+
 @unittest.skipUnless(jsettlers.available(), "needs a JDK and JSettlers' jar in JSETTLERS_JAR")
 class RobotTests(unittest.TestCase):
     @classmethod
@@ -58,30 +69,28 @@ class RobotTests(unittest.TestCase):
         cls.logs = tempfile.mkdtemp()
         agent = f'"{sys.executable}" "{os.path.join(HERE, "first_move_agent.py")}" --builds'
         cls.output = play(2, agent, cls.logs)
-        cls.stats = [json.loads(line[line.index("{"):]) for line in cls.output.splitlines() if '"osp-robot"' in line]
+        cls.lines, cls.stats = results(cls.output)
 
-    def test_every_game_ends_with_a_winner_and_the_robots_line(self):
-        self.assertEqual(2, len(self.stats), self.output[-3000:])
-        for stats in self.stats:
-            # The line names the winner (JSettlers names it a moment after the game ended), the seat with the points
-            self.assertIsNotNone(stats["winner"], stats)
-            self.assertGreaterEqual(stats["vp"][stats["winner"]], 10, stats)
+    def test_every_game_ends_with_a_winner_and_its_result_line(self):
+        self.assertEqual(2, len(self.lines), self.output[-3000:])
+        for line in self.lines:
+            # The line names the winner, the seat with the points, and the seed the agents got
+            self.assertIsNotNone(line["winner"], line)
+            self.assertGreaterEqual(line["vp"][line["winner"]], 10, line)
+            self.assertIsInstance(line["result"]["seed"], int)
+            self.assertEqual(sum(seat["moves"] for seat in line["result"]["seats"]), line["result"]["moves"])
 
     def test_an_unrecorded_games_line_counts_no_choices(self):
         # Listing the legal moves for every request would cost the server's one message thread: only a recorded game has them
-        lines = [json.loads(line[line.index("{"):]) for line in self.output.splitlines() if '"osp-game"' in line]
-        self.assertEqual(2, len(lines), self.output[-3000:])
-        for line in lines:
-            self.assertIsNone(line["choices"], line)
-            self.assertTrue(all(moves > 20 for moves in line["moves"]), line)
+        for line in self.lines:
+            self.assertTrue(all(seat["choices"] is None and seat["moves"] > 20 for seat in line["result"]["seats"]), line)
 
     def test_each_decision_of_the_robot_is_one_move_of_its_seat(self):
         # The brain moves again only once the move log counted its last move: a decision more than its seat's moves is a
         # move sent twice, which JSettlers mostly ignores, so nothing else would show it
-        games = {line["game_id"]: line for line in (json.loads(line[line.index("{"):]) for line in self.output.splitlines() if '"osp-game"' in line)}
-        self.assertEqual(2, len(games), self.output[-3000:])
-        for stats in self.stats:
-            self.assertEqual(games[stats["game_id"]]["moves"][stats["seat"]], stats["decisions"], stats)
+        self.assertEqual(2, len(self.stats), self.output[-3000:])
+        for seat in self.stats:
+            self.assertEqual(seat["moves"], seat["robot_decisions"], seat)
 
     def test_the_server_never_has_to_end_the_robots_turn(self):
         # JSettlers ends a robot's turn when it stops answering, e.g. after a bought piece it doesn't place (its own robots
@@ -105,11 +114,12 @@ class RobotTests(unittest.TestCase):
         self.assertEqual(2, len(pinged), self.output[-3000:])
 
     def test_the_robot_decides_through_its_agent_without_fallbacks(self):
-        for stats in self.stats:
-            self.assertEqual("first-move", stats["agent"])
-            self.assertGreater(stats["decisions"], 20, stats)
-            self.assertGreater(stats["asked"], 5, stats)
-            self.assertEqual(0, stats["fallbacks"], stats)
+        for seat in self.stats:
+            self.assertEqual(("first-move", "truth"), (seat["agent"], seat["needs"]))
+            self.assertGreater(seat["robot_decisions"], 20, seat)
+            self.assertGreater(seat["decisions"], 5, seat)
+            self.assertLessEqual(seat["max_ms"], seat["time_ms"], seat)
+            self.assertEqual((0, []), (seat["fallbacks"], seat["failures"]), seat)
 
     def test_the_agent_got_the_game_its_decisions_and_its_end(self):
         logs = [os.path.join(self.logs, name) for name in os.listdir(self.logs)]
@@ -118,13 +128,77 @@ class RobotTests(unittest.TestCase):
             with open(log, encoding="utf-8") as file:
                 messages = [json.loads(line) for line in file if line.startswith("{")]
             kinds = [m["type"] for m in messages]
-            self.assertEqual(["hello", "before"], kinds[:2])
+            self.assertEqual(["handshake", "before"], kinds[:2])
             self.assertEqual("after", kinds[-1])
             self.assertTrue(all(k == "decide" for k in kinds[2:-1]))
             # The decisions come in order, numbered by the robot's moves
             numbers = [m["n"] for m in messages if m["type"] == "decide"]
             self.assertEqual(numbers, sorted(numbers))
 
+
+
+@unittest.skipUnless(jsettlers.available(), "needs a JDK and JSettlers' jar in JSETTLERS_JAR")
+class FailureTests(unittest.TestCase):
+    """An agent that fails: the failure is told to it (if it still listens), recorded with its code in the game's result,
+    and the robot plays on with the first legal move, so the game ends all the same"""
+
+    @classmethod
+    def setUpClass(cls):
+        jsettlers.build()
+
+    def failed(self, *flags):
+        logs = tempfile.mkdtemp()
+        output = play(1, agent_command(*flags), logs)
+        lines, seats = results(output)
+        self.assertEqual(1, len(lines), output[-3000:])
+        self.assertIsNotNone(lines[0]["winner"], lines[0])
+        seat = seats[0]
+        self.assertGreater(seat["fallbacks"], 0, seat)
+        told = []
+        for name in os.listdir(logs):
+            with open(os.path.join(logs, name), encoding="utf-8") as file:
+                told += [json.loads(line) for line in file if line.startswith("{") and '"failure"' in line]
+        return [(f["code"], f["by"]) for f in seat["failures"]], told
+
+    def test_an_illegal_answer(self):
+        failures, told = self.failed("--illegal", "--full")
+        self.assertEqual([("illegal", "referee")], failures)
+        self.assertEqual(["illegal"], [m["code"] for m in told])
+
+    def test_a_world_is_refused(self):
+        failures, told = self.failed("--needs", "world", "--full")
+        self.assertEqual([("unsupported", "referee")], failures)
+        self.assertEqual(["unsupported"], [m["code"] for m in told])
+
+    def test_a_game_turned_down(self):
+        failures, told = self.failed("--refuse", "--full")
+        self.assertEqual([("unsupported", "agent")], failures)
+        self.assertEqual([], told)
+
+
+@unittest.skipUnless(jsettlers.available(), "needs a JDK and JSettlers' jar in JSETTLERS_JAR")
+class LeanTests(unittest.TestCase):
+    """A lean agent gets each decision with the state's hash only, and the state when it asks; the hash is the one Python
+    computes from that state"""
+
+    def test_a_lean_agent_gets_the_hash_and_the_state_when_it_asks(self):
+        jsettlers.build()
+        logs = tempfile.mkdtemp()
+        output = play(1, agent_command("--lean", "--observe", "--full"), logs)
+        lines, seats = results(output)
+        self.assertEqual(1, len(lines), output[-3000:])
+        with open(os.path.join(logs, os.listdir(logs)[0]), encoding="utf-8") as file:
+            messages = [json.loads(line) for line in file if line.startswith("{")]
+        decides = [m for m in messages if m["type"] == "decide"]
+        lean = [d for d in decides if "state" not in d]
+        full = [d for d in decides if "state" in d]
+        self.assertGreater(len(lean), 5)
+        for decide in full:
+            canonical = json.dumps(decide["state"], sort_keys=True, separators=(",", ":"))
+            self.assertEqual(hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16], decide["hash"])
+        # Every lean decision was asked again, and the result counts the resyncs
+        self.assertEqual(len(lean), seats[0]["resyncs"])
+        self.assertEqual((True, []), (seats[0]["lean"], seats[0]["failures"]))
 
 
 @unittest.skipUnless(jsettlers.available(), "needs a JDK and JSettlers' jar in JSETTLERS_JAR")

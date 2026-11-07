@@ -364,6 +364,8 @@ namespace Common.OSP
             if (!settings.FreeTrade) ruleset["player_trading"] = "none";
             if (settings.VictoryPoints != 10) ruleset["victory_points"] = settings.VictoryPoints;
             if (settings.RobberCardLimit != 7) ruleset["discard_limit"] = settings.RobberCardLimit;
+            // The rulebook has no limit on offers; Hexfarer's referee has one (10 unless set otherwise)
+            if (settings.FreeTrade) ruleset["offer_limit"] = settings.TradeOfferLimit;
             return ruleset;
         }
 
@@ -550,6 +552,13 @@ namespace Common.OSP
         /// JSON with every object's members sorted by name, so that equal values have equal text
         /// </summary>
         public static string Canonical(JsonNode? node) => JsonSerializer.Serialize(Sorted(node));
+
+        /// <summary>
+        /// A state's hash as the protocol's decisions carry it: the first 16 hex digits of the SHA-256 of its canonical
+        /// JSON (keys sorted, no whitespace, UTF-8)
+        /// </summary>
+        public static string Hash(JsonNode? state) =>
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Canonical(state))))[..16].ToLowerInvariant();
 
         private static JsonNode? Sorted(JsonNode? node) => node switch
         {

@@ -78,7 +78,16 @@ public final class AgentProcess implements AutoCloseable
         input.flush();
     }
 
-    /** The agent's next answer within the timeout */
+    /** No answer within the time */
+    public static final class Timeout extends IOException
+    {
+        Timeout(String message)
+        {
+            super(message);
+        }
+    }
+
+    /** The agent's next answer within the timeout (else Timeout); an ended agent is an IOException */
     @SuppressWarnings("unchecked")
     public Map<String, Object> receive(long timeoutMillis) throws IOException, InterruptedException
     {
@@ -87,7 +96,7 @@ public final class AgentProcess implements AutoCloseable
         {
             Object line = lines.poll(Math.max(1, deadline - System.currentTimeMillis()), TimeUnit.MILLISECONDS);
             if (line == null)
-                throw new IOException("The Open Seat Agent gave no answer within " + timeoutMillis + " ms");
+                throw new Timeout("The Open Seat Agent gave no answer within " + timeoutMillis + " ms");
             if (line == END)
             {
                 lines.add(END);

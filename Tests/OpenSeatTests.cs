@@ -264,7 +264,7 @@ namespace Tests
             StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU);
             StringWriter log = new();
             SeatAgent agent = new(net, 32, 0, log);
-            Assert.Equal("osp", agent.Handle(JsonNode.Parse("""{"type":"hello","protocol":"osp","version":1}""")!)!["protocol"]!.GetValue<string>());
+            Assert.Equal("osp", agent.Handle(JsonNode.Parse("""{"type":"handshake","protocol":"osp","version":2}""")!)!["protocol"]!.GetValue<string>());
             int answered = 0, choices = 0;
             foreach (JsonNode recorded in Replay.Read(Fixture).Where(m => m["game_id"]!.GetValue<string>() == game))
             {

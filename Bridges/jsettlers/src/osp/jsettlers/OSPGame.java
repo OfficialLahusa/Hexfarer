@@ -147,6 +147,26 @@ public final class OSPGame
         return cards;
     }
 
+    /**
+     * A state's hash as the protocol's decisions carry it: the first 16 hex digits of the SHA-256 of its canonical JSON
+     * (keys sorted, no whitespace, UTF-8)
+     */
+    public static String hash(Object state)
+    {
+        try
+        {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(Json.write(state, true).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (int i = 0; i < 8; i++)
+                hex.append(String.format("%02x", digest[i]));
+            return hex.toString();
+        }
+        catch (java.security.NoSuchAlgorithmException e)
+        {
+            throw new IllegalStateException(e);
+        }
+    }
+
     /** A card set of only the cards there, for moves, from JSettlers' resources */
     public static Map<String, Object> cardSet(ResourceSet set)
     {
@@ -224,9 +244,10 @@ public final class OSPGame
                 "settlements", (long) player.getNumPieces(SOCPlayingPiece.SETTLEMENT), "cities", (long) player.getNumPieces(SOCPlayingPiece.CITY)));
             players.add(entry);
         }
+        // JSettlers has no resource bank (its ruleset says unlimited): the counts stop at 0, though it still pays
         Map<String, Object> bank = new LinkedHashMap<>();
         for (int type : RESOURCES)
-            bank.put(RESOURCE_NAMES[type], (long) (19 - held[type]));
+            bank.put(RESOURCE_NAMES[type], (long) Math.max(0, 19 - held[type]));
         bank.put("development", (long) game.getNumDevCards());
 
         Map<String, Object> state = new LinkedHashMap<>();

@@ -45,6 +45,47 @@ namespace OpenSeat
             _robbedNeedCards = Option("robber_victims", "adjacent", "with_cards") == "with_cards";
             _bestBankRateOnly = Option("bank_rates", "all", "best_only") == "best_only";
             _forcedRoadBuilding = Option("road_building", "optional", "forced") == "forced";
+            // The options Hexfarer's engine plays itself: points to win, the discard limit, trades between players and offers
+            State.Settings.VictoryPoints = ruleset?["victory_points"]?.GetValue<int>() ?? 10;
+            State.Settings.RobberCardLimit = ruleset?["discard_limit"]?.GetValue<int>() ?? 7;
+            State.Settings.FreeTrade = Option("player_trading", "rulebook", "none") == "rulebook";
+            State.Settings.MaxTradeOffersPerTurn = ruleset?["offer_limit"]?.GetValue<int>() ?? int.MaxValue;
+        }
+
+        // Every option of RULESET.md with the values it takes (null: a number), and the presets
+        private static readonly Dictionary<string, string[]?> Options = new()
+        {
+            ["victory_points"] = null, ["discard_limit"] = null, ["turn_limit"] = null, ["offer_limit"] = null,
+            ["player_trading"] = ["rulebook", "none"], ["counteroffers"] = ["true", "false"], ["bank_shortage"] = ["rulebook", "nobody", "unlimited"],
+            ["win_timing"] = ["own_turn", "any_time"], ["robber_victims"] = ["adjacent", "with_cards"], ["bank_rates"] = ["all", "best_only"],
+            ["road_building"] = ["optional", "forced"],
+        };
+
+        /// <summary>
+        /// What of a ruleset the copy can't play, as a failure's detail ({"preset": ...} or {"option": ..., "value": ...}),
+        /// or null: the presets standard and catanatron and every option of RULESET.md with its values; a value Hexfarer's
+        /// rules play differently is taken over from the referee's states (Patch)
+        /// </summary>
+        public static JsonObject? Unsupported(JsonNode? ruleset)
+        {
+            if (ruleset is not JsonObject options) return null;
+            foreach ((string name, JsonNode? value) in options)
+            {
+                if (name == "preset")
+                {
+                    if (value?.ToJsonString() is not ("\"standard\"" or "\"catanatron\"")) return new JsonObject { ["preset"] = value?.DeepClone() };
+                    continue;
+                }
+                bool known = Options.TryGetValue(name, out string[]? values) && value switch
+                {
+                    null => values == null,
+                    JsonValue number when values == null => number.TryGetValue(out int count) && count >= 0,
+                    JsonValue text => values != null && values.Contains(text.ToJsonString().Trim('"')),
+                    _ => false,
+                };
+                if (!known) return new JsonObject { ["option"] = name, ["value"] = value?.DeepClone() };
+            }
+            return null;
         }
 
         /// <summary>

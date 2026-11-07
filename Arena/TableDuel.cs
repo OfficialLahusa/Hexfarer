@@ -1,5 +1,6 @@
 using Agents;
 using Agents.Inference;
+using Agents.OpenSeat;
 using Common;
 using Common.Actions;
 using System.Collections.Concurrent;
@@ -85,7 +86,7 @@ namespace Arena
                                 Record(game, result, stop);
                         }
                         catch (OperationCanceledException) { }
-                        catch (Exception e) { Write($"game {game + 1} failed: {e.Message}"); }
+                        catch (Exception e) { Write($"game {game + 1} failed{(e is OpenSeatException failure ? $" ({failure.Code})" : "")}: {e.Message}"); }
                     }
                 })).ToList();
                 threads.ForEach(t => t.Start());
@@ -112,6 +113,9 @@ namespace Arena
         private sealed record GameResult(GameState State, int ChallengerSeat, bool ChallengerWon, double Seconds, int ChallengerOffers,
             int ChallengerTrades, int ChallengerPartner, int BaselineOffers, int BaselineTrades, int ChallengerCounters, int BaselineCounters);
 
+        // The seed a game's Open Seat Agents get: one per game, from the duel's seed
+        private int Seed(int game) => settings.SeedBase + game;
+
         private GameResult PlayGame(int game, SideNets challengerNets, SideNets baselineNets, CancellationToken cancellation)
         {
             // The four games of a map share its seed, so they play the same map with the challenger in each seat once
@@ -121,8 +125,8 @@ namespace Arena
             state.Settings.FreeTrade = settings.FreeTrade;
             GameState start = state;
             Agent[] agents = Seating.Create(Seats, seat => seat == challengerSeat
-                ? settings.Challenger.Create((sbyte)seat, start, challengerNets.Net, settings.Iterations, settings.Seconds, challengerNets.Leaves, $"{game + 1}")
-                : settings.Baseline.Create((sbyte)seat, start, baselineNets.Net, settings.Iterations, settings.Seconds, baselineNets.Leaves, $"{game + 1}"));
+                ? settings.Challenger.Create((sbyte)seat, start, challengerNets.Net, settings.Iterations, settings.Seconds, challengerNets.Leaves, $"{game + 1}", Seed(game))
+                : settings.Baseline.Create((sbyte)seat, start, baselineNets.Net, settings.Iterations, settings.Seconds, baselineNets.Leaves, $"{game + 1}", Seed(game)));
             for (int seat = 0; seat < Seats; seat++)
                 if (_seating.Name(seat == challengerSeat ? settings.Challenger.Name : settings.Baseline.Name, agents[seat]) is string line) Write(line);
             try
@@ -131,7 +135,7 @@ namespace Arena
             }
             finally
             {
-                Seating.Close(agents);
+                Seating.Close(agents, Seed(game), Write);
             }
         }
 

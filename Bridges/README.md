@@ -29,7 +29,9 @@ Contents:
   - `open_seat_agent.py --bot AB:2 [--needs world|truth]`: Catanatron's bots as an Open Seat Agent under another
     referee (e.g. Hexfarer's Arena: `--baseline "AB2=command:python open_seat_agent.py --bot AB:2"`); each decision
     rebuilds a Catanatron game from the referee's state, the bot picks among the referee's legal moves.
-  - `drive.py`: Hexfarer (or any Open Seat Agent) under Catanatron's referee.
+  - `drive.py`: Hexfarer (or any Open Seat Agent) under Catanatron's referee. It serves its seat's view or every hand
+    (no worlds), steps and lean decisions, gives each decision `--decide-ms` (default 300 000), ends a game at a failure
+    and records it in the game's result, which every result line carries.
 - `jsettlers/`: JSettlers in protocol terms (Java, built by `jsettlers.py` against JSettlers' jar into `build/`):
   - `OSPBoard`: its classic board in protocol keys, from its own adjacency; `OSPGame`: states, legal moves by its own
     rules and moves played through its game logic.
@@ -41,9 +43,11 @@ Contents:
     a step from the game's start (`MoveLog`, which turns JSettlers' requests into protocol moves). -Dosp.log=DIR keeps
     each agent's standard error, -Dosp.debug=true prints the robot's steps, -Dosp.record=DIR writes every game as a
     referee log while it runs (for the replay harness, the relay and the live relay), -Dosp.bots=smart|fast gives all of
-    JSettlers' own robots one strategy (it starts 30% fast, the rest smart). Each game ends with an `osp-game` line on
-    standard error: the players by seat, the winner, and per seat its moves, its decisions with a choice (only in a
-    recorded game) and its robot brain's CPU time. A record never overwrites one of an earlier server run (JSettlers
+    JSettlers' own robots one strategy (it starts 30% fast, the rest smart). Each game ends with its result record (see
+    `PROTOCOL.md`) as an `osp-result` line on standard error: the players by seat, the winner, and per seat the agent and
+    its decisions, their time, resyncs, fallbacks and failures, its moves, its decisions with a choice (only in a recorded
+    game) and its robot brain's CPU time. An agent that fails is told why where it still listens, and the robot plays
+    the first legal move for the rest of the game. A record never overwrites one of an earlier server run (JSettlers
     numbers its games afresh): the second `GAME.jsonl` is written as `GAME-2.jsonl`.
   - Tests: `python -m unittest test_jsettlers_board test_jsettlers_game test_jsettlers_robot test_jsettlers_steps` (with
     JSETTLERS_JAR set).
@@ -53,6 +57,6 @@ the differences, `OpenSeat relay LOG --save DIR` writes its games as save files 
 rules part), `OpenSeat relay LOG|DIR --live` hosts them for the client's watchers while the referee writes them (the
 client joins with the Watch role; a known rule difference such as JSettlers' unlimited bank comes in as an edit, so the
 game stays one), and `OpenSeat agent` is Hexfarer's own Open Seat Agent (`--fair` for the agent that
-plays from its seat's view). The Arena seats any agent as `NAME=command:COMMAND`,
+plays from its seat's view, `--lean` for decisions with only the state's hash, checked against its own copy of the game). The Arena seats any agent as `NAME=command:COMMAND`,
 and the client's local games seat those listed in `%AppData%\Hexfarer\settings.json` under `OpenSeatAgents`
 (`[{"Name": "...", "Command": "..."}]`).

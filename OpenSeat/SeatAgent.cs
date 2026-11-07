@@ -22,14 +22,15 @@ namespace OpenSeat
     /// MCTS over worlds drawn from what its seat knows (BeliefTracker), which takes in every move as the seat sees it.
     /// </summary>
     internal sealed class SeatAgent(StateValueNet net, long iterations, double seconds, TextWriter log, int leavesPerBatch = MCTSAgent.DefaultLeavesPerBatch,
-        bool parallelSelection = true, bool fair = false)
+        bool parallelSelection = true, bool fair = false, bool lean = false)
     {
         private Replica? _replica;
         private MCTSAgent? _agent;
         // The fair agent around the search (null for the open-hand agent)
         private InformationSetMCTSAgent? _fair;
-        // Times the fair agent's own copy of the game had drifted from the replica and was set back to it (should stay 0)
-        private int _resyncs;
+        // Times the fair agent's own copy of the game had drifted from the replica and was set back to it (should stay 0),
+        // and the decisions a lean agent asked the referee's state for
+        private int _resyncs, _resyncsAsked;
         private string _gameId = "";
         private sbyte _seat;
         // Per game: decisions, those searched, patched states, replaced moves, whether the copy was lost (it then plays the
@@ -50,15 +51,27 @@ namespace OpenSeat
             + (leavesPerBatch != MCTSAgent.DefaultLeavesPerBatch ? $"-b{leavesPerBatch}" : "") + (parallelSelection ? "" : "-serial");
 
         /// <summary>
-        /// Answers the referee's messages until its input ends
+        /// Answers the referee's messages until its input ends; a message it can't handle is answered with a failure
+        /// (internal) for its game
         /// </summary>
         public void Run(TextReader input, TextWriter output)
         {
             while (input.ReadLine() is string line)
             {
                 if (line.Length == 0) continue;
-                JsonNode message = JsonNode.Parse(line)!;
-                JsonNode? answer = Handle(message);
+                JsonNode? answer;
+                JsonNode? message = null;
+                try
+                {
+                    message = JsonNode.Parse(line)!;
+                    answer = Handle(message);
+                }
+                catch (Exception e)
+                {
+                    log.WriteLine($"{_gameId}: failed: {e}");
+                    answer = Failure(message?["game_id"]?.DeepClone(), message?["n"]?.DeepClone(), "internal", e.Message);
+                    _lost = true;
+                }
                 if (answer != null)
                 {
                     output.WriteLine(answer.ToJsonString());
@@ -67,18 +80,35 @@ namespace OpenSeat
             }
         }
 
+        private static JsonObject Failure(JsonNode? gameId, JsonNode? n, string code, string message, JsonNode? detail = null)
+        {
+            JsonObject failure = new() { ["type"] = "failure", ["game_id"] = gameId, ["n"] = n, ["code"] = code, ["message"] = message };
+            if (detail != null) failure["detail"] = detail;
+            return failure;
+        }
+
         /// <summary>
-        /// The answer to one message (hello and decide), or null
+        /// The answer to one message (handshake, before and decide), or null
         /// </summary>
         public JsonNode? Handle(JsonNode message)
         {
             switch (message["type"]!.GetValue<string>())
             {
-                case "hello":
-                    return new JsonObject { ["type"] = "hello", ["protocol"] = "osp", ["version"] = 1, ["name"] = Name,
-                        ["rulesets"] = new JsonArray("standard", "catanatron"), ["observe"] = true, ["needs"] = "truth" };
+                case "handshake":
+                    if (message["protocol"]?.ToJsonString() != "\"osp\"" || message["version"]?.ToJsonString() != "2")
+                        return Failure(null, null, "version", $"This agent speaks protocol osp version 2, not {message.ToJsonString()}.");
+                    return new JsonObject { ["type"] = "handshake", ["protocol"] = "osp", ["version"] = 2, ["name"] = Name,
+                        ["rulesets"] = new JsonArray("standard", "catanatron"), ["observe"] = true, ["needs"] = "truth", ["lean"] = lean };
                 case "before":
+                    // A ruleset the copy can't play is turned down
+                    if (Replica.Unsupported(message["ruleset"]) is JsonObject unsupported)
+                        return Failure(message["game_id"]?.DeepClone(), null, "unsupported", $"This agent can't play {unsupported.ToJsonString()}.", unsupported);
                     Before(message);
+                    return new JsonObject { ["type"] = "ready", ["game_id"] = message["game_id"]!.DeepClone() };
+                case "failure":
+                    // The game is over for this agent: it plays no more of it
+                    log.WriteLine($"{_gameId}: the referee reported a failure: {message.ToJsonString()}");
+                    _lost = true;
                     return null;
                 case "step":
                     Step(message);
@@ -89,7 +119,7 @@ namespace OpenSeat
                     log.WriteLine(new JsonObject { ["type"] = "stats", ["game_id"] = _gameId, ["seat"] = _seat, ["decisions"] = _decisions, ["searched"] = _searched,
                         ["patches"] = _patches, ["fallbacks"] = _fallbacks, ["rebuilds"] = _rebuilds, ["lost"] = _lost,
                         ["searches"] = _searches, ["iterations"] = _iterations, ["distinct_leaves"] = _distinctLeaves, ["search_seconds"] = Math.Round(_searchSeconds, 3),
-                        ["fair"] = fair, ["resyncs"] = _resyncs,
+                        ["fair"] = fair, ["resyncs"] = _resyncs, ["resyncs_asked"] = _resyncsAsked,
                         ["cpu_seconds"] = Math.Round((System.Diagnostics.Process.GetCurrentProcess().TotalProcessorTime - _cpuAtStart).TotalSeconds, 3) }.ToJsonString());
                     log.Flush();
                     return null;
@@ -107,12 +137,16 @@ namespace OpenSeat
             _searches = _iterations = _distinctLeaves = 0;
             _searchSeconds = 0;
             _cpuAtStart = System.Diagnostics.Process.GetCurrentProcess().TotalProcessorTime;
-            _resyncs = 0;
+            _resyncs = _resyncsAsked = 0;
             _stale = false;
             _lost = !_replica.BoardMatches(before);
             if (_lost) log.WriteLine($"{_gameId}: the board doesn't write back as sent");
-            _agent = new MCTSAgent(_seat, _replica.State, timeLimitSeconds: seconds, valueNet: net, iterationLimit: iterations, leavesPerBatch: leavesPerBatch,
-                parallelSelection: parallelSelection);
+            // The game's seed seeds the agent's randomness, so it plays the same game the same way
+            if (before["seed"] is JsonValue seed && seed.TryGetValue(out int value)) Utils.Random.SeedCurrentThread(value);
+            // A time-based search keeps within the budget's time per decision, with a fifth of it to spare
+            double budgetSeconds = before["budget"]?["decide_ms"] is JsonValue ms && ms.TryGetValue(out int decideMs) ? decideMs * 0.8 / 1000 : double.MaxValue;
+            _agent = new MCTSAgent(_seat, _replica.State, timeLimitSeconds: seconds > 0 ? Math.Min(seconds, budgetSeconds) : seconds, valueNet: net,
+                iterationLimit: iterations, leavesPerBatch: leavesPerBatch, parallelSelection: parallelSelection);
             _fair = fair ? new InformationSetMCTSAgent(_agent, _replica.State) : null;
             // No trades between players under these rules
             _agent.Offers.Enabled = false;
@@ -184,12 +218,28 @@ namespace OpenSeat
 
         private JsonNode Decide(JsonNode decide)
         {
+            // A lean decision carries only the state's hash: the copy has to be the referee's game, else the agent asks for
+            // the state (resync), and the referee sends the decision again with it
+            if (decide["state"] == null)
+            {
+                if (_replica == null || _lost || _stale || OSPCodec.Hash(_replica.Codec.State(_replica.State)) != decide["hash"]?.GetValue<string>())
+                {
+                    _resyncsAsked++;
+                    return new JsonObject { ["type"] = "resync", ["game_id"] = decide["game_id"]!.DeepClone(), ["n"] = decide["n"]!.DeepClone() };
+                }
+                return Choose(decide);
+            }
+            return Choose(decide);
+        }
+
+        private JsonNode Choose(JsonNode decide)
+        {
             _decisions++;
             JsonArray legal = decide["legal"]!.AsArray();
             HashSet<string> allowed = legal.Select(OSPCodec.Canonical).ToHashSet();
             JsonNode Answer(JsonNode move) => new JsonObject { ["type"] = "decide", ["game_id"] = decide["game_id"]!.DeepClone(), ["n"] = decide["n"]!.DeepClone(), ["action"] = move.DeepClone() };
 
-            if (!_lost && (_stale || _replica!.FirstDifference(decide["state"]!, $"move {decide["n"]}") is not null))
+            if (!_lost && decide["state"] is JsonNode referees && (_stale || _replica!.FirstDifference(referees, $"move {decide["n"]}") is not null))
             {
                 // The referee decides: take over its state where the known differences changed it, or rebuild from it
                 (string kind, string detail)? difference = _replica!.FirstDifference(decide["state"]!, $"move {decide["n"]}");

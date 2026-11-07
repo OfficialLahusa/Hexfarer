@@ -87,7 +87,7 @@ namespace Agents.OpenSeat
             catch (Win32Exception e)
             {
                 log?.Dispose();
-                throw new OpenSeatException($"Couldn't start the Open Seat Agent \"{commandLine}\": {e.Message}", e);
+                throw new OpenSeatException($"Couldn't start the Open Seat Agent \"{commandLine}\": {e.Message}", OpenSeatFailure.Ended, inner: e);
             }
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
@@ -133,7 +133,7 @@ namespace Agents.OpenSeat
             lock (_tail) return _tail.Count == 0 ? "" : $"; it said last:{Environment.NewLine}{string.Join(Environment.NewLine, _tail)}";
         }
 
-        private OpenSeatException Closed() => new($"The Open Seat Agent \"{_command}\" was closed.");
+        private OpenSeatException Closed() => new($"The Open Seat Agent \"{_command}\" was closed.", OpenSeatFailure.Ended);
 
         public void Send(JsonNode message)
         {
@@ -145,7 +145,7 @@ namespace Agents.OpenSeat
             }
             catch (IOException e)
             {
-                throw new OpenSeatException($"The Open Seat Agent \"{_command}\" ended before it read its messages{Ended()}{Said()}", e);
+                throw new OpenSeatException($"The Open Seat Agent \"{_command}\" ended before it read its messages{Ended()}{Said()}", OpenSeatFailure.Ended, inner: e);
             }
             catch (InvalidOperationException) when (_disposed)
             {
@@ -158,12 +158,14 @@ namespace Agents.OpenSeat
             Stopwatch waited = Stopwatch.StartNew();
             while (true)
             {
-                TimeSpan left = _timeout - waited.Elapsed;
+                // An infinite timeout leaves the limit to the caller (the referee's budget)
+                bool unlimited = _timeout == Timeout.InfiniteTimeSpan;
+                TimeSpan left = unlimited ? Timeout.InfiniteTimeSpan : _timeout - waited.Elapsed;
                 string? line;
                 try
                 {
-                    if (left <= TimeSpan.Zero || !_lines.TryTake(out line, (int)Math.Ceiling(left.TotalMilliseconds), cancellation))
-                        throw new OpenSeatException($"The Open Seat Agent \"{_command}\" gave no answer within {_timeout.TotalSeconds:0.#} s{Said()}");
+                    if (!unlimited && left <= TimeSpan.Zero || !_lines.TryTake(out line, unlimited ? Timeout.Infinite : (int)Math.Ceiling(left.TotalMilliseconds), cancellation))
+                        throw new OpenSeatException($"The Open Seat Agent \"{_command}\" gave no answer within {_timeout.TotalSeconds:0.#} s{Said()}", OpenSeatFailure.Timeout);
                 }
                 catch (OperationCanceledException) { throw; }
                 if (line == null)
@@ -173,7 +175,7 @@ namespace Agents.OpenSeat
                     catch (InvalidOperationException) when (_disposed) { }
                     _lines.Add(null);
                     if (_disposed) throw Closed();
-                    throw new OpenSeatException($"The Open Seat Agent \"{_command}\" ended without an answer{Ended()}{Said()}");
+                    throw new OpenSeatException($"The Open Seat Agent \"{_command}\" ended without an answer{Ended()}{Said()}", OpenSeatFailure.Ended);
                 }
                 if (line.Trim().Length == 0) continue;
                 if (AnswerOf(line) is JsonObject answer) return answer;

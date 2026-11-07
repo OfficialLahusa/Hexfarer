@@ -1,22 +1,31 @@
 """
-Plays Catanatron games under Catanatron's referee with some seats played by Open Seat Agents (see ../PROTOCOL.md):
-external processes that get every message of their seat (before, decide, step, after) over standard input and output
-and answer the decisions. The other seats are Catanatron's bots. Every map is played once per rotation of the lineup
-(4 rotations: each lineup entry sits in each seat once), all rotations of a map with the same Catanatron seed (the same
-dice and development cards as long as the games run alike). One result line per game, with each side's time per decision.
+Plays Catanatron games under Catanatron's referee with some seats played by Open Seat Agents (see ../PROTOCOL.md,
+version 2): external processes that get their seat's messages over standard input and output and answer them. The
+other seats are Catanatron's bots. The driver serves what each agent asks in its handshake or refuses it: its seat's
+view (the other hands hidden) or every hand, steps only if it observes, decisions with only the state's hash if it is
+lean; it can't draw worlds. Each game starts with before (the ruleset, the budget, the map's seed), which the agent takes
+(ready) or turns down; a decision has the budget's time. A failure (the agent's own, an illegal, late or malformed answer,
+a game it turns down) ends the game, recorded in its result, and the run goes on; an agent whose process ended stops it.
+Every map is played once per rotation of the lineup (4 rotations: each lineup entry sits in each seat once), all
+rotations of a map with the same Catanatron seed (the same dice and development cards as long as the games run alike).
+One result line per game, with each side's time per decision and the game's result record.
 
 Usage: python drive.py --boards boards.jsonl --lineup open-seat-agent,AB:2,AB:2,AB:2 --open-seat-agent "dotnet OpenSeat.dll agent --iterations 5000"
-                       --maps 0:25 --out results.jsonl [--log games.jsonl.gz]
+                       --maps 0:25 --out results.jsonl [--log games.jsonl.gz] [--decide-ms 300000]
 """
 
 import argparse
+import copy
 import gzip
+import hashlib
 import json
 import os
+import queue
 import random
 import shlex
 import subprocess
 import sys
+import threading
 import time
 
 import catanatron.players  # noqa: F401 (registers the bots)
@@ -30,6 +39,45 @@ from osp_game import Encoder, card_set
 
 COLORS = [Color.RED, Color.BLUE, Color.ORANGE, Color.WHITE]
 
+PROTOCOL, VERSION = "osp", 2
+# How long an agent has for its handshake and its ready (starting a process, loading a net)
+ANSWER_SECONDS = 60
+# The driver's time per decision when the run sets none
+DEFAULT_DECIDE_MS = 300_000
+
+
+def state_hash(state):
+    """The hash decisions carry: the first 16 hex digits of the SHA-256 of the state's canonical JSON"""
+    return hashlib.sha256(json.dumps(state, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:16]
+
+
+def view(state, seat):
+    """The state as a seat sees it: the other seats' hands, development cards and points with them hidden"""
+    seen = copy.deepcopy(state)
+    for player in seen["players"]:
+        if player["seat"] != seat:
+            player["hand"] = player["development"] = player["vp"] = None
+    return seen
+
+
+def seen_result(action, result, mover, seat):
+    """A move's result as a seat sees it: another's bought card is null, a steal between two others is "unknown" """
+    if result is None or mover == seat:
+        return result
+    if action[0] == "buy_development":
+        return {"card": None}
+    if action[0] == "move_robber" and result.get("stolen") is not None and action[1].get("victim") != seat:
+        return {"stolen": "unknown"}
+    return result
+
+
+class AgentFailure(Exception):
+    """A failure of an agent's seat: its code (see PROTOCOL.md), whether the agent reported it itself"""
+
+    def __init__(self, code, message, by_agent=False):
+        super().__init__(message)
+        self.code, self.by_agent = code, by_agent
+
 
 class OpenSeatAgentSeat(Player):
     """A seat whose decisions an Open Seat Agent makes (the driver asks it; Catanatron never calls decide)"""
@@ -39,31 +87,97 @@ class OpenSeatAgentSeat(Player):
 
 
 class OpenSeatAgent:
-    """An Open Seat Agent process: one JSON object per line each way"""
+    """An Open Seat Agent process: one JSON object per line each way. The handshake says what it plays and wants; the
+    driver serves view or truth, steps and lean decisions, and refuses the rest (a failure, unsupported)."""
 
     def __init__(self, command, stderr):
         # POSIX splitting on every system (quotes group a path with spaces; write paths with forward slashes)
         self.process = subprocess.Popen(shlex.split(command), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=stderr, text=True, encoding="utf-8", bufsize=1)
-        hello = self.ask({"type": "hello", "protocol": "osp", "version": 1})
-        if hello.get("protocol") != "osp" or hello.get("version") != 1:
-            raise RuntimeError(f"The agent speaks {hello}")
-        self.name = hello.get("name", "open-seat-agent")
+        # Its lines arrive on a thread of their own, so an answer can be waited for with a time limit
+        self.lines = queue.Queue()
+        threading.Thread(target=self._read, daemon=True).start()
+        try:
+            self._handshake()
+        except AgentFailure:
+            # An agent this driver can't play with doesn't stay running
+            self.close(wait=5)
+            raise
+
+    def _handshake(self):
+        self.send({"type": "handshake", "protocol": PROTOCOL, "version": VERSION})
+        handshake = self.receive(ANSWER_SECONDS)
+        if handshake.get("type") == "failure":
+            raise AgentFailure(handshake.get("code", "internal"), f"The agent refused the handshake: {handshake.get('message')}", by_agent=True)
+        if handshake.get("type") != "handshake" or handshake.get("protocol") != PROTOCOL or handshake.get("version") != VERSION:
+            self.refuse("version", f"The agent didn't answer the handshake in protocol {PROTOCOL} version {VERSION}: {handshake}")
+        self.name = handshake.get("name", "open-seat-agent")
+        self.needs = handshake.get("needs", "view")
+        self.observe, self.lean = handshake.get("observe", False), handshake.get("lean", False)
+        rulesets = handshake.get("rulesets", [])
+        if not isinstance(self.observe, bool) or not isinstance(self.lean, bool) or not isinstance(rulesets, list):
+            self.refuse("malformed", f"The agent's handshake has a field of the wrong type: {handshake}")
+        # What this referee can't serve, it refuses instead of sending something else
+        if self.needs not in ("view", "truth"):
+            self.refuse("unsupported", f"Catanatron's driver serves view and truth, not {self.needs!r}: it draws no worlds")
+        if self.lean and not self.observe:
+            self.refuse("unsupported", "A lean agent has to observe: it keeps its own game from the steps")
+        if "catanatron" not in rulesets:
+            self.refuse("unsupported", f"Catanatron's driver plays the catanatron preset, the agent plays {rulesets}", {"preset": "catanatron"})
+
+    def _read(self):
+        for line in self.process.stdout:
+            self.lines.put(line)
+        self.lines.put(None)
 
     def send(self, message):
-        self.process.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
-        self.process.stdin.flush()
+        try:
+            self.process.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
+            self.process.stdin.flush()
+        except OSError as error:
+            raise AgentFailure("ended", f"The agent ended before it read its messages ({error})")
 
-    def ask(self, message):
-        self.send(message)
-        line = self.process.stdout.readline()
-        if not line:
-            raise RuntimeError("The agent ended")
-        return json.loads(line)
+    def receive(self, seconds):
+        """The agent's next message within the time; a timeout, an end of its output or a line that isn't JSON fails"""
+        try:
+            line = self.lines.get(timeout=max(0.0, seconds))
+        except queue.Empty:
+            raise AgentFailure("timeout", f"The agent gave no answer within {seconds:.1f} s")
+        if line is None:
+            self.lines.put(None)
+            raise AgentFailure("ended", "The agent ended without an answer")
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError:
+            message = None
+        if not isinstance(message, dict):
+            raise AgentFailure("malformed", f"The agent wrote a line that isn't a protocol message: {line.strip()[:200]}")
+        return message
 
-    def close(self):
-        self.process.stdin.close()
-        self.process.wait(timeout=60)
+    def fail(self, game_id, n, code, message, detail=None):
+        """Tells the agent what failed (if it still listens) and returns the failure"""
+        failure = {"type": "failure", "game_id": game_id, "n": n, "code": code, "message": message}
+        if detail is not None:
+            failure["detail"] = detail
+        try:
+            self.send(failure)
+        except AgentFailure:
+            pass
+        return AgentFailure(code, message)
+
+    def refuse(self, code, message, detail=None):
+        raise self.fail(None, None, code, message, detail)
+
+    def close(self, wait=60):
+        try:
+            self.process.stdin.close()
+        except OSError:
+            pass
+        try:
+            self.process.wait(timeout=wait)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
 
 
 def seated_game(players, seed, catan_map):
@@ -78,38 +192,129 @@ def seated_game(players, seed, catan_map):
     return game
 
 
-def play(game, open_seat_agents, write, game_id, codes):
-    """Plays the game; open_seat_agents maps seats to Open Seat Agents. Returns the result line."""
+def seat_record(seat, agent=None):
+    """A seat's line in the game's result record (see PROTOCOL.md): null agent for Catanatron's own bots"""
+    return {"seat": seat, "agent": agent.name if agent else None, "needs": agent.needs if agent else None,
+            "observe": agent.observe if agent else None, "lean": agent.lean if agent else None,
+            "decisions": 0, "time_ms": 0, "max_ms": 0, "resyncs": 0, "fallbacks": 0, "failures": []}
+
+
+def ask(agent, record, decide, seat_state, budget_ms):
+    """Asks the agent for a decision within the budget: a lean agent gets only the hash, and the state again when it
+    asks (resync); answers to earlier decisions and games are skipped. Returns the chosen move."""
+    started = time.perf_counter()
+    message = {**decide, "hash": state_hash(seat_state)}
+    if not agent.lean:
+        message["state"] = seat_state
+    agent.send(message)
+    while True:
+        left = budget_ms / 1000 - (time.perf_counter() - started)
+        if left <= 0:
+            raise agent.fail(decide["game_id"], decide["n"], "timeout", f"The agent gave no answer within {budget_ms} ms")
+        try:
+            answer = agent.receive(left)
+        except AgentFailure as failure:
+            if failure.code == "timeout":
+                raise agent.fail(decide["game_id"], decide["n"], "timeout", f"The agent gave no answer within {budget_ms} ms")
+            if failure.code == "malformed":
+                raise agent.fail(decide["game_id"], decide["n"], "malformed", str(failure))
+            raise
+        kind = answer.get("type")
+        if kind in ("ready", "decide") and answer.get("game_id") != decide["game_id"] or kind == "decide" and isinstance(answer.get("n"), int) and answer["n"] < decide["n"]:
+            continue
+        if kind == "failure":
+            raise AgentFailure(answer.get("code", "internal"), f"The agent reported a failure: {answer.get('message')}", by_agent=True)
+        if kind == "resync" and answer.get("n") == decide["n"]:
+            record["resyncs"] += 1
+            agent.send({**decide, "hash": message["hash"], "state": seat_state})
+            continue
+        if kind != "decide" or "action" not in answer:
+            raise agent.fail(decide["game_id"], decide["n"], "malformed", f"The agent answered a decision with {answer}")
+        if answer.get("n") != decide["n"]:
+            raise agent.fail(decide["game_id"], decide["n"], "illegal", f"The agent answered decision {answer.get('n')} when asked for {decide['n']}")
+        if answer["action"] not in decide["legal"]:
+            raise agent.fail(decide["game_id"], decide["n"], "illegal", f"The agent's {answer['action']} is not one of the legal moves")
+        spent = round((time.perf_counter() - started) * 1000)
+        record["decisions"] += 1
+        record["time_ms"] += spent
+        record["max_ms"] = max(record["max_ms"], spent)
+        return answer["action"]
+
+
+def play(game, open_seat_agents, write, game_id, codes, budget_ms=DEFAULT_DECIDE_MS):
+    """Plays the game; open_seat_agents maps seats to Open Seat Agents. A failure ends the game (cut short) and is
+    recorded. Returns the result line, with the game's result record."""
     encoder = Encoder(game)
     state = game.state
     times = {seat: [0.0, 0] for seat in range(4)}
+    records = [seat_record(seat, open_seat_agents.get(seat)) for seat in range(4)]
+    playing = dict(open_seat_agents)
+    budget = {"decide_ms": budget_ms, "game_ms": None, "threads": None, "gpu": False}
 
-    def tell(message, before=None):
-        # The log has the state before each move in its decide; the agents (which need the full state) get it with the step
+    def seat_state(seat, full):
+        return full if playing[seat].needs == "truth" else view(full, seat)
+
+    def tell(message, before=None, mover=None):
+        # The log has the state before each move in its decide; observing agents get the step as their seat sees it,
+        # with the state before the move under truth
         write(message)
-        for agent in open_seat_agents.values():
-            agent.send(message if before is None else {**message, "state": before})
+        for seat, agent in list(playing.items()):
+            if not agent.observe:
+                continue
+            seen = dict(message)
+            if message["type"] == "step":
+                if agent.needs == "truth":
+                    seen["state"] = before
+                else:
+                    seen["result"] = seen_result(message["action"], message["result"], mover, seat)
+            try:
+                agent.send(seen)
+            except AgentFailure as failure:
+                lost(seat, failure, message.get("n"))
+
+    def lost(seat, failure, n):
+        records[seat]["failures"].append({"n": n, "code": failure.code, "by": "agent" if failure.by_agent else "referee", "message": str(failure)})
+        playing.pop(seat, None)
+        write({"type": "failure", "game_id": game_id, "seat": seat, "n": n, "code": failure.code, "by": "agent" if failure.by_agent else "referee", "message": str(failure)})
 
     board = osp_board.board(state.board.map, state.board.robber_coordinate)
     full = encoder.state()
-    write({"type": "before", "game_id": game_id, "seed": game.seed, "players": 4, "ruleset": {"preset": "catanatron"},
+    ruleset = {"preset": "catanatron"}
+    write({"type": "before", "game_id": game_id, "seed": game.seed, "players": 4, "ruleset": ruleset, "budget": budget,
            "bots": codes, "board": board, "state": full})
-    for seat, agent in open_seat_agents.items():
-        agent.send({"type": "before", "game_id": game_id, "seat": seat, "players": 4, "ruleset": {"preset": "catanatron"},
-                  "board": board, "state": full})
+    for seat, agent in list(playing.items()):
+        agent.send({"type": "before", "game_id": game_id, "seat": seat, "players": 4, "ruleset": ruleset, "budget": budget,
+                    "seed": game.seed, "board": board, "state": seat_state(seat, full)})
+    # Each agent takes the game or turns it down
+    for seat, agent in list(playing.items()):
+        try:
+            while True:
+                answer = agent.receive(ANSWER_SECONDS)
+                if answer.get("type") == "failure":
+                    raise AgentFailure(answer.get("code", "internal"), f"The agent turned the game down: {answer.get('message')} {answer.get('detail') or ''}".strip(), by_agent=True)
+                if answer.get("type") == "ready" and answer.get("game_id") == game_id:
+                    break
+                if answer.get("type") in ("ready", "decide"):
+                    continue
+                raise agent.fail(game_id, None, "malformed", f"The agent answered before with {answer}")
+        except AgentFailure as failure:
+            lost(seat, failure, None)
 
     n = 0
-    while game.winning_color() is None and state.num_turns < TURNS_LIMIT:
+    while not any(r["failures"] for r in records) and game.winning_color() is None and state.num_turns < TURNS_LIMIT:
         seat = state.current_player_index
         discard = state.current_prompt == ActionPrompt.DISCARD
         legal = encoder.discard_options(seat) if discard else encoder.legal(game.playable_actions)
-        decide = {"type": "decide", "game_id": game_id, "n": n, "seat": seat, "state": encoder.state(), "legal": legal}
+        full = encoder.state()
+        decide = {"type": "decide", "game_id": game_id, "n": n, "seat": seat, "state": full, "legal": legal}
         write(decide)
         start = time.perf_counter()
         if seat in open_seat_agents:
-            move = open_seat_agents[seat].ask(decide)["action"]
-            if move not in legal:
-                raise RuntimeError(f"{game_id} move {n}: the agent's {move} is not legal")
+            try:
+                move = ask(playing[seat], records[seat], {key: value for key, value in decide.items() if key != "state"}, seat_state(seat, full), budget_ms)
+            except AgentFailure as failure:
+                lost(seat, failure, n)
+                break
         else:
             move = None
         if discard:
@@ -124,24 +329,33 @@ def play(game, open_seat_agents, write, game_id, codes):
                 discarded = card_set(cards)
             times[seat][0] += time.perf_counter() - start
             times[seat][1] += 1
-            tell({"type": "step", "game_id": game_id, "n": n, "seat": seat, "action": ["discard", discarded], "result": None}, decide["state"])
+            tell({"type": "step", "game_id": game_id, "n": n, "seat": seat, "action": ["discard", discarded], "result": None}, decide["state"], seat)
         else:
             action = encoder.decode(move, game.playable_actions) if move is not None else state.current_player().decide(game, game.playable_actions)
             times[seat][0] += time.perf_counter() - start
             times[seat][1] += 1
             taken = encoder.monopoly_taken(action) if action.action_type == ActionType.PLAY_MONOPOLY else None
             record = game.execute(action)
-            tell({"type": "step", "game_id": game_id, "n": n, "seat": seat, "action": encoder.move(record.action), "result": encoder.result(record, taken)}, decide["state"])
+            tell({"type": "step", "game_id": game_id, "n": n, "seat": seat, "action": encoder.move(record.action), "result": encoder.result(record, taken)}, decide["state"], seat)
         n += 1
 
-    winner = game.winning_color()
+    failed = any(r["failures"] for r in records)
+    winner = None if failed else game.winning_color()
     winner_seat = None if winner is None else encoder.seats[winner]
     final = encoder.state()
-    tell({"type": "after", "game_id": game_id, "winner": winner_seat, "vp": [p["vp"] for p in final["players"]],
-          "truncated": winner is None, "turns": state.num_turns, "state": final})
+    result = {"seed": game.seed, "moves": n, "turns": state.num_turns, "seats": records}
+    # Every agent still in the game hears its end, with the result record; the log keeps it as the game's result line
+    after = {"type": "after", "game_id": game_id, "winner": winner_seat, "vp": [p["vp"] for p in final["players"]],
+             "truncated": winner is None, "result": result}
+    write({**after, "turns": state.num_turns, "state": final})
+    for seat, agent in list(playing.items()):
+        try:
+            agent.send(after)
+        except AgentFailure as failure:
+            lost(seat, failure, None)
     return {"game_id": game_id, "seats": codes, "winner": winner_seat, "winner_code": None if winner_seat is None else codes[winner_seat],
             "vp": [p["vp"] for p in final["players"]], "truncated": winner is None, "turns": state.num_turns, "moves": n,
-            "seconds": [round(times[s][0], 3) for s in range(4)], "decisions": [times[s][1] for s in range(4)]}
+            "seconds": [round(times[s][0], 3) for s in range(4)], "decisions": [times[s][1] for s in range(4)], "result": result}
 
 
 def main(argv=None):
@@ -153,6 +367,7 @@ def main(argv=None):
     parser.add_argument("--out", required=True, help="result lines, appended")
     parser.add_argument("--log", help="every game's referee messages, gzipped (for OpenSeat replay)")
     parser.add_argument("--agent-log", help="the agents' standard error (their stats lines)")
+    parser.add_argument("--decide-ms", type=int, default=DEFAULT_DECIDE_MS, help="the agents' time per decision (the game's budget)")
     args = parser.parse_args(argv)
 
     lineup = args.lineup.split(",")
@@ -182,11 +397,16 @@ def main(argv=None):
                 random.seed(entry["seed"] * 4 + rotation)
                 game = seated_game(players, entry["seed"], osp_board.catan_map(entry["board"]))
                 game_id = f"map{entry['seed']}-r{rotation}"
-                result = play(game, open_seat_agents, write, game_id, codes)
+                result = play(game, open_seat_agents, write, game_id, codes, args.decide_ms)
                 result.update({"map_seed": entry["seed"], "rotation": rotation, "lineup": lineup})
                 out.write(json.dumps(result) + "\n")
                 out.flush()
-                print(f"{game_id}: winner {result['winner_code']} in {result['turns']} turns", file=sys.stderr, flush=True)
+                failures = [f for seat in result["result"]["seats"] for f in seat["failures"]]
+                print(f"{game_id}: winner {result['winner_code']} in {result['turns']} turns"
+                      + "".join(f"; failure {f['code']}: {f['message']}" for f in failures), file=sys.stderr, flush=True)
+                # An agent whose process ended can't play the rest of the run
+                if any(f["code"] == "ended" for f in failures):
+                    raise SystemExit(f"{game_id}: an Open Seat Agent ended; the run stops")
     for agent in agents:
         if agent:
             agent.close()

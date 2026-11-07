@@ -149,7 +149,9 @@ namespace OpenSeat
                         bool serial = args.Contains("--serial");
                         // Information Set MCTS over what the seat knows instead of the open-hand search
                         bool fair = args.Contains("--fair");
-                        new SeatAgent(net, iterations, seconds, Console.Error, leavesPerBatch, parallelSelection: !serial, fair: fair).Run(Console.In, protocol);
+                        // Decisions with only the state's hash, checked against its own copy of the game
+                        bool lean = args.Contains("--lean");
+                        new SeatAgent(net, iterations, seconds, Console.Error, leavesPerBatch, parallelSelection: !serial, fair: fair, lean: lean).Run(Console.In, protocol);
                         return 0;
                     }
                 case "boards":

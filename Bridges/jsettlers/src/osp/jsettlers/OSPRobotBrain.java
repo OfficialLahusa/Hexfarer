@@ -1,12 +1,11 @@
 package osp.jsettlers;
 
 import java.io.File;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
-import java.util.TreeSet;
 
 import soc.game.SOCCity;
 import soc.game.SOCDevCardConstants;
@@ -31,22 +30,31 @@ import soc.util.SOCRobotParameters;
  * keep JSettlers' own robot logic or game tracking. An agent that observes gets every move of the game as a step from
  * the server's move log (MoveLog), from the game's start, before each decision; one that doesn't has to take its game
  * from each decision's state. The brain reads the game under the server's locks for it (OSPServer.read), so it never
- * sees a move half made. If the agent fails, the first legal move is played. The agent's command comes from the system
- * property osp.agent, its standard error goes to the directory osp.log if set; one statistics line per game goes to
- * the server's standard error.
+ * sees a move half made. It speaks version 2: it serves view and truth (no worlds), steps, and lean decisions (the full
+ * state again when the agent asks, and on its own after a change no step explains); the agent takes each game (ready)
+ * or turns it down; a decision has the budget's time (120 s by default). Whatever fails (a game turned down, an illegal,
+ * late or malformed answer, the agent's own failure, its process ending) is told to the agent where it still listens and
+ * recorded in the seat's line of the game's result record (MoveLog), and the robot plays the first legal move for the
+ * rest of the game (fallbacks). The agent's command comes from the system property osp.agent, its standard error goes to
+ * the directory osp.log if set.
  */
 public class OSPRobotBrain extends SOCRobotBrain
 {
     // The rules JSettlers plays, as the protocol names them: the rulebook without trades between players, narrower where
     // JSettlers is (see Recorder)
-    static final Map<String, Object> RULESET = Json.object("preset", "standard", "player_trading", "none",
+    static final Map<String, Object> RULESET = Json.object("preset", "standard", "player_trading", "none", "bank_shortage", "unlimited",
         "bank_rates", "best_only", "robber_victims", "with_cards", "road_building", "forced");
-    // How long the agent may think about one decision
-    private static final long ANSWER_MILLIS = 120_000;
+    // The game's budget: how long the agent may think about one decision; the handshake and ready get a minute
+    private static final long DECIDE_MILLIS = 120_000, HANDSHAKE_MILLIS = 60_000;
+    static final Map<String, Object> BUDGET = Json.object("decide_ms", DECIDE_MILLIS, "game_ms", null, "threads", null, "gpu", false);
 
     private OSPGame osp;
     private AgentProcess agent;
-    private boolean agentFailed, truth, observe, after;
+    private boolean agentFailed, truth, observe, lean, after;
+    // The move log's gaps at the last decision: a change no step explains sends a lean agent the full state
+    private long gapsAtDecision;
+    // The seat's line in the game's result record
+    private MoveLog.SeatRecord record;
     // The steps the agent has been sent
     private int sent;
     private String agentName = "?";
@@ -171,7 +179,7 @@ public class OSPRobotBrain extends SOCRobotBrain
         Map<String, Object> position;
         List<Object> legal;
         // The game's moves so far, with its gaps (changes no move explains), and those the agent hasn't been sent
-        long moves, progress;
+        long moves, progress, gaps;
         List<Map<String, Object>> steps;
         MoveLog log;
     }
@@ -202,6 +210,7 @@ public class OSPRobotBrain extends SOCRobotBrain
             seen.legal = seen.acting == seat && ! seen.over ? osp.legal(seat) : null;
             seen.moves = log != null ? log.size() : 0;
             seen.progress = log != null ? log.size() + log.gaps() : 0;
+            seen.gaps = log != null ? log.gaps() : 0;
             seen.steps = log != null ? log.stepsFrom(sent) : null;
             return seen;
         });
@@ -241,6 +250,8 @@ public class OSPRobotBrain extends SOCRobotBrain
         if (acting != seat || seen.progress == actedAt || legal.isEmpty())
             return;
         decisions++;
+        if (seen.log != null)
+            seen.log.seatRecord(seat).robotDecided();
         @SuppressWarnings("unchecked")
         List<Object> move = (List<Object>) (legal.size() == 1 ? legal.get(0) : ask(seat, legal, seen));
         actedAt = seen.progress;
@@ -248,11 +259,47 @@ public class OSPRobotBrain extends SOCRobotBrain
         firstStep(move, state);
     }
 
-    // Asks the agent; the first legal move if it fails
+    /** A failure of the agent's seat: its code (see PROTOCOL.md) and whether the agent reported it itself */
+    private static final class AgentFailure extends Exception
+    {
+        final String code;
+        final boolean byAgent;
+
+        AgentFailure(String code, String message, boolean byAgent)
+        {
+            super(message);
+            this.code = code;
+            this.byAgent = byAgent;
+        }
+    }
+
+    // Tells the agent what failed (if it still listens) and returns the failure
+    private AgentFailure fail(Object n, String code, String message, Map<String, Object> detail)
+    {
+        try
+        {
+            Map<String, Object> failure = Json.object("type", "failure", "game_id", game.getName(), "n", n, "code", code, "message", message);
+            if (detail != null)
+                failure.put("detail", detail);
+            agent.send(failure);
+        }
+        catch (Exception e) {}
+        return new AgentFailure(code, message, false);
+    }
+
+    // The agent's own failure, as the exception for it
+    private static AgentFailure reported(Map<String, Object> failure)
+    {
+        Object code = failure.get("code");
+        return new AgentFailure(code instanceof String ? (String) code : "internal", "the agent reported a failure: " + failure.get("message"), true);
+    }
+
+    // Asks the agent; the first legal move once it failed
     private Object ask(int seat, List<Object> legal, Seen seen)
     {
         asked++;
         long started = System.currentTimeMillis();
+        Long n = seen.moves;
         try
         {
             if (agent == null && ! agentFailed)
@@ -260,26 +307,62 @@ public class OSPRobotBrain extends SOCRobotBrain
             if (agent == null)
                 return fallback(legal);
             sendSteps(seat, seen.steps);
-            agent.send(Json.object("type", "decide", "game_id", game.getName(), "n", seen.moves, "seat", (long) seat,
-                "state", truth ? seen.position : OSPGame.hide(seen.position, seat), "legal", legal));
-            Map<String, Object> answer = agent.receive(ANSWER_MILLIS);
-            Object chosen = answer.get("action");
-            Set<String> listed = new TreeSet<>();
-            for (Object move : legal)
-                listed.add(Json.write(move, true));
-            if (chosen != null && listed.contains(Json.write(chosen, true)))
+            Map<String, Object> state = truth ? seen.position : OSPGame.hide(seen.position, seat);
+            // A lean agent gets only the hash, unless a change no step explains came since its last decision
+            boolean force = seen.gaps != gapsAtDecision;
+            gapsAtDecision = seen.gaps;
+            Map<String, Object> decide = Json.object("type", "decide", "game_id", game.getName(), "n", n, "seat", (long) seat, "hash", OSPGame.hash(state));
+            if (! lean || force)
+                decide.put("state", state);
+            decide.put("legal", legal);
+            agent.send(decide);
+            while (true)
+            {
+                long left = DECIDE_MILLIS - (System.currentTimeMillis() - started);
+                Map<String, Object> answer;
+                try
+                {
+                    if (left <= 0)
+                        throw new AgentProcess.Timeout("no time left");
+                    answer = agent.receive(left);
+                }
+                catch (AgentProcess.Timeout e)
+                {
+                    throw fail(n, "timeout", "the agent gave no answer within " + DECIDE_MILLIS + " ms", null);
+                }
+                Object type = answer.get("type");
+                if ("failure".equals(type))
+                    throw reported(answer);
+                if ("resync".equals(type) && n.equals(answer.get("n")))
+                {
+                    record.resynced();
+                    Map<String, Object> full = new LinkedHashMap<>(decide);
+                    full.put("state", state);
+                    agent.send(full);
+                    continue;
+                }
+                if (! "decide".equals(type) || ! answer.containsKey("action"))
+                    throw fail(n, "malformed", "the agent answered a decision with " + Json.write(answer), null);
+                if (! n.equals(answer.get("n")))
+                    throw fail(n, "illegal", "the agent answered decision " + answer.get("n") + " when asked for " + n, null);
+                String chosen = Json.write(answer.get("action"), true);
                 for (Object move : legal)
-                    if (Json.write(move, true).equals(Json.write(chosen, true)))
+                    if (Json.write(move, true).equals(chosen))
+                    {
+                        record.decided(System.currentTimeMillis() - started);
                         return move;
-            System.err.println(client.getNickname() + " in " + game.getName() + ": the agent answered " + Json.write(chosen) + ", not a legal move");
-            return fallback(legal);
+                    }
+                throw fail(n, "illegal", "the agent answered " + chosen + ", not a legal move", null);
+            }
+        }
+        catch (AgentFailure e)
+        {
+            return failed(n, e.code, e.byAgent, e.getMessage(), legal);
         }
         catch (Exception e)
         {
-            System.err.println(client.getNickname() + " in " + game.getName() + ": the agent failed: " + e.getMessage());
-            agentFailed = true;
-            close();
-            return fallback(legal);
+            // Its process ended (or broke off): nothing to tell it
+            return failed(n, "ended", false, e.getMessage(), legal);
         }
         finally
         {
@@ -287,9 +370,22 @@ public class OSPRobotBrain extends SOCRobotBrain
         }
     }
 
+    // The agent failed: recorded, closed, and the robot plays on with the first legal move
+    private Object failed(Long n, String code, boolean byAgent, String message, List<Object> legal)
+    {
+        System.err.println(client.getNickname() + " in " + game.getName() + ": the agent failed (" + code + "): " + message);
+        if (record != null)
+            record.failed(n, code, byAgent, message);
+        agentFailed = true;
+        close();
+        return fallback(legal);
+    }
+
     private Object fallback(List<Object> legal)
     {
         fallbacks++;
+        if (record != null)
+            record.fellBack();
         return legal.get(0);
     }
 
@@ -322,7 +418,7 @@ public class OSPRobotBrain extends SOCRobotBrain
         }
     }
 
-    // Starts the agent and the game for it
+    // Starts the agent and the game for it: the handshake (what it plays and wants), before, and its ready
     private void start(int seat, Seen seen) throws Exception
     {
         String command = System.getProperty("osp.agent");
@@ -330,21 +426,57 @@ public class OSPRobotBrain extends SOCRobotBrain
             throw new IllegalStateException("No agent: set the system property osp.agent");
         String logs = System.getProperty("osp.log");
         File log = logs == null ? null : new File(logs, game.getName() + "-" + client.getNickname() + ".log");
+        record = seen.log.seatRecord(seat);
+        gapsAtDecision = seen.gaps;
         agent = new AgentProcess(command, log);
-        agent.send(Json.object("type", "hello", "protocol", "osp", "version", 1L));
-        Map<String, Object> hello = agent.receive(ANSWER_MILLIS);
-        agentName = String.valueOf(hello.get("name"));
-        String needs = String.valueOf(hello.get("needs"));
-        truth = needs.equals("truth");
-        if (needs.equals("world"))
-            throw new IllegalStateException("The agent needs a world, which this robot can't draw");
+        agent.send(Json.object("type", "handshake", "protocol", "osp", "version", 2L));
+        Map<String, Object> handshake = receiveOrTimeout(HANDSHAKE_MILLIS, null);
+        if ("failure".equals(handshake.get("type")))
+            throw reported(handshake);
+        if (! "handshake".equals(handshake.get("type")) || ! "osp".equals(handshake.get("protocol")) || ! Long.valueOf(2).equals(handshake.get("version")))
+            throw fail(null, "version", "the agent didn't answer the handshake in protocol osp version 2: " + Json.write(handshake), null);
+        agentName = String.valueOf(handshake.get("name"));
+        Object needs = handshake.containsKey("needs") ? handshake.get("needs") : "view";
+        Object observing = handshake.containsKey("observe") ? handshake.get("observe") : false, leaning = handshake.containsKey("lean") ? handshake.get("lean") : false;
+        Object rulesets = handshake.get("rulesets");
+        record.agent(agentName, needs instanceof String ? (String) needs : null, Boolean.TRUE.equals(observing), Boolean.TRUE.equals(leaning));
+        if (! (observing instanceof Boolean) || ! (leaning instanceof Boolean) || ! (rulesets == null || rulesets instanceof List))
+            throw fail(null, "malformed", "the agent's handshake has a field of the wrong type: " + Json.write(handshake), null);
+        // What this referee can't serve, it refuses instead of sending something else
+        if (! "view".equals(needs) && ! "truth".equals(needs))
+            throw fail(null, "unsupported", "this robot serves view and truth, not " + Json.write(needs) + ": it draws no worlds", null);
+        if (rulesets == null || ! ((List<?>) rulesets).contains("standard"))
+            throw fail(null, "unsupported", "JSettlers plays the standard preset with options, the agent plays " + Json.write(rulesets), Json.object("preset", "standard"));
+        truth = "truth".equals(needs);
+        lean = (Boolean) leaning;
+        if (lean && ! (Boolean) observing)
+            throw fail(null, "unsupported", "a lean agent has to observe: it keeps its own game from the steps", null);
         // An observing agent follows the game from its start; one that doesn't starts from now
-        observe = Boolean.TRUE.equals(hello.get("observe")) && seen.log != null;
+        observe = (Boolean) observing && seen.log != null;
         Map<String, Object> from = observe ? seen.log.start() : seen.position;
         if (! observe)
             sent = (int) seen.moves;
         agent.send(Json.object("type", "before", "game_id", game.getName(), "seat", (long) seat, "players", (long) game.maxPlayers,
-            "ruleset", RULESET, "board", osp.board.boardJson(), "state", truth ? from : OSPGame.hide(from, seat)));
+            "ruleset", RULESET, "budget", BUDGET, "seed", (long) seen.log.seed, "board", osp.board.boardJson(), "state", truth ? from : OSPGame.hide(from, seat)));
+        // The agent takes the game or turns it down
+        Map<String, Object> ready = receiveOrTimeout(HANDSHAKE_MILLIS, null);
+        if ("failure".equals(ready.get("type")))
+            throw reported(ready);
+        if (! "ready".equals(ready.get("type")) || ! game.getName().equals(ready.get("game_id")))
+            throw fail(null, "malformed", "the agent answered before with " + Json.write(ready), null);
+    }
+
+    // The agent's next message within the time, or a timeout failure
+    private Map<String, Object> receiveOrTimeout(long millis, Object n) throws Exception
+    {
+        try
+        {
+            return agent.receive(millis);
+        }
+        catch (AgentProcess.Timeout e)
+        {
+            throw fail(n, "timeout", "the agent gave no answer within " + millis + " ms", null);
+        }
     }
 
     private static final boolean DEBUG = System.getProperty("osp.debug") != null;
@@ -487,14 +619,13 @@ public class OSPRobotBrain extends SOCRobotBrain
                 MoveLog log = OSPServer.log(game.getName());
                 if (log != null)
                     sendSteps(seat, log.stepsFrom(sent));
-                agent.send(Json.object("type", "after", "game_id", game.getName(), "winner", winner, "vp", vp, "truncated", winner == null));
+                Map<String, Object> end = Json.object("type", "after", "game_id", game.getName(), "winner", winner, "vp", vp, "truncated", winner == null);
+                if (log != null && log.result() != null)
+                    end.put("result", log.result());
+                agent.send(end);
             }
         }
         catch (Exception e) {}
-        System.err.println(Json.write(Json.object("type", "osp-robot", "game_id", game.getName(), "robot", client.getNickname(),
-            "agent", agentName, "seat", (long) seat, "winner", winner, "vp", vp, "decisions", (long) decisions, "asked", (long) asked,
-            "fallbacks", (long) fallbacks, "thinking_seconds", thinkingMillis / 1000.0 > 0 ? (long) (thinkingMillis / 1000) : 0L,
-            "rounds", (long) truthGame.getRoundCount())));
         close();
     }
 

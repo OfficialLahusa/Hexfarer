@@ -1,6 +1,7 @@
 using Agents;
 using Agents.Inference;
 using Agents.MCTS;
+using Agents.OpenSeat;
 using Common;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -129,7 +130,7 @@ namespace Arena
                                 Record(game, winner, state, seconds, stop);
                         }
                         catch (OperationCanceledException) { }
-                        catch (Exception e) { Write($"game {game + 1} failed: {e.Message}"); }
+                        catch (Exception e) { Write($"game {game + 1} failed{(e is OpenSeatException failure ? $" ({failure.Code})" : "")}: {e.Message}"); }
                     }
                 })).ToList();
                 threads.ForEach(t => t.Start());
@@ -159,7 +160,8 @@ namespace Arena
             state = new GameState(MapGenerator.GenerateRandomClassic(), 4);
             state.Settings.FreeTrade = settings.FreeTrade;
             GameState start = state;
-            Agent[] agents = Seating.Create(4, seat => seats[seat].Create((sbyte)seat, start, nets[seats[seat]].Net, settings.Iterations, settings.Seconds, nets[seats[seat]].Leaves, $"{game + 1}"));
+            Agent[] agents = Seating.Create(4, seat => seats[seat].Create((sbyte)seat, start, nets[seats[seat]].Net, settings.Iterations, settings.Seconds, nets[seats[seat]].Leaves,
+                $"{game + 1}", settings.SeedBase + game));
             for (int seat = 0; seat < 4; seat++)
                 if (_seating.Name(seats[seat].Name, agents[seat]) is string line) Write(line);
             try
@@ -168,7 +170,7 @@ namespace Arena
             }
             finally
             {
-                Seating.Close(agents);
+                Seating.Close(agents, settings.SeedBase + game, Write);
             }
         }
 

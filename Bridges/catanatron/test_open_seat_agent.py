@@ -134,21 +134,37 @@ class ProtocolTests(unittest.TestCase):
     def test_the_agent_speaks_the_protocol(self):
         game, board, state, legal = next(p for p in positions(seeds=[4], every=1) if p[2]["prompt"] == "main")
         messages = [
-            {"type": "hello", "protocol": "osp", "version": 1},
-            {"type": "before", "game_id": "g1", "seat": state["current"], "players": 4, "ruleset": CATANATRON, "board": board, "state": state},
-            {"type": "decide", "game_id": "g1", "n": 17, "seat": state["current"], "state": state, "legal": legal},
+            {"type": "handshake", "protocol": "osp", "version": 2},
+            {"type": "before", "game_id": "g1", "seat": state["current"], "players": 4, "ruleset": CATANATRON,
+             "budget": {"decide_ms": 5000, "game_ms": None, "threads": None, "gpu": False}, "seed": 7, "board": board, "state": state},
+            {"type": "decide", "game_id": "g1", "n": 17, "seat": state["current"], "hash": "0", "state": state, "legal": legal},
             {"type": "after", "game_id": "g1", "winner": 0, "vp": [10, 3, 4, 5], "truncated": False},
         ]
         answers = open_seat_agent.run([json.dumps(m) for m in messages], bot="W", needs="world")
-        hello, decide = [json.loads(a) for a in answers]
-        self.assertEqual({"type": "hello", "protocol": "osp", "version": 1, "name": "catanatron-W", "rulesets": ["standard", "catanatron"],
-                          "observe": False, "needs": "world"}, hello)
+        handshake, ready, decide = [json.loads(a) for a in answers]
+        self.assertEqual({"type": "handshake", "protocol": "osp", "version": 2, "name": "catanatron-W", "rulesets": ["standard", "catanatron"],
+                          "observe": False, "needs": "world", "lean": False}, handshake)
+        self.assertEqual({"type": "ready", "game_id": "g1"}, ready)
         self.assertEqual(("decide", "g1", 17), (decide["type"], decide["game_id"], decide["n"]))
         self.assertIn(canonical(decide["action"]), set(map(canonical, legal)))
 
+    def test_the_agent_turns_down_what_it_cant_play_and_asks_for_a_missing_state(self):
+        def answers(*messages):
+            return [json.loads(a) for a in open_seat_agent.run([json.dumps(m) for m in messages], bot="W")]
+        self.assertEqual("version", answers({"type": "handshake", "protocol": "osp", "version": 1})[0]["code"])
+        for ruleset in ({"preset": "jsettlers"}, {"preset": "standard", "dice": "balanced"}, {"preset": "standard", "bank_rates": "none"},
+                        {"preset": "standard", "victory_points": "ten"}):
+            refused = answers({"type": "before", "game_id": "g2", "ruleset": ruleset})[0]
+            self.assertEqual(("failure", "unsupported", "g2"), (refused["type"], refused["code"], refused["game_id"]), ruleset)
+            self.assertIsNotNone(refused["detail"])
+        self.assertEqual("ready", answers({"type": "before", "game_id": "g3", "ruleset": {"preset": "standard", "victory_points": 12, "offer_limit": 4}})[0]["type"])
+        # It rebuilds from every decision's state, so a decision without one gets a resync
+        self.assertEqual({"type": "resync", "game_id": "g3", "n": 4},
+                         answers({"type": "decide", "game_id": "g3", "n": 4, "seat": 0, "hash": "0", "legal": [["roll"]]})[0])
+
     def test_a_rebuild_failure_falls_back_to_a_listed_move(self):
         # A state the bot can't use (here no players at all) still gets a legal answer
-        answers = open_seat_agent.run([json.dumps({"type": "hello", "protocol": "osp", "version": 1}),
+        answers = open_seat_agent.run([json.dumps({"type": "handshake", "protocol": "osp", "version": 2}),
                                        json.dumps({"type": "decide", "game_id": "g", "n": 0, "seat": 0, "state": {}, "legal": [["roll"]]})], bot="W")
         self.assertEqual(["roll"], json.loads(answers[1])["action"])
 

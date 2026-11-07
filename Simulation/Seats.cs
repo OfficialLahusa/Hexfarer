@@ -144,9 +144,9 @@ namespace Simulation
         }
 
         /// <summary>
-        /// How long an Open Seat Agent may take for an answer before its seat fails
+        /// The time budget of an Open Seat Agent's games in a match: 5 minutes per decision (OpenSeatBudget.Default)
         /// </summary>
-        public static readonly TimeSpan OpenSeatAgentTimeout = TimeSpan.FromMinutes(5);
+        public static readonly OpenSeatBudget OpenSeatAgentBudget = OpenSeatBudget.Default;
 
         /// <summary>
         /// The agent of a seat, an Open Seat Agent from the simulation's list among them (a process, its game named gameId,
@@ -166,7 +166,8 @@ namespace Simulation
             {
                 try
                 {
-                    return new OpenSeatAgentProxy(seat, state, OpenSeatAgentProcess.Start(agent.Command, OpenSeatAgentTimeout), gameId, beliefs: beliefs, cancellation: cancellation);
+                    return new OpenSeatAgentProxy(seat, state, OpenSeatAgentProcess.Start(agent.Command, Timeout.InfiniteTimeSpan), gameId, beliefs: beliefs, cancellation: cancellation,
+                        budget: OpenSeatAgentBudget);
                 }
                 catch (OpenSeatException e)
                 {
