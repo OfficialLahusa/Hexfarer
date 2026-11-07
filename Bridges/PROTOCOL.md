@@ -68,8 +68,10 @@ version, its adapter disappears.
     for decisions only.
   - Under `truth` the results show everything (another seat's bought card, a steal between two others); otherwise as
     the seat sees them.
-  - A referee that can't follow moves for an agent sends it no steps (JSettlers' robot): the agent then has to take the
-    game from each decision's state.
+  - A referee that can't follow moves for an agent sends it no steps: the agent then has to take the game from each
+    decision's state. JSettlers' robot sends steps; its server makes them from the players' requests, in the protocol's
+    order (simultaneous discards from the lowest seat up, each with the state that order gives it). A change the server
+    makes on its own (a slow player's turn ended) comes as no step; the next step's state shows it.
 - **`n`:** counts the moves of the game, so answers and steps can't be mixed up.
 - **`decide` answer:** a copy of one entry of `legal`. The referee matches it against its own list, as Catanatron's does,
   so an encoding that only looks right can't slip through.

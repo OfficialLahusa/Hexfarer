@@ -35,13 +35,21 @@ Contents:
   - `Recorder --games N --out games.jsonl.gz [--ruleset jsettlers]`: random games by JSettlers' rules as referee
     messages, for Hexfarer's replay harness (the differences found are in PROTOCOL.md's ruleset table).
   - `OspServer` with `OspRobotClient`: JSettlers' server whose robot seats include Open Seat Agents (-Dosp.agent=COMMAND,
-    started through jsettlers.bots.start3p); the robot runs inside the server and hands its agent the true state, so
-    agents that need their seat's view only, or every step, aren't served yet. -Dosp.log=DIR keeps each agent's
-    standard error, -Dosp.debug=true prints the robot's steps.
-  - Tests: `python -m unittest test_jsettlers_board test_jsettlers_game test_jsettlers_robot` (with JSETTLERS_JAR set).
+    started through jsettlers.bots.start3p). The robot runs inside the server and reads the game under the server's
+    locks; an agent gets the true state or its seat's view, as it asks, and if it observes, every move of the game as
+    a step from the game's start (`MoveLog`, which turns JSettlers' requests into protocol moves). -Dosp.log=DIR keeps
+    each agent's standard error, -Dosp.debug=true prints the robot's steps, -Dosp.record=DIR writes every game as a
+    referee log while it runs (for the replay harness, the relay and the live relay), -Dosp.bots=smart|fast gives all of
+    JSettlers' own robots one strategy (it starts 30% fast, the rest smart). Each game ends with an `osp-game` line on
+    standard error: the players by seat, the winner, and per seat its moves, its decisions with a choice and its robot
+    brain's CPU time.
+  - Tests: `python -m unittest test_jsettlers_board test_jsettlers_game test_jsettlers_robot test_jsettlers_steps` (with
+    JSETTLERS_JAR set).
 
 On Hexfarer's side, outside this folder: `OpenSeat replay LOG` plays a referee's log through Hexfarer's rules and lists
 the differences, `OpenSeat relay LOG --save DIR` writes its games as save files for the client (a new part where the
-rules part), and `OpenSeat agent` is Hexfarer's own Open Seat Agent. The Arena seats any agent as `NAME=command:COMMAND`,
+rules part), `OpenSeat relay LOG|DIR --live` hosts them for the client's watchers while the referee writes them (the
+client joins with the Watch role), and `OpenSeat agent` is Hexfarer's own Open Seat Agent (`--fair` for the agent that
+plays from its seat's view). The Arena seats any agent as `NAME=command:COMMAND`,
 and the client's local games seat those listed in `%AppData%\Hexfarer\settings.json` under `OpenSeatAgents`
 (`[{"Name": "...", "Command": "..."}]`).
