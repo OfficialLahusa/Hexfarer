@@ -65,6 +65,48 @@ namespace Tests
             Assert.DoesNotContain(report.Counts.Keys, kind => kind.Contains("Catanatron"));
         }
 
+        [Theory]
+        [InlineData("catanatron", true)]
+        [InlineData("standard", false)]
+        public void ABankShortageAfterARollIsNamedOnlyUnderCatanatronsRules(string preset, bool named)
+        {
+            // Hexfarer's bank has no brick left when a roll comes; the referee's still holds one
+            GameState game = RandomGames(games: 1).Skip(40).First(s => s.Turn.MustRoll && new OspCodec(s.Board).State(s)["prompt"]!.GetValue<string>() == "roll");
+            uint bricks = game.ResourceBank.Get(ResourceCardType.Brick);
+            game.ResourceBank.Remove(ResourceCardType.Brick, bricks);
+            game.Players[1].ResourceCards.Add(ResourceCardType.Brick, bricks);
+            OspCodec codec = new(game.Board);
+            JsonNode before = JsonNode.Parse(new JsonObject { ["type"] = "before", ["game_id"] = "shortage", ["seat"] = 0, ["players"] = 4,
+                ["ruleset"] = new JsonObject { ["preset"] = preset }, ["board"] = codec.BoardJson(), ["state"] = codec.State(game) }.ToJsonString())!;
+            Replica replica = new(before);
+            sbyte acting = TestUtil.ActingPlayer(game);
+            replica.Rebuild(JsonNode.Parse(codec.State(game).ToJsonString())!, new JsonArray(LegalActionProvider.GetActionsForState(game, acting).Select(a => JsonNode.Parse(codec.Move(a).ToJsonString())).ToArray()));
+            JsonNode step = JsonNode.Parse(new JsonObject { ["type"] = "step", ["game_id"] = "shortage", ["n"] = 0, ["seat"] = (int)acting, ["action"] = new JsonArray("roll"), ["result"] = new JsonObject { ["dice"] = new JsonArray(1, 2) } }.ToJsonString())!;
+            Assert.Null(replica.Follow(step));
+
+            JsonNode theirs = JsonNode.Parse(replica.Codec.State(replica.State).ToJsonString())!;
+            theirs["bank"]!["brick"] = 1;
+            (string kind, _) = replica.FirstDifference(theirs, "after the roll")!.Value;
+            Assert.Equal(named ? "state: bank (known: Catanatron gives nobody a short resource, even a single player owed it)" : "state: bank", kind);
+        }
+
+        [Theory]
+        [InlineData("catanatron", true)]
+        [InlineData("standard", false)]
+        public void AWinOutsideTheWinnersTurnIsNamedOnlyUnderCatanatronsRules(string preset, bool named)
+        {
+            // The referee ends the game in the setup, a seat that isn't on turn winning: Hexfarer's rules never would
+            List<JsonNode> game = Replay.Read(Fixture).TakeWhile(m => m["game_id"]!.GetValue<string>() == Replay.Read(Fixture).First()["game_id"]!.GetValue<string>()).ToList();
+            List<JsonNode> messages = game.TakeWhile(m => !At(m, "decide", 10)).ToList();
+            messages[0]["ruleset"] = new JsonObject { ["preset"] = preset };
+            JsonNode last = game.First(m => At(m, "decide", 10));
+            int current = Int(last["state"]!["current"]);
+            messages.Add(new JsonObject { ["type"] = "after", ["game_id"] = last["game_id"]!.DeepClone(), ["winner"] = (current + 1) % 4,
+                ["vp"] = new JsonArray(10, 10, 10, 10), ["truncated"] = false, ["state"] = last["state"]!.DeepClone() });
+            Replay.Report report = new Replay().Run(messages.Select(m => JsonNode.Parse(m.ToJsonString())!));
+            Assert.Equal(named ? "winner (known: Catanatron counts a win outside the winner's own turn)" : "winner", Assert.Single(report.Counts.Keys));
+        }
+
         [Fact]
         public void ALogCutShortReadsUpToTheCut()
         {
