@@ -44,8 +44,9 @@ public class OspRobotBrain extends SOCRobotBrain
     private String agentName = "?";
     // The true state the last move was chosen in, to wait for the server to take it
     private String actedIn;
-    // The second step of a two-step move, and the game state it waits for
+    // The second step of a two-step move, the game state its first step was sent in, and how many messages came since
     private List<Object> pending;
+    private int pendingFrom, pendingWaits;
     private long n;
     private int decisions, asked, fallbacks;
     private long thinkingMillis;
@@ -134,36 +135,38 @@ public class OspRobotBrain extends SOCRobotBrain
             finish(seat);
             return;
         }
+        // The server's thread changes the game while this one reads it: the state, the situation and the legal moves are
+        // read together, and read again with the next message if the game moved in between
         int state = truthGame.getGameState();
-
-        // The second step of a two-step move, once the server asks for it; until the server took the first step the
-        // situation is the one it was sent in (messages from before it still come in)
         String situation = state + "|" + Json.write(osp.state(-1), true);
-        if (pending != null && osp.acting() == seat)
+        int acting = osp.acting();
+        List<Object> legal = acting == seat ? osp.legal(seat) : null;
+        if (truthGame.getGameState() != state || ! situation.equals(truthGame.getGameState() + "|" + Json.write(osp.state(-1), true)))
+            return;
+
+        // The second step of a two-step move, once the server asks for it; until the server took the first step the game
+        // stays in the state the first step was sent in (messages from before it still come in)
+        if (pending != null)
         {
-            List<Object> move = pending;
-            if (secondStep(move, state))
+            if (acting == seat && secondStep(pending, state))
             {
                 pending = null;
                 return;
             }
-            if (situation.equals(actedIn))
+            if (state == pendingFrom && ++pendingWaits < 200)
                 return;
-            // The server went elsewhere (it refused the first step): choose anew
+            // The server went elsewhere (the move needed no second step, or it refused the first): choose anew
             pending = null;
         }
-        if (osp.acting() != seat)
-            return;
-        if (situation.equals(actedIn))
-            return;
-        List<Object> legal = osp.legal(seat);
-        if (legal.isEmpty())
+        if (acting != seat || situation.equals(actedIn) || legal.isEmpty())
             return;
         decisions++;
         @SuppressWarnings("unchecked")
         List<Object> move = (List<Object>) (legal.size() == 1 ? legal.get(0) : ask(seat, legal));
         actedIn = situation;
         n++;
+        pendingFrom = state;
+        pendingWaits = 0;
         firstStep(move, state);
     }
 
