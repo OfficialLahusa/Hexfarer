@@ -262,6 +262,8 @@
 	- 6. JSettlers-Bots in der Hexfarer-Sim nur über eine Emulation ihres Server-Protokolls (~1-2 Wochen, fragil); sonst gemischte Partien auf ihrem Server laufen lassen und per Relay verfolgen
 		- Gemischte Partien laufen über Stufe 5 auf ihrem Server; -Dosp.record schreibt Serverpartien live als Log (Replay, Relay, Live-Relay); Catanatrons AB:2 als Robot-Agent gegen 3 smarte Robots 21,5 % (erster Vergleich der beiden Bot-Familien)
 	- 7. Stärkere Gegner aus der JSettlers-Familie: StacSettlers (Fork von JSettlers 1.1.x der Universität Edinburgh) mit Stac-Agent und Dobres MCTS-Agenten mit Belief-Modellen (POMCP, ISMCTS; 53,65 % gegen Stac bei 40k It., 2-3 s pro Entscheidung) => stärkste veröffentlichte Gegner; braucht unseren Robot auf ihrem alten Server oder ihre Agenten als Open Seat Agent (~1 Woche)
+	- 8. SmartSettlers als Baseline (MCTS auf JSettlers, Szita et al. 2009): Code und Regeländerungen klären, dann als Robot oder Open Seat Agent
+	- 9. Ausführlichere Recherche nach weiteren starken Baselines (Paper, Code, Turniere, Bots anderer Plattformen) mit Stärke und Verfügbarkeit, bevor Leaderboard-Ergebnisse als Stand der Technik gelten
 - Interface für JSettlers Agents/Server
 - Tabletalking über LLMs
 	- Zusätzlich zu Value Functions von einem Basisbot
@@ -276,7 +278,7 @@
 	- Map Layout
 
 ## Related Work
-- Catan MCTS => Szita, Chaslot, Spronck: "Monte-Carlo Tree Search in Settlers of Catan" (ACG 2009) https://www.researchgate.net/publication/220716999_Monte-Carlo_Tree_Search_in_Settlers_of_Catan, PDF: https://dke.maastrichtuniversity.nl/pim.nijssen/pub/acg11.pdf
+- Catan MCTS (SmartSettlers, auf JSettlers) => Szita, Chaslot, Spronck: "Monte-Carlo Tree Search in Settlers of Catan" (ACG 2009, LNCS 6048) https://doi.org/10.1007/978-3-642-12993-3_3
 - Deep Catan => Cazenave et al.: "Deep Catan" https://www.lamsade.dauphine.fr/~cazenave/papers/DeepCatan.pdf
 - LLM-Agents auf Catanatron (AlphaBeta n=2 als stärkste Heuristik-Baseline) => "Agents of Change: Self-Evolving LLM Agents for Strategic Planning" https://arxiv.org/abs/2506.04651
 - Überblick über Catan-Bots (populärwissenschaftlich) => https://sciworthy.com/can-a-computer-learn-to-play-settlers-of-catan/
