@@ -57,6 +57,10 @@ class RebuildTests(unittest.TestCase):
             for field in ("prompt", "current", "on_turn", "free_roads", "robber", "buildings", "bank", "players"):
                 self.assertEqual(canonical(state[field]), canonical(ours[field]), f"{field} at turn {state['turn']}")
             self.assertEqual(state["turn"], ours["turn"])
+            # The board's own Longest Road holder too, which Catanatron's rules consult when roads are built: the referee's
+            # (Catanatron's own board can disagree with its players' flags after a settlement cuts a road)
+            holders = [record.COLORS[p["seat"]] for p in state["players"] if p["has_longest_road"]]
+            self.assertEqual(holders[0] if holders else None, rebuilt.state.board.road_color)
             prompts.add(state["prompt"])
             if state["prompt"] == "discard":
                 moves = Encoder(rebuilt).discard_options(state["current"])

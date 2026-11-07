@@ -165,6 +165,8 @@ class Encoder:
         return {
             "prompt": self.prompt(),
             "current": state.current_player_index,
+            # Whose turn it is (the current player may be another one, e.g. a player discarding after a 7)
+            "on_turn": state.current_turn_index,
             "turn": state.num_turns,
             # The free roads that can still be placed (Catanatron counts 2 when the card is played, even with 1 road left)
             "free_roads": min(state.free_roads_available, ps[f"P{state.current_player_index}_ROADS_AVAILABLE"]) if state.is_road_building else 0,
