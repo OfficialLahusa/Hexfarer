@@ -11,13 +11,15 @@ using System.Text.Json.Nodes;
 namespace OpenSeat
 {
     /// <summary>
-    /// Hexfarer's side of the Open Seat Protocol (see Bridges/PROTOCOL.md): the replay harness, Hexfarer's agents as an
-    /// Open Seat Agent, the boards of the Arena's map seeds, and a speed benchmark of the simulator.
+    /// Hexfarer's side of the Open Seat Protocol (see Bridges/PROTOCOL.md): the replay harness, the relay of an outside
+    /// referee's games into save files, Hexfarer's agents as an Open Seat Agent, the boards of the Arena's map seeds, and a
+    /// speed benchmark of the simulator.
     /// </summary>
     internal static class Program
     {
         public const string Usage = """
             Usage: OpenSeat replay LOG [LOG ...] [--max-games N] [--examples K]
+                   OpenSeat relay LOG [LOG ...] --save DIR [--max-games N]
                    OpenSeat agent [--net MODEL.onnx] [--iterations N | --seconds S] [--provider auto|cpu|dml|cuda] [--leaves-per-batch B]
                                   [--threads T] [--serial] [--fair]
                    OpenSeat boards --seed-base S --count N --out FILE
@@ -27,6 +29,11 @@ namespace OpenSeat
             Bridges/catanatron/record.py) through Hexfarer's rules with the recorded results, and compares the state and the
             legal moves at every move. Prints the differences by kind with up to K examples each (default 3). Exit code 0 if
             no game diverged, 1 otherwise.
+
+            relay: writes the games of referee logs as save files into DIR, for the client (Load game): each game played
+            through Hexfarer's rules with the recorded results. Where the rules part (a state Hexfarer holds differently, a
+            move it doesn't allow), the file ends and GAME-part2.yaml etc. go on from the referee's state; each file holds
+            where its part ended and the moves since it began. Prints where and why a part started from the referee's state.
 
             agent: plays one seat for a referee over the protocol on standard input and output, with open-hand MCTS and the
             value net (default: the deployed net, 5000 iterations per decision; budgets round up to whole batches of B leaves,
@@ -69,6 +76,32 @@ namespace OpenSeat
                         foreach (string log in logs) replay.Run(Replay.Read(log), int.Parse(Option("--max-games", int.MaxValue.ToString())));
                         Console.WriteLine(replay.Result);
                         return replay.Result.Diverged == 0 ? 0 : 1;
+                    }
+                case "relay":
+                    {
+                        List<string> logs = [];
+                        for (int i = 1; i < args.Length; i++)
+                        {
+                            if (args[i] is "--max-games" or "--save") i++;
+                            else logs.Add(args[i]);
+                        }
+                        string directory = Option("--save", "");
+                        if (directory == "" || logs.Count == 0)
+                        {
+                            Console.WriteLine(Usage);
+                            return 2;
+                        }
+                        Relay relay = new();
+                        int maxGames = int.Parse(Option("--max-games", int.MaxValue.ToString())), games = 0, files = 0;
+                        foreach (string log in logs)
+                            foreach (Relay.Part part in relay.Write(Replay.Read(log), directory, maxGames - games))
+                            {
+                                files++;
+                                if (part.Number == 1) games++;
+                            }
+                        foreach (string line in relay.Log) Console.WriteLine(line);
+                        Console.WriteLine($"{games} games as {files} save files in {directory}; {relay.Log.Count} parts started from the referee's state");
+                        return 0;
                     }
                 case "agent":
                     {
