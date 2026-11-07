@@ -102,6 +102,16 @@ class RecorderTests(unittest.TestCase):
                 held = sum(p["development_size"] for p in state["players"])
                 self.assertLessEqual(state["bank"]["development"] + held + sum(p["played"]["knight"] for p in state["players"]), 25)
 
+    def test_a_discard_gives_up_half_the_hand(self):
+        discards = 0
+        for message in self.messages:
+            if message["type"] == "decide" and message["state"]["prompt"] == "discard":
+                hand = message["state"]["players"][message["seat"]]["hand_size"]
+                for move in message["legal"]:
+                    self.assertEqual(hand // 2, sum(move[1].values()), move)
+                discards += 1
+        self.assertGreater(discards, 0)
+
     def test_results_have_the_protocols_shape(self):
         for message in self.messages:
             if message["type"] != "step":
