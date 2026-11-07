@@ -392,7 +392,10 @@ namespace Common.Osp
         public GameState BuildState(JsonNode state, JsonArray legal)
         {
             JsonArray players = state["players"]!.AsArray();
-            GameState game = new(Board, (uint)players.Count);
+            // A board of its own, emptied: the codec's board stays as the referee sent it
+            Board board = new(Board);
+            board.Clear();
+            GameState game = new(board, (uint)players.Count);
             int Number(JsonNode? n) => int.Parse(n!.ToJsonString());
 
             // Buildings, and the points they give

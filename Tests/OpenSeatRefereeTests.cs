@@ -26,9 +26,9 @@ namespace Tests
             $"dotnet \"{Path.Combine(AppContext.BaseDirectory, "OpenSeat.dll")}\" agent --net \"{TinyNet}\" --iterations 16 --leaves-per-batch 16 --provider cpu {options}".Trim();
 
         // The moves of random games, each with the state before and after it
-        private static IEnumerable<(GameState before, Action applied, GameState after)> RandomMoves(int games = 3, int maxMoves = 3000)
+        private static IEnumerable<(GameState before, Action applied, GameState after)> RandomMoves(int games = 3, int maxMoves = 3000, int firstSeed = 1)
         {
-            for (int seed = 1; seed <= games; seed++)
+            for (int seed = firstSeed; seed < firstSeed + games; seed++)
             {
                 TestUtil.Seed(seed);
                 GameState state = TestUtil.NewGame();
@@ -454,20 +454,57 @@ namespace Tests
         public void AGameRebuiltFromTheTrueStateWritesBackAsItAndListsTheSameMoves()
         {
             HashSet<string> prompts = [];
-            foreach ((GameState state, _, _) in RandomMoves(games: 3).Where((_, i) => i % 3 == 0))
+            for (int seed = 1; seed <= 3; seed++)
             {
-                OspCodec codec = new(state.Board);
-                sbyte acting = TestUtil.ActingPlayer(state);
-                JsonObject truth = codec.State(state);
-                List<string> legal = LegalActionProvider.GetActionsForState(state, acting).Select(a => OspCodec.Canonical(codec.Move(a))).Order().ToList();
-                GameState rebuilt = codec.BuildState(truth, new JsonArray(legal.Select(m => JsonNode.Parse(m)).ToArray()));
-                string at = $"{truth["prompt"]} with seat {acting}";
-                Assert.Equal(OspCodec.Canonical(truth), OspCodec.Canonical(codec.State(rebuilt)));
-                Assert.Equal(legal, LegalActionProvider.GetActionsForState(rebuilt, acting).Select(a => OspCodec.Canonical(codec.Move(a))).Order().ToList());
-                Assert.True(TestUtil.ActingPlayer(rebuilt) == acting, at);
-                prompts.Add(truth["prompt"]!.GetValue<string>());
+                List<GameState> states = RandomMoves(games: 1, firstSeed: seed).Select(m => m.before).Where((_, i) => i % 3 == 0).ToList();
+                // One codec for the game, on a board built from the referee's board message as an agent has it; the positions
+                // are rebuilt from the last to the first, so nothing a rebuild leaves on that board can pass for an earlier one's
+                OspCodec codec = new(OspCodec.BuildBoard(new OspCodec(states[0].Board).BoardJson()));
+                string board = OspCodec.Canonical(codec.BoardJson());
+                foreach (GameState state in Enumerable.Reverse(states))
+                {
+                    sbyte acting = TestUtil.ActingPlayer(state);
+                    JsonObject truth = codec.State(state);
+                    List<string> legal = LegalActionProvider.GetActionsForState(state, acting).Select(a => OspCodec.Canonical(codec.Move(a))).Order().ToList();
+                    GameState rebuilt = codec.BuildState(truth, new JsonArray(legal.Select(m => JsonNode.Parse(m)).ToArray()));
+                    string at = $"{truth["prompt"]} with seat {acting}";
+                    Assert.NotSame(codec.Board, rebuilt.Board);
+                    Assert.Equal(OspCodec.Canonical(truth), OspCodec.Canonical(codec.State(rebuilt)));
+                    Assert.Equal(legal, LegalActionProvider.GetActionsForState(rebuilt, acting).Select(a => OspCodec.Canonical(codec.Move(a))).Order().ToList());
+                    Assert.True(TestUtil.ActingPlayer(rebuilt) == acting, at);
+                    prompts.Add(truth["prompt"]!.GetValue<string>());
+                }
+                // The codec's board is as the referee sent it
+                Assert.Equal(board, OspCodec.Canonical(codec.BoardJson()));
             }
             Assert.Superset(new HashSet<string> { "setup_settlement", "setup_road", "roll", "main", "discard", "move_robber" }, prompts);
+        }
+
+        [Fact]
+        public void ARebuiltGameKnowsWhichCardsWereBoughtThisTurn()
+        {
+            // The player on turn holds a knight from before and a monopoly bought this turn: the legal moves list the knight only
+            GameState state = RandomMoves(games: 1, firstSeed: 4).Select(m => m.before).First(s =>
+                new OspCodec(s.Board).State(s)["prompt"]!.GetValue<string>() == "main" && !s.Turn.HasPlayedDevelopmentCard
+                && s.Players[s.Turn.PlayerIndex].DevelopmentCards.Count() == 0
+                && s.DevelopmentBank.Get(DevelopmentCardType.Knight) > 0 && s.DevelopmentBank.Get(DevelopmentCardType.Monopoly) > 0);
+            PlayerState me = state.Players[state.Turn.PlayerIndex];
+            foreach (DevelopmentCardType type in new[] { DevelopmentCardType.Knight, DevelopmentCardType.Monopoly })
+            {
+                state.DevelopmentBank.Remove(type, 1);
+                me.DevelopmentCards.Add(type, 1);
+            }
+            me.NewDevelopmentCards.Add(DevelopmentCardType.Monopoly, 1);
+            OspCodec codec = new(OspCodec.BuildBoard(new OspCodec(state.Board).BoardJson()));
+            sbyte acting = (sbyte)state.Turn.PlayerIndex;
+            List<string> legal = LegalActionProvider.GetActionsForState(state, acting).Select(a => OspCodec.Canonical(codec.Move(a))).Order().ToList();
+            Assert.Contains(legal, m => m.Contains("play_knight"));
+            Assert.DoesNotContain(legal, m => m.Contains("play_monopoly"));
+
+            GameState rebuilt = codec.BuildState(codec.State(state), new JsonArray(legal.Select(m => JsonNode.Parse(m)).ToArray()));
+            Assert.Equal(1u, rebuilt.Players[acting].NewDevelopmentCards.Get(DevelopmentCardType.Monopoly));
+            Assert.Equal(0u, rebuilt.Players[acting].NewDevelopmentCards.Get(DevelopmentCardType.Knight));
+            Assert.Equal(legal, LegalActionProvider.GetActionsForState(rebuilt, acting).Select(a => OspCodec.Canonical(codec.Move(a))).Order().ToList());
         }
 
         [Fact]
