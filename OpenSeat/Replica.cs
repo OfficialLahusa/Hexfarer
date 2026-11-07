@@ -16,7 +16,7 @@ namespace OpenSeat
     /// </summary>
     internal sealed class Replica
     {
-        public GameState State { get; }
+        public GameState State { get; private set; }
         public OspCodec Codec { get; }
 
         /// <summary>
@@ -41,6 +41,12 @@ namespace OpenSeat
             _bestBankRateOnly = Option("bank_rates", "all", "best_only") == "best_only";
             _forcedRoadBuilding = Option("road_building", "optional", "forced") == "forced";
         }
+
+        /// <summary>
+        /// Takes the game from the referee's full state where following its moves can't (no steps came, or a rule
+        /// difference changed the board): the copy becomes that state, with what the legal moves tell (OspCodec.BuildState)
+        /// </summary>
+        public void Rebuild(JsonNode state, JsonArray legal) => State = Codec.BuildState(state, legal);
 
         /// <summary>
         /// Whether the board as Hexfarer holds it writes back as the referee sent it
@@ -148,7 +154,8 @@ namespace OpenSeat
         public (string kind, string detail)? FirstDifference(JsonNode theirs, string at, bool goesOn = true)
         {
             JsonObject ours = Codec.State(State);
-            foreach (string field in new[] { "prompt", "current", "free_roads", "robber" })
+            // Engines name a finished game's prompt differently: only while the game goes on does it count
+            foreach (string field in (goesOn ? ["prompt"] : Array.Empty<string>()).Concat(["current", "free_roads", "robber"]))
                 if (!Same(theirs[field], ours[field])) return ($"state: {field}", $"{at}: referee {theirs[field]?.ToJsonString()}, Hexfarer {ours[field]?.ToJsonString()}");
             foreach (string kind in new[] { "settlements", "cities", "roads" })
             {

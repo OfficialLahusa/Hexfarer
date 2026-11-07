@@ -305,6 +305,8 @@ namespace Common.Osp
             {
                 ["prompt"] = Prompt(state),
                 ["current"] = current,
+                // Whose turn it is (the current player may be another one, e.g. a player discarding after a 7)
+                ["on_turn"] = state.Turn.PlayerIndex,
                 ["free_roads"] = FreeRoads(state),
                 ["robber"] = Hex(state.Board.GetRobberTileIndex()!.Value),
                 ["buildings"] = new JsonObject { ["settlements"] = settlements, ["cities"] = cities, ["roads"] = roads },
@@ -365,10 +367,137 @@ namespace Common.Osp
             return ruleset;
         }
 
+        // The development cards of a classic game
+        private static readonly IReadOnlyDictionary<DevelopmentCardType, uint> DevelopmentDeck = new Dictionary<DevelopmentCardType, uint>
+        {
+            [DevelopmentCardType.Knight] = 14, [DevelopmentCardType.VictoryPoint] = 5, [DevelopmentCardType.RoadBuilding] = 2,
+            [DevelopmentCardType.YearOfPlenty] = 2, [DevelopmentCardType.Monopoly] = 2,
+        };
+
+        // The move that plays each card that can be played
+        private static readonly IReadOnlyDictionary<DevelopmentCardType, string> PlayMoves = new Dictionary<DevelopmentCardType, string>
+        {
+            [DevelopmentCardType.Knight] = "play_knight", [DevelopmentCardType.RoadBuilding] = "play_road_building",
+            [DevelopmentCardType.YearOfPlenty] = "play_year_of_plenty", [DevelopmentCardType.Monopoly] = "play_monopoly",
+        };
+
         /// <summary>
-        /// A game in the protocol's state (stub)
+        /// A game in the protocol's full state (every hand), on this codec's board: the buildings, hands, development cards,
+        /// banks, points, Longest Road and Largest Army, whose turn it is and what has to be done. What the state doesn't
+        /// say comes from the legal moves the referee listed for the player on turn: which of its development cards it may
+        /// play now (the others count as bought this turn, or as none playable after one was played). The development bank
+        /// holds the cards nobody holds or played (Hexfarer's state counts only the knights played), as many as the state
+        /// says. A finished game, an open offer between players and the last roll aren't rebuilt.
         /// </summary>
-        public GameState BuildState(JsonNode state, JsonArray legal) => throw new NotImplementedException();
+        public GameState BuildState(JsonNode state, JsonArray legal)
+        {
+            JsonArray players = state["players"]!.AsArray();
+            GameState game = new(Board, (uint)players.Count);
+            int Number(JsonNode? n) => int.Parse(n!.ToJsonString());
+
+            // Buildings, and the points they give
+            foreach (JsonNode? entry in state["buildings"]!["settlements"]!.AsArray())
+            {
+                game.Board.SetBuilding(IntersectionIndex(entry![1]!), Common.Intersection.BuildingType.Settlement, (sbyte)Number(entry[0]));
+                game.Players[Number(entry[0])].VictoryPoints.SettlementPoints++;
+            }
+            foreach (JsonNode? entry in state["buildings"]!["cities"]!.AsArray())
+            {
+                game.Board.SetBuilding(IntersectionIndex(entry![1]!), Common.Intersection.BuildingType.City, (sbyte)Number(entry[0]));
+                game.Players[Number(entry[0])].VictoryPoints.CityPoints += 2;
+            }
+            foreach (JsonNode? entry in state["buildings"]!["roads"]!.AsArray())
+                game.Board.SetRoad(EdgeIndex(entry![1]!), Edge.BuildingType.Road, (sbyte)Number(entry[0]));
+            game.Board.Robber = Board.Map.Values[TileIndex(state["robber"]!)];
+            SettlementAction.FullyRecalculatePortPrivileges(game);
+
+            // Whose turn it is and what has to be done
+            string prompt = state["prompt"]!.GetValue<string>();
+            int current = Number(state["current"]);
+            int onTurn = state["on_turn"] is JsonNode turn ? Number(turn) : current;
+            JsonNode me = players[onTurn]!;
+            int settlementsOnTurn = state["buildings"]!["settlements"]!.AsArray().Count(e => Number(e![0]) == onTurn)
+                + state["buildings"]!["cities"]!.AsArray().Count(e => Number(e![0]) == onTurn);
+            HashSet<string> listed = legal.Select(m => m![0]!.GetValue<string>()).ToHashSet();
+            TurnState t = game.Turn;
+            t.PlayerIndex = onTurn;
+            t.TypeOfRound = prompt switch
+            {
+                "setup_settlement" => settlementsOnTurn == 0 ? TurnState.RoundType.FirstInitial : TurnState.RoundType.SecondInitial,
+                "setup_road" => settlementsOnTurn == 1 ? TurnState.RoundType.FirstInitial : TurnState.RoundType.SecondInitial,
+                _ => TurnState.RoundType.Normal,
+            };
+            // The rounds the setup counts; in play only the first roll of the game matters (the value net's features)
+            bool untouched = players.All(p => Number(p!["pieces_left"]!["settlements"]) == BuildingStock.MAX_SETTLEMENTS - 2
+                && Number(p!["pieces_left"]!["roads"]) == BuildingStock.MAX_ROADS - 2 && Number(p!["hand_size"]) + Number(p!["development_size"]) <= 3);
+            t.RoundCounter = t.TypeOfRound switch
+            {
+                TurnState.RoundType.FirstInitial => 0,
+                TurnState.RoundType.SecondInitial => 1,
+                _ => prompt == "roll" && onTurn == 0 && untouched ? 2 : 3,
+            };
+            // Road Building may come before the roll, its roads then before it too (the legal moves tell); after a robber
+            // moved by a knight the state can't tell, it counts as rolled
+            t.MustRoll = prompt == "roll" || prompt == "road_building" && listed.Contains("roll");
+            t.MustMoveRobber = prompt == "move_robber";
+            if (prompt == "discard") t.AwaitedPlayerDiscards[current] = true;
+
+            // Hands, development cards, played knights, pieces, Longest Road and Largest Army
+            uint[] heldCards = new uint[Enum.GetValues<DevelopmentCardType>().Length];
+            for (int seat = 0; seat < players.Count; seat++)
+            {
+                JsonNode p = players[seat]!;
+                PlayerState player = game.Players[seat];
+                player.ResourceCards = Cards(p["hand"]!);
+                player.DevelopmentCards = new CardSet<DevelopmentCardType>();
+                foreach ((DevelopmentCardType type, string name) in CardNames)
+                {
+                    uint count = (uint)Number(p["development"]![name]);
+                    player.DevelopmentCards.Add(type, count);
+                    heldCards[(int)type] += count;
+                }
+                player.PlayedKnights = (uint)Number(p["played"]!["knight"]);
+                player.LongestRoadLength = (uint)Number(p["longest_road"]);
+                player.VictoryPoints.LongestRoadPoints = (byte)(p["has_longest_road"]!.GetValue<bool>() ? 2 : 0);
+                player.VictoryPoints.LargestArmyPoints = (byte)(p["has_largest_army"]!.GetValue<bool>() ? 2 : 0);
+                player.VictoryPoints.DevelopmentCardPoints = (byte)player.DevelopmentCards.Get(DevelopmentCardType.VictoryPoint);
+                uint free = seat == onTurn && prompt == "road_building" ? (uint)Number(state["free_roads"]) : 0;
+                player.BuildingStock.FreeRoads = free;
+                player.BuildingStock.RemainingRoads = (uint)Number(p["pieces_left"]!["roads"]) - free;
+                player.BuildingStock.RemainingSettlements = (uint)Number(p["pieces_left"]!["settlements"]);
+                player.BuildingStock.RemainingCities = (uint)Number(p["pieces_left"]!["cities"]);
+            }
+
+            // The development cards the player on turn may play: a listed card is playable; the others were bought this
+            // turn, or none is playable because one was played already (Road Building's roads are placed after playing it)
+            PlayerState mine = game.Players[onTurn];
+            bool anyListed = PlayMoves.Values.Any(listed.Contains);
+            bool heldPlayable = PlayMoves.Keys.Any(type => mine.DevelopmentCards.Get(type) > 0);
+            t.HasPlayedDevelopmentCard = prompt == "road_building" || prompt is "roll" or "main" && heldPlayable && !anyListed;
+            if (prompt is "roll" or "main" && anyListed)
+                foreach ((DevelopmentCardType type, string move) in PlayMoves)
+                    if (!listed.Contains(move) && mine.DevelopmentCards.Get(type) > 0)
+                        mine.NewDevelopmentCards.Add(type, mine.DevelopmentCards.Get(type));
+
+            // The banks: the resources the state names; the development cards nobody holds or played, cut to its count
+            game.ResourceBank = new CardSet<ResourceCardType>();
+            foreach ((ResourceCardType type, string name) in ResourceNames)
+                game.ResourceBank.Add(type, (uint)Number(state["bank"]![name]));
+            uint knightsPlayed = (uint)game.Players.Sum(p => (long)p.PlayedKnights);
+            List<DevelopmentCardType> deck = [];
+            foreach ((DevelopmentCardType type, uint total) in DevelopmentDeck)
+            {
+                uint used = heldCards[(int)type] + (type == DevelopmentCardType.Knight ? knightsPlayed : 0);
+                for (uint i = used; i < total; i++) deck.Add(type);
+            }
+            int size = Number(state["bank"]!["development"]);
+            // Unknown plays (only knights are counted) leave the deck too large: the non-knight cards go first
+            deck = deck.OrderBy(type => type == DevelopmentCardType.Knight ? 1 : 0).Skip(Math.Max(0, deck.Count - size)).ToList();
+            while (deck.Count < size) deck.Add(DevelopmentCardType.Knight);
+            game.DevelopmentBank = new CardSet<DevelopmentCardType>();
+            foreach (DevelopmentCardType type in deck) game.DevelopmentBank.Add(type, 1);
+            return game;
+        }
 
         /// <summary>
         /// The open offer between players: who offered what to whom, the answers so far (accept, decline or counter) and

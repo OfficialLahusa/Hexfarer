@@ -41,10 +41,12 @@ namespace Agents.OpenSeat
         /// </summary>
         public bool HasExited => _disposed ? _exited : _process.HasExited;
 
+        private static int _running;
+
         /// <summary>
-        /// Agents started and not yet closed (stub)
+        /// Agents started and not yet closed (for tests)
         /// </summary>
-        public static int Running => -1;
+        public static int Running => Volatile.Read(ref _running);
 
         /// <summary>
         /// Starts the command (its words split as SplitCommandLine does); answers have to come within answerTimeout,
@@ -88,6 +90,7 @@ namespace Agents.OpenSeat
             }
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
+            Interlocked.Increment(ref _running);
             return agent;
         }
 
@@ -179,6 +182,7 @@ namespace Agents.OpenSeat
         {
             if (_disposed) return;
             _disposed = true;
+            Interlocked.Decrement(ref _running);
             try
             {
                 // The agent ends when its input does

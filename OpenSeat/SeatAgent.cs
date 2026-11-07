@@ -15,7 +15,9 @@ namespace OpenSeat
     /// the game (Replica) that follows every step; before each decision it compares the copy with the referee's state and
     /// takes over what the referee's known rule differences change (Replica.Patch), since the referee decides the game.
     /// The search plans by Hexfarer's rules; a move the referee doesn't allow is replaced by the most visited root move it
-    /// allows. It needs the full state ("truth"): every hand is the true one, as for the open-hand MCTS in Hexfarer. The
+    /// allows. Where the copy can't follow (no steps came, as from JSettlers' robot, or a rule difference changed the board),
+    /// the open-hand agent rebuilds it from the decision's state (Replica.Rebuild); the fair agent can't without losing
+    /// what its seat knows, and plays the referee's first legal move from then on. It needs the full state ("truth"): every hand is the true one, as for the open-hand MCTS in Hexfarer. The
     /// fair agent (fair: true) gets the same messages but plays like Hexfarer's fair agents in the Arena: Information Set
     /// MCTS over worlds drawn from what its seat knows (BeliefTracker), which takes in every move as the seat sees it.
     /// </summary>
@@ -32,8 +34,10 @@ namespace OpenSeat
         private sbyte _seat;
         // Per game: decisions, those searched, patched states, replaced moves, whether the copy was lost (it then plays the
         // referee's first legal move)
-        private int _patches, _fallbacks, _decisions, _searched;
+        private int _patches, _fallbacks, _decisions, _searched, _rebuilds;
         private bool _lost;
+        // The open-hand agent's copy missed a move: rebuilt from the next decision's state
+        private bool _stale;
         // Per game, the search's work: searches that ran (a decision with an immediate win may skip it), leaf evaluations
         // (whole batches) and the distinct positions among them, for comparisons with other engines at equal work
         private long _searches, _iterations, _distinctLeaves;
@@ -80,7 +84,7 @@ namespace OpenSeat
                     return Decide(message);
                 case "after":
                     log.WriteLine(new JsonObject { ["type"] = "stats", ["game_id"] = _gameId, ["seat"] = _seat, ["decisions"] = _decisions, ["searched"] = _searched,
-                        ["patches"] = _patches, ["fallbacks"] = _fallbacks, ["lost"] = _lost,
+                        ["patches"] = _patches, ["fallbacks"] = _fallbacks, ["rebuilds"] = _rebuilds, ["lost"] = _lost,
                         ["searches"] = _searches, ["iterations"] = _iterations, ["distinct_leaves"] = _distinctLeaves, ["search_seconds"] = Math.Round(_searchSeconds, 3),
                         ["fair"] = fair, ["resyncs"] = _resyncs }.ToJsonString());
                     log.Flush();
@@ -95,10 +99,11 @@ namespace OpenSeat
             _gameId = before["game_id"]!.GetValue<string>();
             _seat = (sbyte)before["seat"]!.GetValue<int>();
             _replica = new Replica(before);
-            _patches = _fallbacks = _decisions = _searched = 0;
+            _patches = _fallbacks = _decisions = _searched = _rebuilds = 0;
             _searches = _iterations = _distinctLeaves = 0;
             _searchSeconds = 0;
             _resyncs = 0;
+            _stale = false;
             _lost = !_replica.BoardMatches(before);
             if (_lost) log.WriteLine($"{_gameId}: the board doesn't write back as sent");
             _agent = new MCTSAgent(_seat, _replica.State, timeLimitSeconds: seconds, valueNet: net, iterationLimit: iterations, leavesPerBatch: leavesPerBatch,
@@ -110,7 +115,7 @@ namespace OpenSeat
 
         private void Step(JsonNode step)
         {
-            if (_replica == null || _lost) return;
+            if (_replica == null || _lost || _stale) return;
             // With the full state the step carries the referee's state before the move: the copy takes over where the
             // rules differ, so it can follow moves that depend on it (a discard of cards Hexfarer's bank wouldn't have
             // given, any move after Hexfarer's rules ended the game)
@@ -120,8 +125,10 @@ namespace OpenSeat
                 GameState untouched = new(_replica.State);
                 if (!_replica.Patch(before))
                 {
-                    _lost = true;
-                    log.WriteLine($"{_gameId}: lost the game: can't take over {differs}: {why}");
+                    // The open-hand agent waits for the next decision's state to rebuild from
+                    if (fair) _lost = true;
+                    else _stale = true;
+                    if (fair) log.WriteLine($"{_gameId}: lost the game: can't take over {differs}: {why}");
                     return;
                 }
                 TookOver(untouched);
@@ -134,9 +141,14 @@ namespace OpenSeat
             }
             if (_replica.Follow(step) is (string kind, string detail))
             {
-                // The copy can't follow (a rule difference that changes the board): it's no longer the referee's game
-                _lost = true;
-                log.WriteLine($"{_gameId}: lost the game: {kind}: {detail}");
+                // The copy can't follow (a rule difference that changes the board): it's no longer the referee's game; the
+                // open-hand agent rebuilds it at its next decision
+                if (fair)
+                {
+                    _lost = true;
+                    log.WriteLine($"{_gameId}: lost the game: {kind}: {detail}");
+                }
+                else _stale = true;
                 return;
             }
             Player.HandleAction(_replica.Applied!);
@@ -172,17 +184,28 @@ namespace OpenSeat
             HashSet<string> allowed = legal.Select(OspCodec.Canonical).ToHashSet();
             JsonNode Answer(JsonNode move) => new JsonObject { ["type"] = "decide", ["game_id"] = decide["game_id"]!.DeepClone(), ["n"] = decide["n"]!.DeepClone(), ["action"] = move.DeepClone() };
 
-            if (!_lost && _replica!.FirstDifference(decide["state"]!, $"move {decide["n"]}") is (string kind, string detail))
+            if (!_lost && (_stale || _replica!.FirstDifference(decide["state"]!, $"move {decide["n"]}") is not null))
             {
-                // The referee decides: take over its state where the known differences changed it
-                _patches++;
+                // The referee decides: take over its state where the known differences changed it, or rebuild from it
+                (string kind, string detail)? difference = _replica!.FirstDifference(decide["state"]!, $"move {decide["n"]}");
                 GameState untouched = new(_replica.State);
-                if (!_replica.Patch(decide["state"]!))
+                if (difference != null) _patches++;
+                if (_stale || difference != null && !_replica.Patch(decide["state"]!))
                 {
-                    _lost = true;
-                    log.WriteLine($"{_gameId}: lost the game: can't take over {kind}: {detail}");
+                    if (fair)
+                    {
+                        _lost = true;
+                        log.WriteLine($"{_gameId}: lost the game: can't take over {difference?.kind}: {difference?.detail}");
+                    }
+                    else
+                    {
+                        _replica.Rebuild(decide["state"]!, legal);
+                        _rebuilds++;
+                        _stale = false;
+                        _agent!.ResetToState(_replica.State);
+                    }
                 }
-                else TookOver(untouched);
+                else if (difference != null) TookOver(untouched);
             }
             if (_lost || _replica!.Acting() != _seat) return Answer(legal[0]!);
 

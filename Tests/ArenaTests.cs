@@ -619,6 +619,35 @@ namespace Tests
             Assert.Contains("all games played: 4 games", text);
         }
 
+        [Theory]
+        [InlineData("truth")]
+        [InlineData("world")]
+        public void CatanatronsBotsPlayUnderHexfarersReferee(string needs)
+        {
+            // Catanatron's adapter with its own environment (Bridges/catanatron/.venv); without it there is nothing to test
+            string bridge = Path.Combine(TestUtil.SourceFixtureDirectory(), "..", "..", "Bridges", "catanatron");
+            string python = Path.Combine(bridge, ".venv", OperatingSystem.IsWindows() ? "Scripts/python.exe" : "bin/python");
+            if (!File.Exists(python)) return;
+            var settings = new DuelSettings
+            {
+                Challenger = AgentSpec.Parse($"C={PlainModelPath}=b8"),
+                Baseline = AgentSpec.Parse($"W=command:\"{python}\" \"{Path.Combine(bridge, "open_seat_agent.py")}\" --bot W --needs {needs}"),
+                Iterations = 16,
+                MaxGames = 4,
+                SeedBase = 77,
+                Provider = InferenceProvider.Cpu,
+                FreeTrade = false,
+            };
+            var log = new StringWriter();
+            GroupStatistics result = new TableDuel(settings, log).Run();
+            string text = log.ToString();
+            Assert.Contains($"Open Seat Agent W: catanatron-W, needs {needs}", text);
+            Assert.DoesNotContain("failed", text);
+            Assert.Contains("all games played: 4 games", text);
+            Assert.Equal(1, result.Groups);
+            Assert.Equal(0, OpenSeatAgentProcess.Running);
+        }
+
         [Fact]
         public void AMirrorDuelSeatsOpenSeatAgentProcesses()
         {
