@@ -184,6 +184,9 @@ public class OspRobotBrain extends SOCRobotBrain
             if (acting == seat && secondStep(pending, state))
             {
                 pending = null;
+                // Until the server took the second step the game stays in this situation (it waits for the piece, say): no
+                // new move in it, which the server would take as a new first step
+                actedIn = situation;
                 return;
             }
             if (state == pendingFrom && ++pendingWaits < 200)

@@ -7,6 +7,7 @@ Needs a JDK and JSettlers' full jar in JSETTLERS_JAR. Run: python -m unittest te
 
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -52,7 +53,7 @@ class RobotTests(unittest.TestCase):
     def setUpClass(cls):
         jsettlers.build()
         cls.logs = tempfile.mkdtemp()
-        agent = f'"{sys.executable}" "{os.path.join(HERE, "first_move_agent.py")}"'
+        agent = f'"{sys.executable}" "{os.path.join(HERE, "first_move_agent.py")}" --builds'
         cls.output = play(2, agent, cls.logs)
         cls.stats = [json.loads(line[line.index("{"):]) for line in cls.output.splitlines() if '"osp-robot"' in line]
 
@@ -66,6 +67,14 @@ class RobotTests(unittest.TestCase):
         # JSettlers ends a robot's turn when it stops answering, e.g. after a bought piece it doesn't place (its own robots
         # sometimes get stuck too, so only ours count)
         self.assertNotIn("For robot extrabot", self.output)
+
+    def test_no_move_starts_while_the_server_waits_for_a_piece(self):
+        # In states 30 to 32 JSettlers waits for the piece the robot asked to build; a new move then (a second build request,
+        # say) leaves the server waiting for a piece the robot can't place, until it ends the robot's turn
+        started = [line for line in self.output.splitlines() if re.match(r"\[osp extrabot .*\] state 3[0-2]: ", line)]
+        self.assertEqual([], started)
+        # The debug lines are there to check
+        self.assertTrue(any(re.match(r"\[osp extrabot .*\] state 3[0-2], pending ", line) for line in self.output.splitlines()), self.output[-3000:])
 
     def test_jsettlers_pinger_wakes_the_brain(self):
         # Once a second JSettlers' pinger sends the brain a message, so it looks at the game again even when no game
