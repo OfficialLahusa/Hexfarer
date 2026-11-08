@@ -11,6 +11,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 SOURCES = os.path.join(HERE, "src")
 CLASSES = os.path.join(HERE, "build")
+# The start of the line the server writes when its stop rule ends a run (FailureLimit.java, -Dosp.max_failed_games)
+STOPPED = "osp: stopped:"
 
 
 def jar():

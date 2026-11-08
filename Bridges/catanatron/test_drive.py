@@ -148,7 +148,7 @@ def read_lines(path):
 
 
 class DriveTests(unittest.TestCase):
-    def drive(self, needs="truth", mode="", maps="0:1", decide_ms=None):
+    def drive(self, needs="truth", mode="", maps="0:1", decide_ms=None, max_failed=None):
         """One map (4 rotations) with the stand-in agent in the lineup's first entry: what it got, the results, the log"""
         directory = self.enterContext(tempfile.TemporaryDirectory())
         boards = os.path.join(directory, "boards.jsonl")
@@ -159,6 +159,8 @@ class DriveTests(unittest.TestCase):
         arguments = ["--boards", boards, "--lineup", "open-seat-agent,R,W,R", "--open-seat-agent", fake_agent(seen, needs, mode), "--maps", maps, "--out", out, "--log", log]
         if decide_ms:
             arguments += ["--decide-ms", str(decide_ms)]
+        if max_failed is not None:
+            arguments += ["--max-failed", str(max_failed)]
         drive.main(arguments)
         return read_lines(seen), read_lines(out), read_lines(log)
 
@@ -218,7 +220,8 @@ class DriveTests(unittest.TestCase):
 
     def test_a_failure_ends_the_game_is_recorded_and_the_run_goes_on(self):
         for mode, code, by, decide_ms in (("illegal", "illegal", "referee", None), ("slow", "timeout", "referee", 500), ("refuse", "unsupported", "agent", None)):
-            messages, results, logged = self.drive(mode=mode, decide_ms=decide_ms)
+            # Four failed games allowed: the run plays the whole map
+            messages, results, logged = self.drive(mode=mode, decide_ms=decide_ms, max_failed=4)
             # Every game of the map was played and cut short at the failure, which the result record names
             self.assertEqual(4, len(results), mode)
             for result in results:
@@ -229,6 +232,23 @@ class DriveTests(unittest.TestCase):
             # The referee told the agent, except for the agent's own failure
             told = [m for m in messages if m["type"] == "failure"]
             self.assertEqual(0 if by == "agent" else 4, len(told), mode)
+
+    def test_a_run_stops_once_more_games_failed_than_allowed(self):
+        # Every game fails (turned down); with two failed games allowed the run stops after the third, which it wrote, and
+        # says why; by default it allows three, or one in a hundred of its games
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        boards = os.path.join(directory, "boards.jsonl")
+        with open(boards, "w", encoding="utf-8") as file:
+            for seed in (5, 6):
+                file.write(json.dumps({"seed": 900 + seed, "board": random_board(seed)[0]}) + "\n")
+        seen, out = os.path.join(directory, "seen.jsonl"), os.path.join(directory, "results.jsonl")
+        with self.assertRaises(SystemExit) as stopped:
+            drive.main(["--boards", boards, "--lineup", "open-seat-agent,R,W,R", "--open-seat-agent", fake_agent(seen, "truth", "refuse"),
+                        "--maps", "0:2", "--out", out, "--max-failed", "2"])
+        self.assertIn("3 of 3 games failed", str(stopped.exception))
+        self.assertIn("at most 2", str(stopped.exception))
+        self.assertEqual(3, len(read_lines(out)))
+        self.assertEqual((3, 3, 4), (drive.default_max_failed(8), drive.default_max_failed(300), drive.default_max_failed(400)))
 
     def test_a_match_with_a_stand_in_agent(self):
         with tempfile.TemporaryDirectory() as directory:

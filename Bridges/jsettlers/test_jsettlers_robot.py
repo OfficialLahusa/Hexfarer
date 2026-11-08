@@ -26,9 +26,10 @@ def free_port():
         return s.getsockname()[1]
 
 
-def play(games, agent_command, logs, record=None, turn_seconds=60, trading=False):
+def play(games, agent_command, logs, record=None, turn_seconds=60, trading=False, jvm=None):
     """Robot-only games with one Open Seat Agent robot and three of JSettlers' (the server's referee logs into the
-    directory record, if given), without trades between players unless trading; the server's standard error"""
+    directory record, if given), without trades between players unless trading, with further system properties (jvm);
+    the server's standard error"""
     properties = {
         "jsettlers.startrobots": "4",
         "jsettlers.bots.start3p": "1,osp.jsettlers.OSPRobotClient",
@@ -46,6 +47,8 @@ def play(games, agent_command, logs, record=None, turn_seconds=60, trading=False
     arguments = ["java", f"-Dosp.agent={agent_command}", f"-Dosp.log={logs}", "-Dosp.debug=true", "-cp", jsettlers.classpath(), "osp.jsettlers.OSPServer"]
     if record:
         arguments.insert(3, f"-Dosp.record={record}")
+    for name, value in (jvm or {}).items():
+        arguments.insert(3, f"-D{name}={value}")
     properties["jsettlers.port"] = str(free_port())
     arguments += [f"-D{name}={value}" for name, value in properties.items()]
     result = subprocess.run(arguments, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=int(os.environ.get("JSETTLERS_ROBOT_TIMEOUT", "900")))
@@ -175,6 +178,17 @@ class FailureTests(unittest.TestCase):
         failures, told = self.failed("--refuse", "--full")
         self.assertEqual([("unsupported", "agent")], failures)
         self.assertEqual([], told)
+
+    def test_a_run_stops_once_more_games_failed_than_allowed(self):
+        # Every game fails (turned down); one failed game is allowed, so the server stops at the second and says why,
+        # without starting the third
+        output = play(3, agent_command("--refuse"), tempfile.mkdtemp(), jvm={"osp.max_failed_games": "1"})
+        lines, seats = results(output)
+        self.assertEqual(2, len(lines), output[-3000:])
+        self.assertTrue(all(seat["failures"] for seat in seats), seats)
+        stops = [line for line in output.splitlines() if line.startswith(jsettlers.STOPPED)]
+        self.assertEqual(1, len(stops), output[-3000:])
+        self.assertIn("2 games", stops[0])
 
 
 @unittest.skipUnless(jsettlers.available(), "needs a JDK and JSettlers' jar in JSETTLERS_JAR")

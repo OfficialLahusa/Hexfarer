@@ -786,6 +786,8 @@ final class MoveLog
         System.err.println(Json.write(Json.object("type", "osp-result", "game_id", gameId, "players", players, "winner", winner, "vp", vp,
             "rounds", (long) game.getRoundCount(), "gaps", (long) gaps, "result", result)));
         close();
+        // A game whose Open Seat seat failed counts toward the run's stop rule
+        FailureLimit.ended(result);
     }
 
     // The CPU time of each robot brain's thread in this game so far, by robot name (JSettlers' brains and ours name their

@@ -27,11 +27,12 @@ def agent_command(*flags):
     return f'"{sys.executable}" "{os.path.abspath(TEST_AGENT)}" ' + " ".join(flags)
 
 
-def play(games, agent, logs, name="OSPTest", opponents=STAC, fully_observable=False):
-    """Headless games with one Open Seat Agent robot and three of StacSettlers' agents; the simulation's output"""
+def play(games, agent, logs, name="OSPTest", opponents=STAC, fully_observable=False, properties=None):
+    """Headless games with one Open Seat Agent robot and three of StacSettlers' agents (and further system properties);
+    the simulation's output"""
     directory = tempfile.mkdtemp()
     config = stacsettlers.config(name, games, [(1, "Hexfarer", "osp"), opponents], fully_observable=fully_observable)
-    output = stacsettlers.simulate(directory, config, agent, {"osp.log": logs, "osp.debug": "true", "osp.stall_ms": STALL_MS},
+    output = stacsettlers.simulate(directory, config, agent, {"osp.log": logs, "osp.debug": "true", "osp.stall_ms": STALL_MS, **(properties or {})},
                                    timeout=int(os.environ.get("STACSETTLERS_ROBOT_TIMEOUT", "600")))
     return output, directory
 
@@ -187,6 +188,18 @@ class FailureTests(unittest.TestCase):
         self.assertEqual([("illegal", "referee")], [(f["code"], f["by"]) for f in seats[0]["failures"]])
         told = [m for m in messages(logs)[0] if m["type"] == "failure"]
         self.assertEqual(["illegal"], [m["code"] for m in told])
+
+    def test_a_run_stops_once_more_games_failed_than_allowed(self):
+        # Every game fails (an illegal answer); one failed game is allowed, so the simulation stops at the second and
+        # says why, without starting the third
+        stacsettlers.build()
+        output, _ = play(3, agent_command("--illegal"), tempfile.mkdtemp(), name="OSPStop", properties={"osp.max_failed_games": "1"})
+        lines, seats = results(output)
+        self.assertEqual(2, len(lines), output[-3000:])
+        self.assertTrue(all(seat["failures"] for seat in seats), seats)
+        stops = [line for line in output.splitlines() if line.startswith(stacsettlers.STOPPED)]
+        self.assertEqual(1, len(stops), output[-3000:])
+        self.assertIn("2 games", stops[0])
 
 
 if __name__ == "__main__":

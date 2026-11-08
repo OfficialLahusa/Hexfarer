@@ -63,6 +63,8 @@ def config(name, games, agents, chat=True, fully_observable=False, force_end_tur
 
 # The line simulate adds to the output of a run that ran out of time
 TIMED_OUT = "osp: the simulation timed out after {seconds} s"
+# The start of the line the simulation writes when its stop rule ends it (FailureLimit.java, -Dosp.max_failed_games)
+STOPPED = "osp: stopped:"
 
 
 def simulate(directory, config_text, agent_command=None, properties=None, timeout=1800, java_options=()):

@@ -1,10 +1,14 @@
 """
 Games of one Open Seat Agent against StacSettlers' agents in StacSettlers' headless simulation (OSPSimulation), with a
 summary: the agent's wins, its decisions and their time, fallbacks, failures, stalled moves, trade offers its robot
-declined and turns the server ended.
+declined and turns the server ended. A game whose seat failed (a failure, or moves the referee made for the seat) says
+nothing about strength: it stays out of the wins and the win rate, is counted beside them (failed_games), and is played
+again in a further simulation until N games count. A run stops once more games failed than --max-failed allows (default
+3, or one in a hundred of N; the simulation stops itself there too, osp.max_failed_games), or when a simulation finished
+no game or timed out; the summary then says why (stopped) and the exit code is 1.
 
 Usage: python play.py --agent "COMMAND" --opponents stac|ss|pomcp|jsettlers|random|LINE --games N --out DIR
-                      [--name NAME] [--fully-observable] [--no-chat] [--no-trades] [--build]
+                      [--name NAME] [--fully-observable] [--no-chat] [--no-trades] [--max-failed K] [--build]
 The opponents fill the other three seats: a preset (stac: the Stac agent with the parameters its README calls best and
 at most 3 offers without building; ss: SmartSettlers; pomcp: Dobre's typed POMCP agent at 10 000 iterations on 4
 threads, as in his thesis; jsettlers: JSettlers 1.1's robot; random) or an agent line's value as Simulation reads it
@@ -13,7 +17,8 @@ pomcp preset keeps a factored belief and plays without it; StacSettlers then sho
 every hand, discard, robbery and bought card to everyone). The games run with ChatNegotiation=true (the Stac agents only
 trade that way), Trades=true (--no-trades: false) and ForceEndTurns=false (the server ends no turn on its own, however long the agent
 thinks). DIR gets the simulation's working directory (config.txt, results/), the agents' standard error (agents/), the
-output (simulation.log) and summary.json. Needs a JDK and StacSettlers' jar in STACSETTLERS_JAR.
+output (simulation.log) and summary.json; a further simulation's go to simulation-2 and simulation-2.log, and so on.
+Needs a JDK and StacSettlers' jar in STACSETTLERS_JAR.
 """
 
 import argparse
@@ -36,24 +41,39 @@ PRESETS = {
 }
 
 
+def default_max_failed(games):
+    """The failed games a run of that many allows by default: three, or one in a hundred"""
+    return max(3, games // 100)
+
+
+def failed(seat):
+    """Whether the Open Seat Agent's seat failed in a game: a failure, or moves the referee made for it (fallbacks)"""
+    return bool(seat["failures"]) or seat["fallbacks"] > 0
+
+
 def summary(output, our_name="Hexfarer"):
-    """The games' result lines and what they say about the Open Seat Agent's seat"""
+    """The games' result lines and what they say about the Open Seat Agent's seat: games counts every game, failed_games
+    those where the seat failed, counted_games the rest; wins, win_rate and mean_vp are of the counted games only"""
     lines = [json.loads(line[line.index("{"):]) for line in output.splitlines() if '"osp-result"' in line]
     games = []
     for line in lines:
         seat = next(s for s in line["result"]["seats"] if s["agent"] is not None or line["players"][s["seat"]] == our_name)
         games.append({"game": line["game_id"], "seat": seat["seat"], "winner": line["winner"], "won": line["winner"] == seat["seat"],
-                      "vp": line["vp"], "turns": line["result"]["turns"], "decisions": seat["decisions"], "time_ms": seat["time_ms"],
-                      "max_ms": seat["max_ms"], "robot_decisions": seat["robot_decisions"], "fallbacks": seat["fallbacks"],
+                      "failed": failed(seat), "vp": line["vp"], "turns": line["result"]["turns"], "decisions": seat["decisions"],
+                      "time_ms": seat["time_ms"], "max_ms": seat["max_ms"], "robot_decisions": seat["robot_decisions"], "fallbacks": seat["fallbacks"],
                       "failures": seat["failures"], "stalls": seat["stalls"], "declined": seat.get("declined"), "agent": seat["agent"],
                       # What the seat asked for: the true state or its view, steps or none, lean decisions
                       "needs": seat.get("needs"), "observe": seat.get("observe"), "lean": seat.get("lean")})
     decisions = sum(g["decisions"] for g in games)
+    # A failed game says nothing about strength: out of the wins, the win rate and the points
+    counted = [g for g in games if not g["failed"]]
     return {
         "games": len(games),
-        "wins": sum(g["won"] for g in games),
-        "win_rate": round(sum(g["won"] for g in games) / len(games), 3) if games else None,
-        "mean_vp": round(statistics.mean(g["vp"][g["seat"]] for g in games), 2) if games else None,
+        "failed_games": len(games) - len(counted),
+        "counted_games": len(counted),
+        "wins": sum(g["won"] for g in counted),
+        "win_rate": round(sum(g["won"] for g in counted) / len(counted), 3) if counted else None,
+        "mean_vp": round(statistics.mean(g["vp"][g["seat"]] for g in counted), 2) if counted else None,
         "decisions": decisions,
         "mean_decision_ms": round(sum(g["time_ms"] for g in games) / decisions, 1) if decisions else None,
         "max_decision_ms": max((g["max_ms"] for g in games), default=None),
@@ -68,6 +88,31 @@ def summary(output, our_name="Hexfarer"):
     }
 
 
+def run_games(simulate, games, max_failed):
+    """Plays until that many games count: the first simulation plays them all, each further one the games that failed so
+    far. simulate(round_number, games, allowance) runs one simulation of that many games, which stops itself past
+    allowance more failed games, and returns its output. Stops once more games failed than max_failed allows, or when a
+    simulation finished no game or timed out. Returns the simulations' outputs and why the run stopped (None if enough
+    games count)"""
+    outputs = []
+    while True:
+        before = summary("\n".join(outputs))
+        missing = games - before["counted_games"]
+        if missing <= 0:
+            return outputs, None
+        output = simulate(len(outputs) + 1, missing, max_failed - before["failed_games"])
+        outputs.append(output)
+        after = summary("\n".join(outputs))
+        # Past the limit (here, or in the simulation's own count): the setup is broken, not unlucky (a negative limit has none)
+        if 0 <= max_failed < after["failed_games"] or stacsettlers.STOPPED in output:
+            return outputs, f"stopped: {after['failed_games']} of {after['games']} games failed, at most {max_failed} allowed (--max-failed)"
+        timed_out = stacsettlers.TIMED_OUT.split("{")[0] in output
+        if after["games"] == before["games"]:
+            return outputs, "stopped: the simulation finished no game" + (" (it timed out)" if timed_out else "")
+        if timed_out:
+            return outputs, f"stopped: simulation {len(outputs)} timed out"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--agent", required=True, help="the Open Seat Agent's command line")
@@ -78,8 +123,9 @@ def main():
     parser.add_argument("--fully-observable", action="store_true")
     parser.add_argument("--no-chat", action="store_true", help="ChatNegotiation=false (the Stac agents then hang)")
     parser.add_argument("--no-trades", action="store_true", help="Trades=false: no trades between players at all")
+    parser.add_argument("--max-failed", type=int, help="failed games the run allows before it stops (default: 3, or 1 in 100 games; negative: any)")
     parser.add_argument("--build", action="store_true", help="compile the adapter first")
-    parser.add_argument("--timeout", type=int, default=24 * 3600)
+    parser.add_argument("--timeout", type=int, default=24 * 3600, help="seconds per simulation")
     args = parser.parse_args()
     if not stacsettlers.available():
         sys.exit("needs a JDK and StacSettlers' jar in STACSETTLERS_JAR")
@@ -89,13 +135,27 @@ def main():
     agents = os.path.join(out, "agents")
     os.makedirs(agents, exist_ok=True)
     opponents = PRESETS.get(args.opponents, args.opponents).split(",", 3)
-    config = stacsettlers.config(args.name, args.games, [(1, "Hexfarer", "osp"), opponents], chat=not args.no_chat,
-                                 fully_observable=args.fully_observable, trades=not args.no_trades)
-    output = stacsettlers.simulate(os.path.join(out, "simulation"), config, args.agent, {"osp.log": agents}, timeout=args.timeout)
-    with open(os.path.join(out, "simulation.log"), "w", encoding="utf-8") as file:
-        file.write(output)
-    result = summary(output)
-    result["config"] = config
+    max_failed = args.max_failed if args.max_failed is not None else default_max_failed(args.games)
+    configs = []
+
+    def simulation(round_number, games, allowance):
+        # A further simulation gets a directory, a log and game names of its own (the agents' logs are named by game)
+        suffix = "" if round_number == 1 else f"-{round_number}"
+        config = stacsettlers.config(args.name + suffix.replace("-", "_r"), games, [(1, "Hexfarer", "osp"), opponents], chat=not args.no_chat,
+                                     fully_observable=args.fully_observable, trades=not args.no_trades)
+        configs.append(config)
+        output = stacsettlers.simulate(os.path.join(out, "simulation" + suffix), config, args.agent,
+                                       {"osp.log": agents, "osp.max_failed_games": allowance}, timeout=args.timeout)
+        with open(os.path.join(out, f"simulation{suffix}.log"), "w", encoding="utf-8") as file:
+            file.write(output)
+        return output
+
+    outputs, stopped = run_games(simulation, args.games, max_failed)
+    result = summary("\n".join(outputs))
+    result["stopped"] = stopped
+    result["max_failed"] = max_failed
+    result["simulations"] = len(outputs)
+    result["config"] = configs[0]
     result["agent_command"] = args.agent
     with open(os.path.join(out, "summary.json"), "w", encoding="utf-8") as file:
         json.dump(result, file, indent=1)
@@ -103,9 +163,13 @@ def main():
     print(json.dumps(shown, indent=1))
     for game in result["per_game"]:
         print(f'{game["game"]}: seat {game["seat"]}, winner {game["winner"]}, vp {game["vp"]}, {game["decisions"]} decisions, '
-              f'max {game["max_ms"]} ms, fallbacks {game["fallbacks"]}, stalls {game["stalls"]}, failures {len(game["failures"])}')
-    # A run counts as failed where a game didn't end with a result or the seat failed
-    sys.exit(0 if result["games"] == args.games and not result["failures"] and not result["fallbacks"] and not result["stalls"] and not result["timed_out"] else 1)
+              f'max {game["max_ms"]} ms, fallbacks {game["fallbacks"]}, stalls {game["stalls"]}, failures {len(game["failures"])}'
+              + (" (failed, not counted)" if game["failed"] else ""))
+    if stopped:
+        print(stopped)
+    # A run counts as failed where it stopped (too many failed games, a simulation that hung) or a move stalled; failed games
+    # it played again are in the summary
+    sys.exit(0 if result["counted_games"] >= args.games and not stopped and not result["stalls"] else 1)
 
 
 if __name__ == "__main__":

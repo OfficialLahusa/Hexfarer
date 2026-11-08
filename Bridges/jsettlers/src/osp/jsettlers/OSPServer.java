@@ -148,6 +148,8 @@ public final class OSPServer
         if (props == null)
             System.exit(1);
         int port = Integer.parseInt(props.getProperty(SOCServer.PROP_JSETTLERS_PORT, Integer.toString(SOCServer.SOC_PORT_DEFAULT)));
+        // The run's robot-only games, for the stop rule's default
+        FailureLimit.games = Integer.parseInt(props.getProperty("jsettlers.bots.botgames.total", "0").trim());
         // JSettlers' server exits right after its last robot-only game: the brains finish theirs first
         Runtime.getRuntime().addShutdownHook(new Thread(() ->
         {

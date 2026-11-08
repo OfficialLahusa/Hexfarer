@@ -5,13 +5,14 @@ other seats are Catanatron's bots. The driver serves what each agent asks in its
 view (the other hands hidden) or every hand, steps only if it observes, decisions with only the state's hash if it is
 lean; it can't draw worlds. Each game starts with before (the ruleset, the budget, the map's seed), which the agent takes
 (ready) or turns down; a decision has the budget's time. A failure (the agent's own, an illegal, late or malformed answer,
-a game it turns down) ends the game, recorded in its result, and the run goes on; an agent whose process ended stops it.
+a game it turns down) ends the game, recorded in its result, and the run goes on; an agent whose process ended stops it,
+and so do more failed games than --max-failed allows (default 3, or one in a hundred of the run's games).
 Every map is played once per rotation of the lineup (4 rotations: each lineup entry sits in each seat once), all
 rotations of a map with the same Catanatron seed (the same dice and development cards as long as the games run alike).
 One result line per game, with each side's time per decision and the game's result record.
 
 Usage: python drive.py --boards boards.jsonl --lineup open-seat-agent,AB:2,AB:2,AB:2 --open-seat-agent "dotnet OpenSeat.dll agent --iterations 5000"
-                       --maps 0:25 --out results.jsonl [--log games.jsonl.gz] [--decide-ms 300000]
+                       --maps 0:25 --out results.jsonl [--log games.jsonl.gz] [--decide-ms 300000] [--max-failed K]
 """
 
 import argparse
@@ -44,6 +45,11 @@ PROTOCOL, VERSION = "osp", 2
 ANSWER_SECONDS = 60
 # The driver's time per decision when the run sets none
 DEFAULT_DECIDE_MS = 300_000
+
+
+def default_max_failed(games):
+    """The failed games a run of that many allows by default: three, or one in a hundred"""
+    return max(3, games // 100)
 
 
 def state_hash(state):
@@ -380,6 +386,7 @@ def main(argv=None):
     parser.add_argument("--log", help="every game's referee messages, gzipped (for OpenSeat replay)")
     parser.add_argument("--agent-log", help="the agents' standard error (their stats lines)")
     parser.add_argument("--decide-ms", type=int, default=DEFAULT_DECIDE_MS, help="the agents' time per decision (the game's budget)")
+    parser.add_argument("--max-failed", type=int, help="failed games the run allows before it stops (default: 3, or 1 in 100 games; negative: any)")
     args = parser.parse_args(argv)
 
     lineup = args.lineup.split(",")
@@ -389,41 +396,51 @@ def main(argv=None):
         all_boards = [json.loads(line) for line in file]
     # Ranges FIRST:END, comma-separated (e.g. the maps a stopped run didn't finish, see resume.py)
     boards = [board for part in args.maps.split(",") for board in all_boards[slice(*(int(x) for x in part.split(":")))]]
+    max_failed = args.max_failed if args.max_failed is not None else default_max_failed(4 * len(boards))
+    played = failed_games = 0
     agent_log = open(args.agent_log, "a", encoding="utf-8") if args.agent_log else subprocess.DEVNULL
     # One agent process per Open Seat Agent entry of the lineup, kept for all games (it follows the entry from seat to seat)
     agents = [OpenSeatAgent(args.open_seat_agent, agent_log) if code == "open-seat-agent" else None for code in lineup]
     log = gzip.open(args.log, "at", encoding="utf-8") if args.log else None
     write = (lambda m: log.write(json.dumps(m, separators=(",", ":")) + "\n")) if log else (lambda m: None)
 
-    with open(args.out, "a", encoding="utf-8") as out:
-        for entry in boards:
-            for rotation in range(4):
-                # Entry i of the lineup sits in seat (i + rotation) % 4
-                codes, open_seat_agents, players = [None] * 4, {}, [None] * 4
-                for i, code in enumerate(lineup):
-                    seat = (i + rotation) % 4
-                    codes[seat] = agents[i].name if agents[i] else code
-                    players[seat] = OpenSeatAgentSeat(COLORS[seat]) if agents[i] else REGISTRY.build(code, COLORS[seat])
-                    if agents[i]:
-                        open_seat_agents[seat] = agents[i]
-                random.seed(entry["seed"] * 4 + rotation)
-                game = seated_game(players, entry["seed"], osp_board.catan_map(entry["board"]))
-                game_id = f"map{entry['seed']}-r{rotation}"
-                result = play(game, open_seat_agents, write, game_id, codes, args.decide_ms)
-                result.update({"map_seed": entry["seed"], "rotation": rotation, "lineup": lineup})
-                out.write(json.dumps(result) + "\n")
-                out.flush()
-                failures = [f for seat in result["result"]["seats"] for f in seat["failures"]]
-                print(f"{game_id}: winner {result['winner_code']} in {result['turns']} turns"
-                      + "".join(f"; failure {f['code']}: {f['message']}" for f in failures), file=sys.stderr, flush=True)
-                # An agent whose process ended can't play the rest of the run
-                if any(f["code"] == "ended" for f in failures):
-                    raise SystemExit(f"{game_id}: an Open Seat Agent ended; the run stops")
-    for agent in agents:
-        if agent:
-            agent.close()
-    if log:
-        log.close()
+    # The agents and the log close also when the run stops (an agent ended, too many failed games)
+    try:
+        with open(args.out, "a", encoding="utf-8") as out:
+            for entry in boards:
+                for rotation in range(4):
+                    # Entry i of the lineup sits in seat (i + rotation) % 4
+                    codes, open_seat_agents, players = [None] * 4, {}, [None] * 4
+                    for i, code in enumerate(lineup):
+                        seat = (i + rotation) % 4
+                        codes[seat] = agents[i].name if agents[i] else code
+                        players[seat] = OpenSeatAgentSeat(COLORS[seat]) if agents[i] else REGISTRY.build(code, COLORS[seat])
+                        if agents[i]:
+                            open_seat_agents[seat] = agents[i]
+                    random.seed(entry["seed"] * 4 + rotation)
+                    game = seated_game(players, entry["seed"], osp_board.catan_map(entry["board"]))
+                    game_id = f"map{entry['seed']}-r{rotation}"
+                    result = play(game, open_seat_agents, write, game_id, codes, args.decide_ms)
+                    result.update({"map_seed": entry["seed"], "rotation": rotation, "lineup": lineup})
+                    out.write(json.dumps(result) + "\n")
+                    out.flush()
+                    failures = [f for seat in result["result"]["seats"] for f in seat["failures"]]
+                    print(f"{game_id}: winner {result['winner_code']} in {result['turns']} turns"
+                          + "".join(f"; failure {f['code']}: {f['message']}" for f in failures), file=sys.stderr, flush=True)
+                    # An agent whose process ended can't play the rest of the run
+                    if any(f["code"] == "ended" for f in failures):
+                        raise SystemExit(f"{game_id}: an Open Seat Agent ended; the run stops")
+                    # Many failed games mean a broken setup, not bad luck: past the limit the run stops
+                    played += 1
+                    failed_games += bool(failures)
+                    if 0 <= max_failed < failed_games:
+                        raise SystemExit(f"{game_id}: stopped: {failed_games} of {played} games failed, at most {max_failed} allowed (--max-failed)")
+    finally:
+        for agent in agents:
+            if agent:
+                agent.close()
+        if log:
+            log.close()
 
 
 if __name__ == "__main__":

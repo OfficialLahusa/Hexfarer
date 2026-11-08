@@ -182,6 +182,14 @@ What happens to the seat is the referee's choice, recorded with the result: a He
 the agent again), the Arena drops the game, Catanatron's driver ends the game, and JSettlers' and StacSettlers' robots
 play on with the first legal move (as `fallbacks`).
 
+A game whose agent's seat has a failure or `fallbacks` in its result record says nothing about the agent's strength:
+tallies leave it out of the win rate and count it beside it (Catanatron's `analyze.py` leaves out its whole map, which
+`resume.py` plays again; JSettlers' `summary.py`; StacSettlers' `play.py`, which plays such games again until a run's
+count holds). Many of them mean a broken setup,
+so a run stops past a number of failed games (default 3, or one in a hundred of the run's games): Catanatron's driver
+with `--max-failed`, JSettlers' server and StacSettlers' simulation with `-Dosp.max_failed_games`, where they write a
+line starting with `osp: stopped:` to standard error and exit (code 3).
+
 ### Trades between players
 
 Where the ruleset allows them (`player_trading` `rulebook`), trades are decisions like any other:

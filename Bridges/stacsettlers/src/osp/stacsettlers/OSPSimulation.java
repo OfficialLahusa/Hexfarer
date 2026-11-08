@@ -44,6 +44,10 @@ public final class OSPSimulation
         }
         FVGeneratorFactory.initialise();
         List<String> lines = Files.readAllLines(Paths.get(args[0]), StandardCharsets.UTF_8);
+        // The config's games, for the stop rule's default
+        for (String line : lines)
+            if (line.startsWith("Games="))
+                FailureLimit.games = Integer.parseInt(line.substring("Games=".length()).trim());
         Simulation simulation = parse(lines);
         simulation.start();
         // StacSettlers leaves its threads to end by themselves; the games are over and written

@@ -37,7 +37,9 @@ Contents:
     rebuilds a Catanatron game from the referee's state, the bot picks among the referee's legal moves.
   - `drive.py`: Hexfarer (or any Open Seat Agent) under Catanatron's referee. It serves its seat's view or every hand
     (no worlds), steps and lean decisions, gives each decision `--decide-ms` (default 300 000), ends a game at a failure
-    and records it in the game's result, which every result line carries.
+    and records it in the game's result, which every result line carries; past `--max-failed` failed games (default 3,
+    or one in a hundred of the run's) the run stops. `analyze.py` leaves a map with a failed game out of the win rate
+    and counts the failed games; `resume.py` plays those maps again.
 - `jsettlers/`: JSettlers in protocol terms (Java, built by `jsettlers.py` against JSettlers' jar into `build/`):
   - `OSPBoard`: its classic board in protocol keys, from its own adjacency; `OSPGame`: states, legal moves by its own
     rules and moves played through its game logic.
@@ -53,16 +55,22 @@ Contents:
     `PROTOCOL.md`) as an `osp-result` line on standard error: the players by seat, the winner, and per seat the agent and
     its decisions, their time, resyncs, fallbacks and failures, its moves, its decisions with a choice (only in a recorded
     game), its trade decisions that expired before they went out, and its robot brain's CPU time. An agent that fails is told why where it still listens, and the robot plays
-    the first legal move for the rest of the game. A record never overwrites one of an earlier server run (JSettlers
-    numbers its games afresh): the second `GAME.jsonl` is written as `GAME-2.jsonl`.
+    the first legal move for the rest of the game. Past -Dosp.max_failed_games games whose agent's seat failed (default
+    3, or one in a hundred of jsettlers.bots.botgames.total; negative: no limit) the server stops: a line
+    `osp: stopped: ...` on standard error, exit code 3, no more games. A record never overwrites one of an earlier
+    server run (JSettlers numbers its games afresh): the second `GAME.jsonl` is written as `GAME-2.jsonl`.
     Without the game option NT the players trade as JSettlers lets them, which the protocol names `player_trading`
     `first_accept`: JSettlers' robots offer, decline, counter and accept, the move log writes each trade request as a
     step (answers in the order they came, an accept trading at once), and the agent's robot answers every offer made to
     its seat as it stands, offers on its turn where its decision names `trades`, waits for the answers to its own offer
     (5 s, -Dosp.offerWait=MILLIS), then takes a counteroffer or withdraws. JSettlers' robots wait 5 s for an answer from a
     robot seat, so an answer has to come quickly: a decision whose offer was taken or withdrawn meanwhile is dropped.
-  - Tests: `python -m unittest test_jsettlers_board test_jsettlers_game test_jsettlers_robot test_jsettlers_steps test_jsettlers_trading` (with
-    JSETTLERS_JAR set).
+  - `summary.py [--json OUT] LOG [LOG ...]`: the agent's strength per setting from the server's output (batches
+    `NAME-b`, `NAME-c`, ... count with `NAME`): games whose seat failed (a failure or fallbacks) stay out of the wins,
+    the 95% interval, the points and the rounds and are counted beside them; also gaps, failures by code, expired trade
+    decisions, decision time, and from `NAME-records` the trade steps per game of the agent's seat and the robots.
+  - Tests: `python -m unittest test_jsettlers_board test_jsettlers_game test_jsettlers_robot test_jsettlers_steps test_jsettlers_trading test_jsettlers_summary` (with
+    JSETTLERS_JAR set; the summary's tests need nothing else).
 - `stacsettlers/`: StacSettlers in protocol terms (Java, built by `stacsettlers.py` against its jar into `build/`), so
   Open Seat Agents play against its Stac agents, SmartSettlers and Dobre's MCTS agents in its headless simulation:
   - `OSPBoard` and `OSPGame` as for JSettlers, for the JSettlers 1.1.13 engine StacSettlers keeps (other hex type and
@@ -86,7 +94,11 @@ Contents:
   - `play.py`: games of one agent against three of StacSettlers' (presets `stac`, `ss`, `pomcp`, `jsettlers`, `random`, or
     any agent line) with a summary of its wins, decision times and failures, e.g.
     `python play.py --agent "OpenSeat agent --net NET --iterations 5000" --opponents stac --games 10 --out DIR`
-    (`--opponents ss --fully-observable` for SmartSettlers).
+    (`--opponents ss --fully-observable` for SmartSettlers). A game whose seat failed (a failure or fallbacks) stays out
+    of the wins and the win rate (`failed_games` counts it) and is played again in a further simulation until N games
+    count; past `--max-failed` failed games (default 3, or one in a hundred of N) the run stops, as does the simulation
+    itself (-Dosp.max_failed_games on `OSPSimulation`, as for JSettlers' server), and `summary.json` says why
+    (`stopped`).
   - `MoveLog`: the steps, from the requests of every seat: two-step moves joined, discards in the protocol's order, and a
     trade StacSettlers' agents make in chat (with `Trades=true`) as the offer of the player on turn and the partner's
     accept under `player_trading` `first_accept`, which the games then announce (`none` with `Trades=false`). Anything
@@ -96,7 +108,7 @@ Contents:
   - `Recorder --games N --out games.jsonl.gz`: random games by StacSettlers' rules as referee messages, each move
     checked as its server would check the request.
   - Tests: `python -m unittest test_stacsettlers_board test_stacsettlers_game test_stacsettlers_robot
-    test_stacsettlers_record test_stacsettlers_steps` (with STACSETTLERS_JAR set; the robot tests play against three Stac agents with the test
+    test_stacsettlers_record test_stacsettlers_steps test_stacsettlers_play` (with STACSETTLERS_JAR set; the robot tests play against three Stac agents with the test
     agent of `jsettlers/`, one of them against three cheap POMCP agents for about 3 minutes; about 5 minutes in all).
 
 On Hexfarer's side, outside this folder: `OpenSeat replay LOG` plays a referee's log through Hexfarer's rules and lists
