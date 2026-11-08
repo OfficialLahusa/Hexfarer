@@ -66,12 +66,19 @@ namespace Tests
                 vectorizer.Vectorize(states[i]).Buffer.Span.CopyTo(batch.Buffer.Span.Slice(i * dim, dim));
 
             float[] batched = net.Run(batch);
+            List<float[]> singles = [];
             for (int i = 0; i < states.Count; i++)
             {
                 float[] single = net.Run(vectorizer.Vectorize(states[i]));
+                singles.Add(single);
+                // Within the float tolerance of a provider's kernels for other batch sizes (CUDA differed by 5e-5); an absolute tolerance, since rounding to 3 places can split values 5e-5 apart
                 for (int p = 0; p < TestUtil.PlayerCount; p++)
-                    Assert.Equal(single[p], batched[i * TestUtil.PlayerCount + p], 4);
+                    Assert.Equal(single[p], batched[i * TestUtil.PlayerCount + p], 1e-3);
             }
+            // The positions' values lie further apart than that tolerance, so rows in the wrong order would still show
+            for (int i = 0; i < states.Count; i++)
+                for (int j = i + 1; j < states.Count; j++)
+                    Assert.True(Enumerable.Range(0, TestUtil.PlayerCount).Max(p => Math.Abs(singles[i][p] - singles[j][p])) > 2e-3, $"positions {i} and {j} have nearly the same values");
         }
     }
 }
