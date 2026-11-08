@@ -511,12 +511,11 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
         lean = (Boolean) leaning;
         if (lean && ! (Boolean) observing)
             throw fail(null, "unsupported", "a lean agent has to observe: it keeps its own game from the steps", null);
-        // An observing agent follows the game from its start; one that doesn't starts from now
+        // An observing agent follows the game from its start; one that doesn't starts from now (the steps so far count
+        // as sent with the first decision's)
         observe = (Boolean) observing;
         gapsAtDecision = seen.gaps;
         Map<String, Object> from = observe ? log.start() : seen.position;
-        if (! observe)
-            sent = (int) seen.moves;
         agent.send(Json.object("type", "before", "game_id", game.getName(), "seat", (long) seat, "players", (long) game.maxPlayers,
             "ruleset", OSPGame.ruleset(), "budget", BUDGET, "seed", (long) record.seed, "board", osp.board.boardJson(),
             "state", truth ? from : OSPGame.hide(from, seat)));

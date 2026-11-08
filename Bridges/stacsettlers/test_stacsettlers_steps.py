@@ -80,6 +80,14 @@ class Checks:
                 self.assertEqual((truth["n"], truth["seat"], truth["action"]), (step["n"], step["seat"], step["action"]), game_id)
                 self.assertEqual(self.shown(truth, seat), step["result"], f"{game_id} move {step['n']}")
 
+    def test_each_decision_is_the_referees_state_as_the_seat_sees_it(self):
+        # The state in the protocol's order (a discard waits for the lower seats' discards), as the seat may see it
+        for game_id, messages in self.got.items():
+            seat = messages[1]["seat"]
+            states = {m["n"]: m["state"] for m in self.recorded[game_id] if m["type"] == "decide"}
+            for decide in (m for m in messages if m["type"] == "decide"):
+                self.assertEqual(self.seen(states[decide["n"]], seat), decide["state"], f"{game_id} move {decide['n']}")
+
     def test_the_game_ends_where_the_referees_does(self):
         for game_id, messages in self.got.items():
             after, recorded = messages[-1], self.recorded[game_id][-1]
@@ -99,6 +107,15 @@ class ViewStepTests(Checks, unittest.TestCase):
     def setUpClass(cls):
         stacsettlers.build()
         cls.got, cls.recorded, cls.lines, cls.output = play(cls.GAMES, ["--needs", "view"], cls.TRADES)
+
+    @staticmethod
+    def seen(state, seat):
+        """A state as the seat may see it: the others' hands, cards and points hidden"""
+        view = json.loads(json.dumps(state))
+        for player in view["players"]:
+            if player["seat"] != seat:
+                player.update(hand=None, development=None, vp=None)
+        return view
 
     @staticmethod
     def shown(truth, seat):
@@ -168,6 +185,10 @@ class TruthStepTests(Checks, unittest.TestCase):
     def setUpClass(cls):
         stacsettlers.build()
         cls.got, cls.recorded, cls.lines, cls.output = play(cls.GAMES, ["--needs", "truth"], True)
+
+    @staticmethod
+    def seen(state, seat):
+        return state
 
     @staticmethod
     def shown(truth, seat):
