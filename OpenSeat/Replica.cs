@@ -295,8 +295,8 @@ namespace OpenSeat
 
         /// <summary>
         /// Takes over what the referee's known rule differences change, since the referee decides the game: every hand,
-        /// the bank, who holds Longest Road (with its points), and that the game goes on. Only for a state the referee asks
-        /// a move in. Returns whether the states agree afterwards.
+        /// the bank, who holds Longest Road (with its points), that the game goes on, and the open offer between players.
+        /// Only for a state the referee asks a move in. Returns whether the states agree afterwards.
         /// </summary>
         public bool Patch(JsonNode theirs)
         {
@@ -319,6 +319,13 @@ namespace OpenSeat
             }
             // A game Hexfarer's rules ended goes on as the referee's does (ending only marks the round as ended)
             if (State.HasEnded) State.Turn.TypeOfRound = TurnState.RoundType.Normal;
+            // An offer between players is public: the referee's stands, or none (a late answer or a player moving on closed it
+            // there without a step); it counts as an offer of the turn
+            if (State.Settings.FreeTrade)
+            {
+                State.Turn.PendingTrade = OSPCodec.TradeOfferOf(theirs["offer"], State.Players.Length);
+                if (State.Turn.PendingTrade != null) State.Turn.TradeOffersThisTurn = Math.Max(State.Turn.TradeOffersThisTurn, 1);
+            }
             return FirstDifference(theirs, "patch") == null;
         }
 

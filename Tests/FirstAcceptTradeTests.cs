@@ -225,6 +225,35 @@ namespace Tests
             Assert.Equal(3u, replica.State.Players[partner].ResourceCards.Get(Lumber));
         }
 
+        [Fact]
+        public void APatchTakesOverTheRefereesOpenOffer()
+        {
+            Replica replica = new(Before(JsonNode.Parse("""{"preset":"standard","player_trading":"first_accept","offer_limit":null}""")!.AsObject(), out OSPCodec codec));
+            (GameState main, sbyte active) = FirstAcceptGame(seed: 3);
+            replica.Rebuild(codec.State(main), new JsonArray(LegalActionProvider.GetActionsForState(main, active).Select(a => (JsonNode)codec.Move(a)).ToArray()));
+            GameState offered = new(main);
+            Play(offered, LumberForOre(offered, active));
+            Play(offered, new RespondToTradeAction(Seat(active, 2), false));
+
+            // The copy has an offer the referee closed without a step (a late answer, a player moving on): the referee's stands
+            Assert.Null(replica.Follow(new JsonObject { ["type"] = "step", ["n"] = 1, ["seat"] = (int)active, ["action"] = codec.Move(LumberForOre(main, active)) }));
+            Assert.NotNull(replica.FirstDifference(codec.State(main), "closed"));
+            Assert.True(replica.Patch(codec.State(main)));
+            Assert.Null(replica.State.Turn.PendingTrade);
+            Assert.Equal(active, replica.Acting());
+
+            // The other way: an offer, with an answer, that a fresh copy (no offer made this turn) didn't see open
+            replica = new(Before(JsonNode.Parse("""{"preset":"standard","player_trading":"first_accept","offer_limit":null}""")!.AsObject(), out _));
+            replica.Rebuild(codec.State(main), new JsonArray(LegalActionProvider.GetActionsForState(main, active).Select(a => (JsonNode)codec.Move(a)).ToArray()));
+            Assert.Equal(0, replica.State.Turn.TradeOffersThisTurn);
+            Assert.NotNull(replica.FirstDifference(codec.State(offered), "opened"));
+            Assert.True(replica.Patch(codec.State(offered)));
+            Assert.Null(replica.FirstDifference(codec.State(offered), "opened"));
+            Assert.Equal(offered.Turn.PendingTrade!.Give, replica.State.Turn.PendingTrade!.Give);
+            Assert.Equal(TradeResponse.Rejected, replica.State.Turn.PendingTrade.Responses[Seat(active, 2)]);
+            Assert.True(replica.State.Turn.TradeOffersThisTurn >= 1);
+        }
+
         private static Agents.Inference.StateValueNet Net(string name) =>
             new(TestUtil.FixturePath("ValueNet", name), provider: Agents.Inference.InferenceProvider.CPU);
 
