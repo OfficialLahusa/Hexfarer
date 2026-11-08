@@ -172,6 +172,57 @@ class RecorderTests(unittest.TestCase):
                     self.assertTrue(any(seat == victim and hex_ in place for seat, place in owned), move)
         self.assertGreater(robbed, 20)
 
+    def test_bank_trades_at_every_rate_the_player_has(self):
+        # StacSettlers' bank takes 4:1 always, 3:1 at a generic harbor and 2:1 at the resource's harbor, so a decision lists
+        # each of those (one card for each other resource) and no other
+        harbor_resources = {"HRB": "brick", "HRG": "grain", "HRL": "lumber", "HRO": "ore", "HRW": "wool"}
+        checked = 0
+        for game in self.games:
+            harbors = game[0]["board"]["harbors"]
+            for decide in (m for m in game if m["type"] == "decide" and m["state"]["prompt"] == "main"):
+                state, seat = decide["state"], decide["seat"]
+                owned = [place for owner, place in state["buildings"]["settlements"] + state["buildings"]["cities"] if owner == seat]
+                ports = {h["hCode"] for h in harbors if any(end in owned for end in h["path"])}
+                hand = state["players"][seat]["hand"]
+                expected = set()
+                for give in RESOURCES:
+                    rates = [4] + ([3] if "HR" in ports else []) + ([2] if any(harbor_resources.get(p) == give for p in ports) else [])
+                    for rate in rates:
+                        if hand[give] >= rate:
+                            expected |= {canonical({"give": {give: rate}, "get": {get: 1}}) for get in RESOURCES if get != give}
+                listed = {canonical(m[1]) for m in decide["legal"] if m[0] == "bank_trade"}
+                self.assertEqual(expected, listed, decide["n"])
+                checked += bool(expected)
+        self.assertGreater(checked, 50)
+
+    def test_a_road_building_cards_roads_count_down(self):
+        # Two free roads only with two roads left and two places for them, else one; each road placed takes one off
+        roads = 0
+        for game in self.games:
+            for decide, step, after in zip(game[1::2], game[2::2], game[3::2]):
+                if decide["state"]["prompt"] != "road_building":
+                    continue
+                roads += 1
+                free = decide["state"]["free_roads"]
+                self.assertIn(free, (1, 2))
+                self.assertEqual("build_road", step["action"][0])
+                if free == 2:
+                    self.assertGreaterEqual(decide["state"]["players"][decide["seat"]]["pieces_left"]["roads"], 2)
+                self.assertEqual(free - 1, after["state"]["free_roads"], step)
+                self.assertEqual(free > 1, after["state"]["prompt"] == "road_building", step)
+        self.assertGreater(roads, 0)
+
+    def test_a_setup_road_starts_at_the_settlement_just_placed(self):
+        for game in self.games:
+            for previous, decide in zip(game[2::2], game[3::2]):
+                if decide["state"]["prompt"] != "setup_road":
+                    continue
+                self.assertEqual(("build_settlement", decide["seat"]), (previous["action"][0], previous["seat"]))
+                settlement = previous["action"][1]
+                self.assertTrue(decide["legal"])
+                for move in decide["legal"]:
+                    self.assertIn(settlement, move[1], move)
+
     def test_every_kind_of_decision_and_move_comes_up(self):
         prompts = Counter(m["state"]["prompt"] for m in self.messages if m["type"] == "decide")
         moves = Counter(m["action"][0] for m in self.messages if m["type"] == "step")

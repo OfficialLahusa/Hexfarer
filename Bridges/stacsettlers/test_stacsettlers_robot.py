@@ -18,6 +18,8 @@ import stacsettlers
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TEST_AGENT = os.path.join(HERE, "..", "jsettlers", "first_move_agent.py")
+# A move the server hasn't taken within this time counts as a stall (in the tests short, so a broken request shows fast)
+STALL_MS = "3000"
 STAC = (3, "Stac", "stac", "TRY_N_BEST_BUILD_PLANS:0|FAVOUR_DEV_CARDS:-5|NP_MAX_NUMBER_OF_OFFERS_WITHOUT_BUILDING:3")
 
 
@@ -29,8 +31,8 @@ def play(games, agent, logs, name="OSPTest", opponents=STAC, fully_observable=Fa
     """Headless games with one Open Seat Agent robot and three of StacSettlers' agents; the simulation's output"""
     directory = tempfile.mkdtemp()
     config = stacsettlers.config(name, games, [(1, "Hexfarer", "osp"), opponents], fully_observable=fully_observable)
-    output = stacsettlers.simulate(directory, config, agent, {"osp.log": logs, "osp.debug": "true"},
-                                   timeout=int(os.environ.get("STACSETTLERS_ROBOT_TIMEOUT", "900")))
+    output = stacsettlers.simulate(directory, config, agent, {"osp.log": logs, "osp.debug": "true", "osp.stall_ms": STALL_MS},
+                                   timeout=int(os.environ.get("STACSETTLERS_ROBOT_TIMEOUT", "600")))
     return output, directory
 
 
