@@ -6,6 +6,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 import soc.game.SOCGame;
+import soc.game.SOCPlayer;
+import soc.message.SOCMessage;
+import soc.message.SOCMessageForGame;
 import soc.server.SOCServer;
 import soc.server.database.DBHelper;
 import soc.server.genericServer.StringConnection;
@@ -15,8 +18,9 @@ import soc.server.logger.SOCLogger;
  * StacSettlers' server (SOCServer) as OSPSimulation runs it, made reachable for the Open Seat Agents' robots
  * (OSPRobotBrain), which run in the same process: they read the true game they play in (game), under the lock every
  * client request is handled with (read), so they never see a request half handled; a game's record (GameRecord) keeps
- * its result record, and before the server removes a game its robots tell their agents its end. Nothing else of the
- * server changes.
+ * its result record, and before the server removes a game its robots tell their agents its end. With the system
+ * property osp.record=DIR every request of a started game also passes through the game's move log (MoveLog), which
+ * writes the game as a referee log of every seat's moves. Nothing else of the server changes.
  */
 public final class OSPServer extends SOCServer
 {
@@ -69,13 +73,52 @@ public final class OSPServer extends SOCServer
         }
     }
 
+    // Where each game is written as a referee log while it runs (osp.record), or null; each recorded game's move log
+    private static final String RECORD = System.getProperty("osp.record");
+    private static final Map<String, MoveLog> LOGS = new ConcurrentHashMap<>();
+
     @Override
     public void processCommand(String command, StringConnection connection)
     {
         synchronized (REQUESTS)
         {
-            super.processCommand(command, connection);
+            SOCMessage message = RECORD == null ? null : SOCMessage.toMsg(command);
+            MoveLog log = message == null ? null : logOf(message);
+            if (log == null)
+            {
+                super.processCommand(command, connection);
+                return;
+            }
+            // The request's seat: the player of the connection's name, if it sits in the game
+            SOCPlayer player = connection == null || connection.getData() == null ? null : log.game.getPlayer((String) connection.getData());
+            int seat = player == null ? -1 : log.osp.seatOf(player.getPlayerNumber());
+            log.dispatch(message, seat, () -> super.processCommand(command, connection));
         }
+    }
+
+    // The move log of the game a request is for, begun at its first request once the game started, or null
+    private MoveLog logOf(SOCMessage message)
+    {
+        if (! (message instanceof SOCMessageForGame) || ((SOCMessageForGame) message).getGame() == null)
+            return null;
+        String name = ((SOCMessageForGame) message).getGame();
+        MoveLog log = LOGS.get(name);
+        if (log != null)
+            return log;
+        SOCGame game = gameList.getGameData(name);
+        if (game == null || game.getGameState() < SOCGame.START1A || game.getGameState() >= SOCGame.OVER)
+            return null;
+        game.takeMonitor();
+        try
+        {
+            log = new MoveLog(game, RECORD);
+        }
+        finally
+        {
+            game.releaseMonitor();
+        }
+        LOGS.put(name, log);
+        return log;
     }
 
     @Override
@@ -90,6 +133,13 @@ public final class OSPServer extends SOCServer
         for (OSPRobotBrain brain : BRAINS)
             brain.gameEnding(name);
         RECORDS.remove(name);
+        // Its record closed between two requests (the request thread writes it)
+        MoveLog log = LOGS.remove(name);
+        if (log != null)
+            synchronized (REQUESTS)
+            {
+                log.close();
+            }
         super.destroyGame(name, haveMonitor);
     }
 }
