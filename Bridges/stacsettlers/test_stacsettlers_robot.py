@@ -1,0 +1,166 @@
+"""
+A StacSettlers robot whose decisions an Open Seat Agent makes (OSPRobotBrain.java), in StacSettlers' headless games
+(OSPSimulation.java, the agent kind "osp") against three of StacSettlers' Stac agents, which negotiate their trades in
+chat among themselves (ChatNegotiation=true, Trades=true) while the server ends no turn on its own (ForceEndTurns=false):
+every game ends with a winner, the robot made its decisions through the agent (here one that plays the first legal move,
+building and playing cards where it can) without a fallback, a stalled move or a forced turn end, and the agent got the
+game, its decisions and its end. Needs a JDK and StacSettlers' jar in STACSETTLERS_JAR.
+Run: python -m unittest test_stacsettlers_robot
+"""
+
+import json
+import os
+import sys
+import tempfile
+import unittest
+
+import stacsettlers
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TEST_AGENT = os.path.join(HERE, "..", "jsettlers", "first_move_agent.py")
+STAC = (3, "Stac", "stac", "TRY_N_BEST_BUILD_PLANS:0|FAVOUR_DEV_CARDS:-5|NP_MAX_NUMBER_OF_OFFERS_WITHOUT_BUILDING:3")
+
+
+def agent_command(*flags):
+    return f'"{sys.executable}" "{os.path.abspath(TEST_AGENT)}" ' + " ".join(flags)
+
+
+def play(games, agent, logs, name="OSPTest", opponents=STAC, fully_observable=False):
+    """Headless games with one Open Seat Agent robot and three of StacSettlers' agents; the simulation's output"""
+    directory = tempfile.mkdtemp()
+    config = stacsettlers.config(name, games, [(1, "Hexfarer", "osp"), opponents], fully_observable=fully_observable)
+    output = stacsettlers.simulate(directory, config, agent, {"osp.log": logs, "osp.debug": "true"},
+                                   timeout=int(os.environ.get("STACSETTLERS_ROBOT_TIMEOUT", "900")))
+    return output, directory
+
+
+def results(output):
+    """The games' result records (osp-result lines), and in each the line of the seat an Open Seat Agent plays"""
+    lines = [json.loads(line[line.index("{"):]) for line in output.splitlines() if '"osp-result"' in line]
+    return lines, [next(seat for seat in line["result"]["seats"] if seat["agent"] is not None) for line in lines]
+
+
+def messages(logs):
+    """What the agent got in each game, by its log file (the test agent writes each message to standard error)"""
+    found = []
+    for name in sorted(os.listdir(logs)):
+        with open(os.path.join(logs, name), encoding="utf-8") as file:
+            found.append([json.loads(line) for line in file if line.startswith("{")])
+    return found
+
+
+@unittest.skipUnless(stacsettlers.available(), "needs a JDK and StacSettlers' jar in STACSETTLERS_JAR")
+class RobotTests(unittest.TestCase):
+    GAMES = 8
+
+    @classmethod
+    def setUpClass(cls):
+        stacsettlers.build()
+        cls.logs = tempfile.mkdtemp()
+        cls.output, cls.directory = play(cls.GAMES, agent_command("--weighted", "--full"), cls.logs)
+        cls.lines, cls.stats = results(cls.output)
+
+    def test_every_game_ends_with_a_winner_and_its_result_line(self):
+        self.assertEqual(self.GAMES, len(self.lines), self.output[-3000:])
+        for line in self.lines:
+            self.assertIsNotNone(line["winner"], line)
+            self.assertGreaterEqual(line["vp"][line["winner"]], 10, line)
+            self.assertIsInstance(line["result"]["seed"], int)
+            self.assertEqual(4, len(line["players"]))
+            self.assertIn("Hexfarer", line["players"])
+
+    def test_stacsettlers_counts_the_same_winner(self):
+        # StacSettlers' own results table (results/<run>/results.txt): one row per game, the winner flagged
+        tables = [os.path.join(root, "results.txt") for root, _, names in os.walk(os.path.join(self.directory, "results")) if "results.txt" in names]
+        self.assertEqual(1, len(tables), self.output[-3000:])
+        with open(tables[0], encoding="utf-8") as file:
+            rows = [line.rstrip("\n").split("\t") for line in file][1:]
+        winners = {}
+        for row in rows:
+            for i in range(2, len(row) - 7, 8):
+                if row[i + 1] == "1":
+                    winners[row[0]] = row[i]
+        self.assertEqual({line["game_id"]: line["players"][line["winner"]] for line in self.lines}, winners)
+
+    def test_the_robot_decides_through_its_agent_without_fallbacks(self):
+        self.assertEqual(self.GAMES, len(self.stats), self.output[-3000:])
+        for seat in self.stats:
+            self.assertEqual(("first-move", "truth", False), (seat["agent"], seat["needs"], seat["observe"]))
+            self.assertGreater(seat["robot_decisions"], 20, seat)
+            self.assertGreater(seat["decisions"], 5, seat)
+            self.assertLessEqual(seat["max_ms"], seat["time_ms"], seat)
+            self.assertEqual((0, [], 0), (seat["fallbacks"], seat["failures"], seat["stalls"]), seat)
+
+    def test_the_server_never_ends_a_turn_on_its_own(self):
+        self.assertNotIn("force end turn", self.output)
+
+    def test_the_robot_plays_cards_and_builds(self):
+        # The test agent builds and plays development cards where it can: in eight games every kind of move comes up but the rarer cards
+        played = [json.loads(line[line.index("{"):]) for line in self.output.splitlines() if line.startswith("[osp ") and "] move " in line]
+        kinds = {move["move"][0] for move in played}
+        self.assertTrue({"build_settlement", "build_road", "roll", "end_turn", "move_robber", "buy_development", "play_knight"} <= kinds, kinds)
+
+    def test_the_agent_got_the_game_its_decisions_and_its_end(self):
+        games = messages(self.logs)
+        self.assertEqual(self.GAMES, len(games))
+        for got in games:
+            kinds = [m["type"] for m in got]
+            self.assertEqual(["handshake", "before"], kinds[:2])
+            self.assertEqual("after", kinds[-1])
+            self.assertTrue(all(k == "decide" for k in kinds[2:-1]))
+            before = got[1]
+            self.assertEqual({"preset": "standard", "player_trading": "none", "bank_shortage": "unlimited", "robber_victims": "with_cards",
+                              "road_building": "forced"}, before["ruleset"])
+            self.assertEqual({"decide_ms": 120000, "game_ms": None, "threads": None, "gpu": True}, before["budget"])
+            self.assertEqual(37, len(before["board"]["tiles"]))
+            # Every decision carries the true state (no steps come), numbered in order, its seat the one that acts
+            decides = got[2:-1]
+            numbers = [m["n"] for m in decides]
+            self.assertEqual(numbers, sorted(numbers))
+            self.assertEqual(len(numbers), len(set(numbers)))
+            for decide in decides:
+                self.assertEqual(before["seat"], decide["seat"])
+                self.assertEqual(decide["seat"], decide["state"]["current"])
+                self.assertTrue(all(p["hand"] is not None for p in decide["state"]["players"]))
+            self.assertEqual(got[-1]["winner"] is None, got[-1]["truncated"])
+            self.assertIsNotNone(got[-1]["winner"])
+
+
+@unittest.skipUnless(stacsettlers.available(), "needs a JDK and StacSettlers' jar in STACSETTLERS_JAR")
+class ViewRobotTests(unittest.TestCase):
+    """A robot whose agent asks for its seat's view only (needs: view)"""
+
+    def test_a_view_shows_the_seats_own_cards_and_no_others(self):
+        stacsettlers.build()
+        logs = tempfile.mkdtemp()
+        output, _ = play(1, agent_command("--needs", "view"), logs, name="OSPView")
+        lines, stats = results(output)
+        self.assertEqual(1, len(lines), output[-3000:])
+        self.assertEqual(("view", 0, []), (stats[0]["needs"], stats[0]["fallbacks"], stats[0]["failures"]))
+        decides = [m for m in messages(logs)[0] if m["type"] == "decide"]
+        self.assertGreater(len(decides), 5)
+        for decide in decides:
+            self.assertEqual(True, decide["own_shown"], decide)
+            self.assertEqual(True, decide["others_hidden"], decide)
+
+
+@unittest.skipUnless(stacsettlers.available(), "needs a JDK and StacSettlers' jar in STACSETTLERS_JAR")
+class FailureTests(unittest.TestCase):
+    """An agent that fails: the failure is told to it (if it still listens), recorded with its code in the game's result,
+    and the robot plays on with the first legal move, so the game ends all the same"""
+
+    def test_an_illegal_answer(self):
+        stacsettlers.build()
+        logs = tempfile.mkdtemp()
+        output, _ = play(1, agent_command("--illegal", "--full"), logs, name="OSPIllegal")
+        lines, seats = results(output)
+        self.assertEqual(1, len(lines), output[-3000:])
+        self.assertIsNotNone(lines[0]["winner"], lines[0])
+        self.assertGreater(seats[0]["fallbacks"], 0, seats[0])
+        self.assertEqual([("illegal", "referee")], [(f["code"], f["by"]) for f in seats[0]["failures"]])
+        told = [m for m in messages(logs)[0] if m["type"] == "failure"]
+        self.assertEqual(["illegal"], [m["code"] for m in told])
+
+
+if __name__ == "__main__":
+    unittest.main()
