@@ -61,9 +61,14 @@ def config(name, games, agents, chat=True, fully_observable=False, force_end_tur
     return "\n".join(lines) + "\n"
 
 
+# The line simulate adds to the output of a run that ran out of time
+TIMED_OUT = "osp: the simulation timed out after {seconds} s"
+
+
 def simulate(directory, config_text, agent_command=None, properties=None, timeout=1800, java_options=()):
     """Runs StacSettlers' Simulation with the config in the working directory (created, with the MCTS agents' file),
-    our robots' agent given by agent_command (osp.agent); returns its standard output and error together"""
+    our robots' agent given by agent_command (osp.agent); returns its standard output and error together (of a run that
+    runs out of time, what it wrote so far and the line TIMED_OUT, so its finished games count)"""
     os.makedirs(directory, exist_ok=True)
     source = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(jar()))), TYPE_PDF)
     if os.path.isfile(source):
@@ -75,7 +80,12 @@ def simulate(directory, config_text, agent_command=None, properties=None, timeou
         arguments.append(f"-Dosp.agent={agent_command}")
     arguments += [f"-D{name}={value}" for name, value in (properties or {}).items()]
     arguments += ["-cp", classpath(), "osp.stacsettlers.OSPSimulation", "config.txt"]
-    result = subprocess.run(arguments, cwd=directory, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    try:
+        result = subprocess.run(arguments, cwd=directory, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    except subprocess.TimeoutExpired as expired:
+        # The process is gone; its output so far comes as bytes or text depending on the platform
+        text = lambda out: out.decode("utf-8", errors="replace") if isinstance(out, bytes) else (out or "")
+        return text(expired.stdout) + text(expired.stderr) + "\n" + TIMED_OUT.format(seconds=timeout) + "\n"
     return result.stdout + result.stderr
 
 

@@ -8,7 +8,8 @@ Usage: python play.py --agent "COMMAND" --opponents stac|ss|pomcp|jsettlers|rand
 The opponents fill the other three seats: a preset (stac: the Stac agent with the parameters its README calls best and
 at most 3 offers without building; ss: SmartSettlers; pomcp: Dobre's typed POMCP agent at 10 000 iterations on 4
 threads, as in his thesis; jsettlers: JSettlers 1.1's robot; random) or an agent line's value as Simulation reads it
-(COUNT,NAME,KIND[,FLAGS]). SmartSettlers and the typed MCTS agents need --fully-observable (StacSettlers then shows
+(COUNT,NAME,KIND[,FLAGS]). SmartSettlers and Dobre's MCTS agents without a belief model need --fully-observable (the
+pomcp preset keeps a factored belief and plays without it; StacSettlers then shows
 every hand, discard, robbery and bought card to everyone). The games run with ChatNegotiation=true (the Stac agents only
 trade that way), Trades=true (--no-trades: false) and ForceEndTurns=false (the server ends no turn on its own, however long the agent
 thinks). DIR gets the simulation's working directory (config.txt, results/), the agents' standard error (agents/), the
@@ -16,6 +17,7 @@ output (simulation.log) and summary.json. Needs a JDK and StacSettlers' jar in S
 """
 
 import argparse
+import collections
 import json
 import os
 import statistics
@@ -43,7 +45,9 @@ def summary(output, our_name="Hexfarer"):
         games.append({"game": line["game_id"], "seat": seat["seat"], "winner": line["winner"], "won": line["winner"] == seat["seat"],
                       "vp": line["vp"], "turns": line["result"]["turns"], "decisions": seat["decisions"], "time_ms": seat["time_ms"],
                       "max_ms": seat["max_ms"], "robot_decisions": seat["robot_decisions"], "fallbacks": seat["fallbacks"],
-                      "failures": seat["failures"], "stalls": seat["stalls"], "declined": seat.get("declined"), "agent": seat["agent"]})
+                      "failures": seat["failures"], "stalls": seat["stalls"], "declined": seat.get("declined"), "agent": seat["agent"],
+                      # What the seat asked for: the true state or its view, steps or none, lean decisions
+                      "needs": seat.get("needs"), "observe": seat.get("observe"), "lean": seat.get("lean")})
     decisions = sum(g["decisions"] for g in games)
     return {
         "games": len(games),
@@ -58,6 +62,8 @@ def summary(output, our_name="Hexfarer"):
         "stalls": sum(g["stalls"] for g in games),
         "declined": sum(g["declined"] or 0 for g in games),
         "forced_turn_ends": output.count("force end turn"),
+        "asked": dict(collections.Counter(f'needs {g["needs"]}, {"observes" if g["observe"] else "no steps"}{", lean" if g["lean"] else ""}' for g in games)),
+        "timed_out": stacsettlers.TIMED_OUT.split("{")[0] in output,
         "per_game": games,
     }
 
@@ -99,7 +105,7 @@ def main():
         print(f'{game["game"]}: seat {game["seat"]}, winner {game["winner"]}, vp {game["vp"]}, {game["decisions"]} decisions, '
               f'max {game["max_ms"]} ms, fallbacks {game["fallbacks"]}, stalls {game["stalls"]}, failures {len(game["failures"])}')
     # A run counts as failed where a game didn't end with a result or the seat failed
-    sys.exit(0 if result["games"] == args.games and not result["failures"] and not result["fallbacks"] and not result["stalls"] else 1)
+    sys.exit(0 if result["games"] == args.games and not result["failures"] and not result["fallbacks"] and not result["stalls"] and not result["timed_out"] else 1)
 
 
 if __name__ == "__main__":

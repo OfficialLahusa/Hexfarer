@@ -81,7 +81,8 @@ Contents:
     server didn't take within 20 s, after which the robot decides again without that move). -Dosp.log=DIR keeps each
     agent's standard error, -Dosp.debug=true prints the robot's moves. Run with `ChatNegotiation=true` (the Stac agents
     hang without it) and `ForceEndTurns=false` (else the server ends a turn after 30 s without a move);
-    SmartSettlers and Dobre's typed MCTS agents need `FullyObservable=true`, which shows every hand to everyone.
+    SmartSettlers and Dobre's MCTS agents without a belief model need `FullyObservable=true`, which shows every hand to
+    everyone (the `pomcp` preset keeps a factored belief and plays without it).
   - `play.py`: games of one agent against three of StacSettlers' (presets `stac`, `ss`, `pomcp`, `jsettlers`, `random`, or
     any agent line) with a summary of its wins, decision times and failures, e.g.
     `python play.py --agent "OpenSeat agent --net NET --iterations 5000" --opponents stac --games 10 --out DIR`
