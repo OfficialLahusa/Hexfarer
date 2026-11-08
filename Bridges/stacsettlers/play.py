@@ -4,13 +4,13 @@ summary: the agent's wins, its decisions and their time, fallbacks, failures, st
 declined and turns the server ended.
 
 Usage: python play.py --agent "COMMAND" --opponents stac|ss|pomcp|jsettlers|random|LINE --games N --out DIR
-                      [--name NAME] [--fully-observable] [--no-chat] [--build]
+                      [--name NAME] [--fully-observable] [--no-chat] [--no-trades] [--build]
 The opponents fill the other three seats: a preset (stac: the Stac agent with the parameters its README calls best and
 at most 3 offers without building; ss: SmartSettlers; pomcp: Dobre's typed POMCP agent at 10 000 iterations on 4
 threads, as in his thesis; jsettlers: JSettlers 1.1's robot; random) or an agent line's value as Simulation reads it
 (COUNT,NAME,KIND[,FLAGS]). SmartSettlers and the typed MCTS agents need --fully-observable (StacSettlers then shows
 every hand, discard, robbery and bought card to everyone). The games run with ChatNegotiation=true (the Stac agents only
-trade that way), Trades=true and ForceEndTurns=false (the server ends no turn on its own, however long the agent
+trade that way), Trades=true (--no-trades: false) and ForceEndTurns=false (the server ends no turn on its own, however long the agent
 thinks). DIR gets the simulation's working directory (config.txt, results/), the agents' standard error (agents/), the
 output (simulation.log) and summary.json. Needs a JDK and StacSettlers' jar in STACSETTLERS_JAR.
 """
@@ -71,6 +71,7 @@ def main():
     parser.add_argument("--name", default="Hexfarer_vs")
     parser.add_argument("--fully-observable", action="store_true")
     parser.add_argument("--no-chat", action="store_true", help="ChatNegotiation=false (the Stac agents then hang)")
+    parser.add_argument("--no-trades", action="store_true", help="Trades=false: no trades between players at all")
     parser.add_argument("--build", action="store_true", help="compile the adapter first")
     parser.add_argument("--timeout", type=int, default=24 * 3600)
     args = parser.parse_args()
@@ -83,7 +84,7 @@ def main():
     os.makedirs(agents, exist_ok=True)
     opponents = PRESETS.get(args.opponents, args.opponents).split(",", 3)
     config = stacsettlers.config(args.name, args.games, [(1, "Hexfarer", "osp"), opponents], chat=not args.no_chat,
-                                 fully_observable=args.fully_observable)
+                                 fully_observable=args.fully_observable, trades=not args.no_trades)
     output = stacsettlers.simulate(os.path.join(out, "simulation"), config, args.agent, {"osp.log": agents}, timeout=args.timeout)
     with open(os.path.join(out, "simulation.log"), "w", encoding="utf-8") as file:
         file.write(output)

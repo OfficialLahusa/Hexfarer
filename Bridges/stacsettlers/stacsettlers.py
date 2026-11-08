@@ -47,7 +47,7 @@ def run(main_class, *args, stdin=None, timeout=600):
     return result.stdout
 
 
-def config(name, games, agents, chat=True, fully_observable=False, force_end_turns=False, log=False):
+def config(name, games, agents, chat=True, fully_observable=False, force_end_turns=False, log=False, trades=True):
     """A Simulation config: the suite's settings, then the agents as (count, name, kind[, flags]), e.g.
     (1, "Hexfarer", "osp") and (3, "Stac", "stac", "TRY_N_BEST_BUILD_PLANS:0|FAVOUR_DEV_CARDS:-5")"""
     lines = [f"Games={games}", f"Log={'true' if log else 'false'}", f"ChatNegotiation={'true' if chat else 'false'}"]
@@ -55,7 +55,8 @@ def config(name, games, agents, chat=True, fully_observable=False, force_end_tur
         lines.append("FullyObservable=true")
     if not force_end_turns:
         lines.append("ForceEndTurns=false")
-    lines += ["~", name, "Trades=true"]
+    # Trades between players for everyone or no one (our robot declines every offer either way)
+    lines += ["~", name, f"Trades={'true' if trades else 'false'}"]
     lines += ["Agent=" + ",".join(str(part) for part in agent) for agent in agents]
     return "\n".join(lines) + "\n"
 
