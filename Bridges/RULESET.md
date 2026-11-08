@@ -17,7 +17,7 @@ The rules of an Open Seat Protocol game (see `PROTOCOL.md`) are a set of options
 
 - **`standard`**: the rulebook of the base game for 3 or 4 players. Every option at its default.
 - **`catanatron`**: the rules of Catanatron's engine (commit `ecf9311`), as its referee plays them.
-- JSettlers 2.6.10 and StacSettlers (a fork of JSettlers 1.1.16) have no preset: their games are `standard` with the
+- JSettlers 2.6.10 and StacSettlers (a fork of JSettlers 1.1.13) have no preset: their games are `standard` with the
   options in the last two columns below.
 
 | Option | `standard` | `catanatron` | JSettlers 2.6.10 | StacSettlers |
@@ -38,7 +38,7 @@ The JSettlers column comes from replaying 100 random JSettlers games through Hex
 `OpenSeat replay`). Its `unlimited` bank and its Largest Army timing are what its engine does, not values an agent
 can ask for; its robot names the bank in the ruleset, so an agent that can't play it turns the game down.
 
-The StacSettlers column comes from reading its engine (JSettlers 1.1.16's `SOCGame` in StacSettlers @8185c5e) and from
+The StacSettlers column comes from reading its engine (JSettlers 1.1.13's `SOCGame` in StacSettlers @8185c5e) and from
 its recorder's random games, whose every move passes the checks StacSettlers' server makes (`Recorder`,
 `test_stacsettlers_game`): it pays every production and Year of Plenty without a bank; it robs only players holding a
 resource card; it trades 4:1 with the bank always and 3:1 or 2:1 at the player's harbors (`canMakeBankTrade` takes

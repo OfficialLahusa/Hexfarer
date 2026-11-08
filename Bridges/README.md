@@ -15,7 +15,7 @@ build on those GPL-licensed engines; the rest of the repository is not (see `../
 Pinned versions:
 - Catanatron: commit `ecf9311` (2026-09-08), the first with its protocol for bots in other languages.
 - JSettlers: release 2.6.10 (its full jar, which JSETTLERS_JAR names; a JDK 8 or newer builds the adapter against it).
-- StacSettlers: commit `8185c5e` of sorinMD/StacSettlers (a fork of JSettlers 1.1.16 with the Stac, SmartSettlers and
+- StacSettlers: commit `8185c5e` of sorinMD/StacSettlers (a fork of JSettlers 1.1.13 with the Stac, SmartSettlers and
   Dobre's MCTS agents), built with its dependencies into `STACSettlers-1.0-bin.jar`, which STACSETTLERS_JAR names. Its
   Maven build needs two changes that aren't the adapter's: the compiler at release 8 (for a JDK 21) and the DeepCatan
   dependency left out (GitHub serves no copy of that jar), with its neural network seeder stubbed; nothing the
@@ -65,7 +65,7 @@ Contents:
     JSETTLERS_JAR set).
 - `stacsettlers/`: StacSettlers in protocol terms (Java, built by `stacsettlers.py` against its jar into `build/`), so
   Open Seat Agents play against its Stac agents, SmartSettlers and Dobre's MCTS agents in its headless simulation:
-  - `OSPBoard` and `OSPGame` as for JSettlers, for the JSettlers 1.1.16 engine StacSettlers keeps (other hex type and
+  - `OSPBoard` and `OSPGame` as for JSettlers, for the JSettlers 1.1.13 engine StacSettlers keeps (other hex type and
     development card numbers, no bank, its own checks for the legal moves).
   - `OSPSimulation CONFIG`: StacSettlers' own `Simulation` (its config format and results, unchanged; the config parsed
     by its own code) with one more agent kind, `osp`: `Agent=1,Hexfarer,osp` seats a robot whose decisions the Open Seat

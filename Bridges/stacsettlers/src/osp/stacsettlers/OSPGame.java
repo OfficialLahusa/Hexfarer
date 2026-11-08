@@ -20,7 +20,7 @@ import soc.game.SOCSettlement;
 import soc.util.IntPair;
 
 /**
- * A StacSettlers game (its SOCGame, JSettlers 1.1.16's, which holds StacSettlers' rules) in the Open Seat Protocol (see
+ * A StacSettlers game (its SOCGame, JSettlers 1.1.13's, which holds StacSettlers' rules) in the Open Seat Protocol (see
  * ../../PROTOCOL.md): its state as the referee or a seat sees it, the legal moves of the seat that acts, and playing a
  * move with its result. The legal moves are the protocol's moves StacSettlers' own checks allow (SOCGame's and
  * SOCPlayer's can..., could... and isPotential... methods, the ones its server asks before it takes a request), one
@@ -123,7 +123,7 @@ public final class OSPGame
     }
 
     /**
-     * The protocol's name of a development card type, by StacSettlers' numbers (JSettlers 1.1.16's: the knight is 0,
+     * The protocol's name of a development card type, by StacSettlers' numbers (JSettlers 1.1.13's: the knight is 0,
      * where JSettlers 2 has 9); every victory point card is one
      */
     public static String cardName(int type)

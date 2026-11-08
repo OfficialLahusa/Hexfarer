@@ -13,7 +13,7 @@ import soc.game.SOCGame;
 /**
  * StacSettlers' classic board in the Open Seat Protocol's keys (see ../../PROTOCOL.md): hexes in axial coordinates
  * [q, r] (pointy-top, q to the east, r to the south-east, the center hex [0, 0]), an intersection as its three hexes (sea
- * included), a path as its two intersections. StacSettlers keeps JSettlers 1.1.16's board (SOCBoard, encoding 1), whose
+ * included), a path as its two intersections. StacSettlers keeps JSettlers 1.1.13's board (SOCBoard, encoding 1), whose
  * coordinates are those of JSettlers 2 but whose hex type numbers differ (the desert is 0 and the sea 6): the codes come
  * from its own constants. Everything else follows from its own adjacency: it numbers a hex's corners clockwise from north,
  * so the neighbor across each side is the hex that shares those two corners, and walking from the center hex gives every

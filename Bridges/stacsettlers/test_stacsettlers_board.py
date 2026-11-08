@@ -3,7 +3,7 @@ StacSettlers' classic board in Open Seat Protocol keys (OSPBoard.java) and a fre
 against the protocol's reference shape of the classic board (../osp/classic-board.json) and anchored to the meaning of
 the compass directions (StacSettlers, like JSettlers 1.1, numbers a hex's corners clockwise from north), so a mirrored or
 rotated mapping can't pass; tiles, numbers and harbors keep their meaning under StacSettlers' own constants (JSettlers
-1.1.16's: the desert is hex type 0 and the sea 6, the reverse of JSettlers 2). Needs a JDK and StacSettlers' jar in
+1.1.13's: the desert is hex type 0 and the sea 6, the reverse of JSettlers 2). Needs a JDK and StacSettlers' jar in
 STACSETTLERS_JAR. Run: python -m unittest test_stacsettlers_board
 """
 
@@ -20,7 +20,7 @@ STEPS = {"EAST": (1, 0), "SOUTHEAST": (0, 1), "SOUTHWEST": (-1, 1), "WEST": (-1,
 # A hex's corners clockwise from north, each between the two neighbors on either side of it
 CORNERS = [("NORTHWEST", "NORTHEAST"), ("NORTHEAST", "EAST"), ("EAST", "SOUTHEAST"), ("SOUTHEAST", "SOUTHWEST"),
            ("SOUTHWEST", "WEST"), ("WEST", "NORTHWEST")]
-# StacSettlers' hex types (JSettlers 1.1.16's SOCBoard: DESERT_HEX 0, CLAY 1, ORE 2, SHEEP 3, WHEAT 4, WOOD 5, WATER 6)
+# StacSettlers' hex types (JSettlers 1.1.13's SOCBoard: DESERT_HEX 0, CLAY 1, ORE 2, SHEEP 3, WHEAT 4, WOOD 5, WATER 6)
 # and port types by meaning, as SGN's codes
 DESERT = 0
 HEX_CODES = {0: "D", 1: "H", 2: "M", 3: "P", 4: "F", 5: "FO"}

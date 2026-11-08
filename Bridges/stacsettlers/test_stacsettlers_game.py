@@ -1,6 +1,6 @@
 """
 StacSettlers' games in the Open Seat Protocol (OSPGame.java) and the recorder (Recorder.java), which plays random games
-by StacSettlers' own rules (JSettlers 1.1.16's SOCGame) and writes them as a referee's messages: every move played passes
+by StacSettlers' own rules (JSettlers 1.1.13's SOCGame) and writes them as a referee's messages: every move played passes
 the checks StacSettlers' server makes before it takes a request (a robber's victims are the ones its game finds, a
 discard is one it takes, a card is one it lets the player play, ...); every decision lists distinct legal moves, the move
 played is one of them, states keep the protocol's shape and add up (pieces, cards), every kind of decision and move comes

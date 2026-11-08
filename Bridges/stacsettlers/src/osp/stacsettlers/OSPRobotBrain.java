@@ -585,7 +585,7 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
             client.buildRequest(game, SOCPlayingPiece.CITY);
             break;
         case "buy_development": client.buyDevCard(game); break;
-        // StacSettlers' card numbers (JSettlers 1.1.16's, not JSettlers 2's)
+        // StacSettlers' card numbers (JSettlers 1.1.13's, not JSettlers 2's)
         case "play_knight": client.playDevCard(game, SOCDevCardConstants.KNIGHT); break;
         case "play_road_building": client.playDevCard(game, SOCDevCardConstants.ROADS); break;
         case "play_year_of_plenty":
