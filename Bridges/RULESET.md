@@ -103,5 +103,5 @@ How long an agent may think is no rule of the game: it is the game's budget in `
 | Hexfarer's agent (`OpenSeat agent`) | `standard`, `catanatron` | follows `robber_victims`, `bank_rates` and `road_building` by narrowing its legal moves; takes the referee's bank, hands and Longest Road where its own rules would differ |
 | Catanatron's referee (`drive.py`) | `catanatron` | |
 | Catanatron's agent (`open_seat_agent.py`) | `standard`, `catanatron` | rebuilds its game from the referee's state at each decision |
-| JSettlers' server with our robot | `standard` | sends `player_trading` `none`, `bank_shortage` `unlimited`, `bank_rates` `best_only`, `robber_victims` `with_cards`, `road_building` `forced` |
+| JSettlers' server with our robot | `standard` | sends `player_trading` `first_accept` with `offer_limit` null (`none` with game option NT), `bank_shortage` `unlimited`, `bank_rates` `best_only`, `robber_victims` `with_cards`, `road_building` `forced` |
 | StacSettlers' simulation with our robot | `standard` | sends `player_trading` `first_accept` (Trades=true, its agents' trades as offers and accepts) or `none`, `bank_shortage` `unlimited`, `robber_victims` `with_cards`, `road_building` `forced` |
