@@ -88,7 +88,7 @@ Contents:
     checked as its server would check the request.
   - Tests: `python -m unittest test_stacsettlers_board test_stacsettlers_game test_stacsettlers_robot
     test_stacsettlers_record` (with STACSETTLERS_JAR set; the robot tests play against three Stac agents with the test
-    agent of `jsettlers/`).
+    agent of `jsettlers/`, one of them against three cheap POMCP agents for about 3 minutes; about 5 minutes in all).
 
 On Hexfarer's side, outside this folder: `OpenSeat replay LOG` plays a referee's log through Hexfarer's rules and lists
 the differences, `OpenSeat relay LOG --save DIR` writes its games as save files for the client (a new part where the
