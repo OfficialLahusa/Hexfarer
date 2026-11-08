@@ -23,6 +23,7 @@ import soc.message.SOCBuildRequest;
 import soc.message.SOCChoosePlayer;
 import soc.message.SOCDiscard;
 import soc.message.SOCDiscoveryPick;
+import soc.message.SOCGameTextMsg;
 import soc.message.SOCMessage;
 import soc.message.SOCMonopolyPick;
 import soc.message.SOCMoveRobber;
@@ -192,7 +193,10 @@ final class MoveLog
             Map<String, Object> before = osp.state(-1);
             int acting = osp.acting();
             // The legal moves only for the requests that make moves (not for the chat of the agents' negotiations)
-            List<Object> legal = ! MOVES.contains(message.getType()) ? null
+            // and the trade messages of the agents' chat (one may close a trade: the offer's decision lists the moves of the
+            // player on turn, as JSettlers' log does, an offer's terms being no move a list can hold)
+            boolean trade = message instanceof SOCGameTextMsg && String.valueOf(((SOCGameTextMsg) message).getText()).startsWith("TRD:");
+            List<Object> legal = ! MOVES.contains(message.getType()) && ! trade ? null
                 : message.getType() == SOCMessage.DISCARD && seat >= 0 ? osp.discardMoves(seat) : acting >= 0 ? osp.legal(acting) : new ArrayList<>();
             List<Integer> mustDiscard = new ArrayList<>();
             for (int s = 0; s < game.maxPlayers; s++)
@@ -388,7 +392,7 @@ final class MoveLog
             break;
         default:
             // A trade between players (executed after their chat), or else a change no protocol move makes
-            if (! traded(before, after))
+            if (! traded(before, after, legal))
                 gap();
         }
     }
@@ -398,7 +402,7 @@ final class MoveLog
      * chat: written as the steps of player_trading first_accept, the offer of what changed hands to the partner and the
      * partner's accept; false if the change was no such trade
      */
-    private boolean traded(Map<String, Object> before, Map<String, Object> after)
+    private boolean traded(Map<String, Object> before, Map<String, Object> after, List<Object> legal)
     {
         int onTurn = Json.integer(before.get("on_turn"));
         int partner = -1;
@@ -445,7 +449,7 @@ final class MoveLog
         Map<String, Object> give = OSPGame.cardSet(gives), get = OSPGame.cardSet(gets);
         if (give.isEmpty() || get.isEmpty() || ! traded.equals(after))
             return false;
-        step(onTurn, Json.array("offer", Json.object("give", give, "get", get, "to", Json.array((long) partner))), null, before, null);
+        step(onTurn, Json.array("offer", Json.object("give", give, "get", get, "to", Json.array((long) partner))), null, before, legal);
         // While the offer stands the partner answers it
         Map<String, Object> offered = OSPGame.copy(before);
         offered.put("prompt", "answer_offer");

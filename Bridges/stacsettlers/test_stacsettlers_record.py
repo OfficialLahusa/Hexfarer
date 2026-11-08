@@ -59,8 +59,9 @@ class RecordTests(unittest.TestCase):
                 self.assertEqual(decide["seat"], step["seat"])
                 self.assertEqual(decide["seat"], decide["state"]["current"], decide["n"])
                 if step["action"][0] == "offer":
-                    # The player on turn offering: terms no list of legal moves holds
-                    self.assertEqual((None, decide["state"]["on_turn"]), (decide["legal"], step["seat"]))
+                    # The player on turn offering: terms no list of legal moves holds, so the list is its other moves
+                    self.assertEqual(decide["state"]["on_turn"], step["seat"])
+                    self.assertTrue(decide["legal"] and "offer" not in {m[0] for m in decide["legal"]}, decide["legal"])
                     continue
                 self.assertIn(canonical(step["action"]), {canonical(m) for m in decide["legal"]}, f"{game[0]['game_id']} move {n}")
 
