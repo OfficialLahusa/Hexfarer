@@ -46,8 +46,10 @@ each, so not only the best rate, unlike JSettlers 2); a Road Building card gives
 two places for them and its roads can't be given up; a player wins only on their own turn (`checkForWinner` looks at
 the player on turn), and a knight that brings Largest Army and the points ends the game once the robber has moved.
 Replaying Stac agents' games through Hexfarer's rules (`record.py`, games without trades between players, and
-`OpenSeat replay`) shows the same two differences and no other in the moves before a game's first one (RECORDS); later
-moves of a diverged game aren't compared, so a rarer difference may still hide there. Its server also takes a second
+`OpenSeat replay`) shows the same two differences and no other: 20 games, 6311 moves, 4 games diverged, 3 by the
+Largest Army's timing and 1 by the bank, whose missing limit also lets Year of Plenty and bank trades take a resource
+of which the hands hold all 19. Later moves of a diverged game aren't compared, so a rarer difference may still hide
+there. Its server also takes a second
 setup road anywhere its player could build one, not only next to the settlement just placed; our robot keeps to the
 rulebook there, the Stac agents did too in the replayed games.
 
