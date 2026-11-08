@@ -17,25 +17,38 @@ The rules of an Open Seat Protocol game (see `PROTOCOL.md`) are a set of options
 
 - **`standard`**: the rulebook of the base game for 3 or 4 players. Every option at its default.
 - **`catanatron`**: the rules of Catanatron's engine (commit `ecf9311`), as its referee plays them.
-- JSettlers 2.6.10 has no preset: its games are `standard` with the options in the last column below.
+- JSettlers 2.6.10 and StacSettlers (a fork of JSettlers 1.1.16) have no preset: their games are `standard` with the
+  options in the last two columns below.
 
-| Option | `standard` | `catanatron` | JSettlers 2.6.10 |
-|---|---|---|---|
-| `victory_points` | 10 | 10 | 10 |
-| `discard_limit` | 7 | 7 | 7 |
-| `player_trading` | `rulebook` | `none` | `rulebook`, `none` with game option NT |
-| `counteroffers` | `true` | `false` | `true` |
-| `bank_shortage` | `rulebook` | `nobody` | `unlimited` |
-| `win_timing` | `own_turn` | `any_time` | `own_turn`, by Largest Army only after the robber moved |
-| `robber_victims` | `adjacent` | `with_cards` | `with_cards` |
-| `bank_rates` | `all` | `best_only` | `best_only` |
-| `road_building` | `optional` | `forced` | `forced` |
-| `turn_limit` | none | 1000 | none |
-| `offer_limit` | none | none (no trading) | not measured (our robot plays without trades) |
+| Option | `standard` | `catanatron` | JSettlers 2.6.10 | StacSettlers |
+|---|---|---|---|---|
+| `victory_points` | 10 | 10 | 10 | 10 |
+| `discard_limit` | 7 | 7 | 7 | 7 |
+| `player_trading` | `rulebook` | `none` | `rulebook`, `none` with game option NT | `none` for our seat (its own agents trade among themselves in chat) |
+| `counteroffers` | `true` | `false` | `true` | (no trades for our seat) |
+| `bank_shortage` | `rulebook` | `nobody` | `unlimited` | `unlimited` |
+| `win_timing` | `own_turn` | `any_time` | `own_turn`, by Largest Army only after the robber moved | `own_turn`, by Largest Army only after the robber moved |
+| `robber_victims` | `adjacent` | `with_cards` | `with_cards` | `with_cards` |
+| `bank_rates` | `all` | `best_only` | `best_only` | `all` |
+| `road_building` | `optional` | `forced` | `forced` | `forced` |
+| `turn_limit` | none | 1000 | none | none (its config's NoTurns unset) |
+| `offer_limit` | none | none (no trading) | not measured (our robot plays without trades) | (no trades for our seat; its Stac agents keep their own limit) |
 
 The JSettlers column comes from replaying 100 random JSettlers games through Hexfarer's rules (`Recorder` and
 `OpenSeat replay`). Its `unlimited` bank and its Largest Army timing are what its engine does, not values an agent
 can ask for; its robot names the bank in the ruleset, so an agent that can't play it turns the game down.
+
+The StacSettlers column comes from reading its engine (JSettlers 1.1.16's `SOCGame` in StacSettlers @8185c5e) and from
+its recorder's random games, whose every move passes the checks StacSettlers' server makes (`Recorder`,
+`test_stacsettlers_game`): it pays every production and Year of Plenty without a bank; it robs only players holding a
+resource card; it trades 4:1 with the bank always and 3:1 or 2:1 at the player's harbors (`canMakeBankTrade` takes
+each, so not only the best rate, unlike JSettlers 2); a Road Building card gives two roads only with two roads left and
+two places for them and its roads can't be given up; a player wins only on their own turn (`checkForWinner` looks at
+the player on turn), and a knight that brings Largest Army and the points ends the game once the robber has moved. Not
+verified yet: no StacSettlers game has been replayed through Hexfarer's rules, so a difference the reading missed (the
+Longest Road's length or ties, say) would only show there. Its server also takes a second setup road anywhere its
+player could build one, not only next to the settlement just placed; our robot keeps to the rulebook there, its own
+agents may not.
 
 ## Options
 
@@ -84,3 +97,4 @@ How long an agent may think is no rule of the game: it is the game's budget in `
 | Catanatron's referee (`drive.py`) | `catanatron` | |
 | Catanatron's agent (`open_seat_agent.py`) | `standard`, `catanatron` | rebuilds its game from the referee's state at each decision |
 | JSettlers' server with our robot | `standard` | sends `player_trading` `none`, `bank_shortage` `unlimited`, `bank_rates` `best_only`, `robber_victims` `with_cards`, `road_building` `forced` |
+| StacSettlers' simulation with our robot | `standard` | sends `player_trading` `none`, `bank_shortage` `unlimited`, `robber_victims` `with_cards`, `road_building` `forced` |
