@@ -1,8 +1,9 @@
 """
 Builds and runs the StacSettlers adapter (Java, in src/) against StacSettlers' jar with its dependencies
 (STACSettlers-1.0-bin.jar), which STACSETTLERS_JAR names (StacSettlers is a dependency, never copied in). The classes go
-to build/ next to this file. simulate() runs StacSettlers' headless games (its Simulation, through OSPSimulation, which
-knows the agent kind "osp") in a working directory of their own.
+to build/ next to this file, or to the directory STACSETTLERS_CLASSES names (e.g. to keep a long run's classes apart
+from later builds). simulate() runs StacSettlers' headless games (its Simulation, through OSPSimulation, which knows the
+agent kind "osp") in a working directory of their own.
 """
 
 import os
@@ -12,7 +13,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SOURCES = os.path.join(HERE, "src")
-CLASSES = os.path.join(HERE, "build")
+CLASSES = os.environ.get("STACSETTLERS_CLASSES") or os.path.join(HERE, "build")
 # StacSettlers' MCTS agents read this file from the working directory
 TYPE_PDF = "mcts.game.catan.typepdf.HumanActionTypePdf.dat"
 
