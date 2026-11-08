@@ -15,8 +15,12 @@ import soc.game.SOCResourceConstants;
 import soc.game.SOCResourceSet;
 import soc.game.SOCRoad;
 import soc.game.SOCSettlement;
+import soc.dialogue.StacDialogueManager;
+import soc.dialogue.StacTradeMessage;
+import soc.message.SOCGameTextMsg;
 import soc.message.SOCMessage;
 import soc.robot.SOCRobotBrainImpl;
+import soc.robot.stac.StacRobotDialogueManager;
 import soc.robot.SOCRobotClient;
 import soc.util.CappedQueue;
 import soc.util.SOCRobotParameters;
@@ -29,7 +33,8 @@ import soc.util.SOCRobotParameters;
  * answer through the robot client's requests, a protocol move that takes StacSettlers two steps (a bought piece and its
  * place, a card and its resources, a robber move and its victim) one after the other. It keeps none of StacSettlers' own
  * robot logic or game tracking, and it takes no part in the trades the other robots negotiate in chat: it never announces
- * that it participates, so they neither wait for its answers nor trade with it.
+ * that it participates (so Stac agents don't wait for its answers) and declines every offer made to it (Dobre's MCTS
+ * agents wait for the answer).
  *
  * It speaks version 2: it serves view and truth (no worlds) and lean decisions; it sends no steps yet, so every decision
  * carries the full state (an agent that asked to observe is told the game without steps, and the result record says
@@ -107,10 +112,14 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
                     alive = false;
                     break;
                 }
-                if (type == SOCMessage.GAMETEXTMSG && ! pinged)
+                if (type == SOCMessage.GAMETEXTMSG)
                 {
-                    pinged = true;
-                    debug("pinged", null);
+                    if (! pinged)
+                    {
+                        pinged = true;
+                        debug("pinged", null);
+                    }
+                    declineOffer((SOCGameTextMsg) message);
                 }
                 try
                 {
@@ -144,6 +153,34 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
             if (pinger != null)
                 pinger.stopPinger();
             OSPServer.BRAINS.remove(this);
+        }
+    }
+
+    /**
+     * Declines a trade offer made to this seat in the game's chat (StacSettlers' agents negotiate there): the seat takes
+     * no part in trades between players. Stac agents offer to every player but wait only for those that announced they
+     * participate, which this robot never does; Dobre's MCTS agents wait for the answer, so it answers with
+     * StacSettlers' own reject message, as their agents that don't trade do.
+     */
+    private void declineOffer(SOCGameTextMsg chat)
+    {
+        String text = chat.getText();
+        if (text == null || ! text.startsWith(StacTradeMessage.TRADE) || client.getNickname().equals(chat.getNickname()) || ourPlayerData == null)
+            return;
+        try
+        {
+            StacTradeMessage trade = StacTradeMessage.parse(StacDialogueManager.fromMessage(text));
+            int us = ourPlayerData.getPlayerNumber();
+            if (trade.getOffer() == null || trade.getSenderInt() == us || ! java.util.Arrays.asList(trade.getReceivers().split(",")).contains(Integer.toString(us)))
+                return;
+            client.sendText(game, StacRobotDialogueManager.makeRejectMessage(us, trade.getSenderInt(), "No, thanks."));
+            if (record != null)
+                record.seat(osp.seatOf(us)).declined();
+            debug("declined", Json.object("from", (long) trade.getSenderInt(), "offer", text));
+        }
+        catch (RuntimeException e)
+        {
+            System.err.println(client.getNickname() + " in " + game.getName() + ": can't read the trade message " + text + ": " + e);
         }
     }
 
@@ -244,8 +281,12 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
         List<Object> move = (List<Object>) (legal.size() == 1 ? legal.get(0) : ask(seat, legal, seen));
         pendingFrom = state;
         acted(seen);
+        decided = seen.key + Json.write(move, true);
         firstStep(move, state);
     }
+
+    // The last move decided, with the position it was decided in: a move the server stopped halfway isn't tried again there
+    private String decided;
 
     // The seat sent a request in this position: the next decision waits until the game went on
     private void acted(Seen seen)
@@ -270,13 +311,17 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
         debug("stall", Json.object("state", (long) seen.state, "move", lastMove));
         actedOn = null;
         pending = null;
-        if (lastMove != null && seen.deciding)
+        if (seen.deciding)
         {
-            // Decided again without that move
-            refused.add(seen.key + Json.write(lastMove, true));
+            // Decided again, without that move if it was a whole one (a second step leaves nothing to rule out)
+            if (lastMove != null)
+                refused.add(seen.key + Json.write(lastMove, true));
             return;
         }
-        // Halfway through a move: its first step undone, or its second made with the first choice there is
+        // Halfway through a move: its first step undone (the move left out when the robot decides there again), or its
+        // second made with the first choice there is
+        if (decided != null)
+            refused.add(decided);
         switch (seen.state)
         {
         case SOCGame.PLACING_ROAD: client.cancelBuildRequest(game, SOCPlayingPiece.ROAD); break;

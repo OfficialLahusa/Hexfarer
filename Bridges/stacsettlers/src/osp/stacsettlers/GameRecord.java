@@ -13,7 +13,8 @@ import soc.game.SOCPlayer;
 /**
  * A StacSettlers game's result record (see ../../PROTOCOL.md), for the games an Open Seat Agent's robot plays in: the
  * seed every agent of the game gets, a line per seat that the seat's robot brain fills in (the agent, what it received,
- * its decisions and their time, resyncs, fallbacks, failures, the robot's own moves and its stalls; StacSettlers' own
+ * its decisions and their time, resyncs, fallbacks, failures, the robot's own moves, its stalls and the offers it
+ * declined; StacSettlers' own
  * robots leave theirs empty), and at the game's end the winner and the points. It is written once, as an osp-result line
  * on standard error with the players by seat and the CPU time of every robot brain's thread in the game. Moves are
  * counted for our seats only: without a recorder of the server's requests the referee sees no other seat's moves, so the
@@ -50,7 +51,7 @@ final class GameRecord
     {
         private String agent, needs;
         private Boolean observe, lean;
-        private int decisions, resyncs, fallbacks, robotDecisions, stalls;
+        private int decisions, resyncs, fallbacks, robotDecisions, stalls, declined;
         private long timeMs, maxMs;
         private final List<Object> failures = new ArrayList<>();
 
@@ -89,6 +90,11 @@ final class GameRecord
             stalls++;
         }
 
+        synchronized void declined()
+        {
+            declined++;
+        }
+
         synchronized void failed(Long n, String code, boolean byAgent, String message)
         {
             failures.add(Json.object("n", n, "code", code, "by", byAgent ? "agent" : "referee", "message", message));
@@ -98,7 +104,7 @@ final class GameRecord
         {
             return Json.object("seat", (long) seat, "agent", agent, "needs", needs, "observe", observe, "lean", lean,
                 "decisions", (long) decisions, "time_ms", timeMs, "max_ms", maxMs, "resyncs", (long) resyncs, "fallbacks", (long) fallbacks,
-                "failures", new ArrayList<>(failures), "robot_decisions", (long) robotDecisions, "stalls", (long) stalls,
+                "failures", new ArrayList<>(failures), "robot_decisions", (long) robotDecisions, "stalls", (long) stalls, "declined", (long) declined,
                 "moves", agent == null ? null : (Object) (long) robotDecisions);
         }
     }

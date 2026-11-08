@@ -93,6 +93,12 @@ class RobotTests(unittest.TestCase):
             self.assertLessEqual(seat["max_ms"], seat["time_ms"], seat)
             self.assertEqual((0, [], 0), (seat["fallbacks"], seat["failures"], seat["stalls"]), seat)
 
+    def test_the_robot_declines_the_offers_made_to_it(self):
+        # Stac agents offer to every player (they wait only for those that announced they participate, which the robot
+        # never does); the robot takes no part in trades between players and answers each offer with a reject
+        self.assertGreater(sum(seat["declined"] for seat in self.stats), 0, self.stats)
+        self.assertTrue(any(line.startswith("[osp Hexfarer") and "] declined " in line for line in self.output.splitlines()))
+
     def test_the_server_never_ends_a_turn_on_its_own(self):
         self.assertNotIn("force end turn", self.output)
 
@@ -144,6 +150,25 @@ class ViewRobotTests(unittest.TestCase):
         for decide in decides:
             self.assertEqual(True, decide["own_shown"], decide)
             self.assertEqual(True, decide["others_hidden"], decide)
+
+
+@unittest.skipUnless(stacsettlers.available(), "needs a JDK and StacSettlers' jar in STACSETTLERS_JAR")
+class MCTSOpponentTests(unittest.TestCase):
+    """Against Dobre's POMCP agents (cheap: 300 iterations on one thread), which offer trades to anyone and wait for the
+    answer: the robot declines every offer made to it, so the game goes on to its end (about 3 minutes)"""
+
+    def test_offers_to_the_robot_are_declined_and_the_game_ends(self):
+        stacsettlers.build()
+        logs = tempfile.mkdtemp()
+        pomcp = (3, "POMCP", "mcts", "MCTS_FACTORED_BELIEF|MCTS_POMCP|MCTS_LIST_POMS|MCTS_PUCT|MCTS_Cp:4|MCTS_HUMAN_ACTION_TYPE_PDF_CONDITIONED_SEEDING"
+                 "|MCTS_HUMAN_ACTION_TYPE_PDF_SEEDING_TEMPERATURE:7|MCTS_TYPED_ROLLOUTS|MCTS_HUMAN_ACTION_TYPE_CONDITIONED_DIST_ROLLOUTS"
+                 "|MCTS_ITERATIONS:300|MCTS_THREADS:1|MCTS_OFFERS_LIMIT:3")
+        output, _ = play(1, agent_command("--weighted"), logs, name="OSPMCTS", opponents=pomcp)
+        lines, seats = results(output)
+        self.assertEqual(1, len(lines), output[-3000:])
+        self.assertIsNotNone(lines[0]["winner"], lines[0])
+        self.assertEqual((0, [], 0), (seats[0]["fallbacks"], seats[0]["failures"], seats[0]["stalls"]), seats[0])
+        self.assertGreater(seats[0]["declined"], 0, seats[0])
 
 
 @unittest.skipUnless(stacsettlers.available(), "needs a JDK and StacSettlers' jar in STACSETTLERS_JAR")

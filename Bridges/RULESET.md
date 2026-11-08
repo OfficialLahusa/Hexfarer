@@ -24,7 +24,7 @@ The rules of an Open Seat Protocol game (see `PROTOCOL.md`) are a set of options
 |---|---|---|---|---|
 | `victory_points` | 10 | 10 | 10 | 10 |
 | `discard_limit` | 7 | 7 | 7 | 7 |
-| `player_trading` | `rulebook` | `none` | `rulebook`, `none` with game option NT | `none` for our seat (its own agents trade among themselves in chat) |
+| `player_trading` | `rulebook` | `none` | `rulebook`, `none` with game option NT | `none` for our seat (it declines their offers; its own agents trade among themselves in chat) |
 | `counteroffers` | `true` | `false` | `true` | (no trades for our seat) |
 | `bank_shortage` | `rulebook` | `nobody` | `unlimited` | `unlimited` |
 | `win_timing` | `own_turn` | `any_time` | `own_turn`, by Largest Army only after the robber moved | `own_turn`, by Largest Army only after the robber moved |
@@ -44,11 +44,12 @@ its recorder's random games, whose every move passes the checks StacSettlers' se
 resource card; it trades 4:1 with the bank always and 3:1 or 2:1 at the player's harbors (`canMakeBankTrade` takes
 each, so not only the best rate, unlike JSettlers 2); a Road Building card gives two roads only with two roads left and
 two places for them and its roads can't be given up; a player wins only on their own turn (`checkForWinner` looks at
-the player on turn), and a knight that brings Largest Army and the points ends the game once the robber has moved. Not
-verified yet: no StacSettlers game has been replayed through Hexfarer's rules, so a difference the reading missed (the
-Longest Road's length or ties, say) would only show there. Its server also takes a second setup road anywhere its
-player could build one, not only next to the settlement just placed; our robot keeps to the rulebook there, its own
-agents may not.
+the player on turn), and a knight that brings Largest Army and the points ends the game once the robber has moved.
+Replaying Stac agents' games through Hexfarer's rules (`record.py`, games without trades between players, and
+`OpenSeat replay`) shows the same two differences and no other in the moves before a game's first one (RECORDS); later
+moves of a diverged game aren't compared, so a rarer difference may still hide there. Its server also takes a second
+setup road anywhere its player could build one, not only next to the settlement just placed; our robot keeps to the
+rulebook there, the Stac agents did too in the replayed games.
 
 ## Options
 
