@@ -65,6 +65,10 @@ public class OSPRobotBrain extends SOCRobotBrain
     // The seat's own offers per turn that its decisions name at most: JSettlers has no limit, but an agent that repeated
     // itself would hold the game up for good (the robots answer every offer)
     private static final int MAX_OFFERS_PER_TURN = 10;
+    // How long after an offer closed the seat waits before it may offer again: JSettlers' robots answer after a pause, and a
+    // rejection names no offer, so a late no to the last offer would count as a no to the next one (and the robot may then
+    // still accept that one, a trade the protocol can't write)
+    private static final long OFFER_SETTLE_MILLIS = 1_000;
     // The game's budget: how long the agent may think about one decision; the handshake and ready get a minute
     private static final long DECIDE_MILLIS = 120_000, HANDSHAKE_MILLIS = 60_000;
     // Any threads and a GPU allowed, as at every referee unless the game says otherwise
@@ -98,8 +102,9 @@ public class OSPRobotBrain extends SOCRobotBrain
     private String tradeSnapshot;
     private List<Object> tradeMove;
     private String tradeFor;
-    // The seat's offers this turn (counted from its roll)
+    // The seat's offers this turn (counted from its roll), and when the seat last saw an offer open
     private int offersThisTurn;
+    private long offerSeenAt;
 
     public OSPRobotBrain(SOCRobotClient rc, SOCRobotParameters params, SOCGame ga, CappedQueue<SOCMessage> mq)
     {
@@ -311,21 +316,25 @@ public class OSPRobotBrain extends SOCRobotBrain
             client.cancelBuildRequest(game, SOCPlayingPiece.ROAD);
             return;
         }
+        if (seen.offer != null)
+            offerSeenAt = System.currentTimeMillis();
         if (trade(seat, seen, state))
             return;
         if (acting != seat || seen.progress == actedAt || legal.isEmpty())
             return;
-        decisions++;
-        if (seen.log != null)
-            seen.log.seatRecord(seat).robotDecided();
         // On its turn, with trades on and no offer open, the seat may offer (any cards, to any of the others), up to
         // MAX_OFFERS_PER_TURN a turn (counted from its roll)
         if ("roll".equals(seen.prompt))
-        {
             offersThisTurn = 0;
-        }
         Map<String, Object> trades = seen.trading && "main".equals(seen.prompt) && seen.offer == null && offersThisTurn < MAX_OFFERS_PER_TURN
             ? Json.object("offer", Json.object("to", others(seat), "left", null)) : null;
+        // Right after an offer closed, late answers to it may still come: the decision (which may offer) waits a moment (the
+        // next ping looks again)
+        if (trades != null && System.currentTimeMillis() - offerSeenAt < OFFER_SETTLE_MILLIS)
+            return;
+        decisions++;
+        if (seen.log != null)
+            seen.log.seatRecord(seat).robotDecided();
         @SuppressWarnings("unchecked")
         List<Object> move = (List<Object>) (legal.size() == 1 && trades == null ? legal.get(0) : ask(seat, legal, seen, trades));
         actedAt = seen.progress;
