@@ -127,6 +127,11 @@ Every message that is answered may also be answered with `failure`.
   the true state under `truth`.
 - A lean agent keeps its own game from the steps and checks it against `hash`. If they differ, or it lost track, it
   answers `{"type":"resync","game_id":"g17","n":144}` and the referee sends the same decision again, with `state`.
+- An agent that keeps its own game and can't make it the referee's again (from `state`) answers the decision with a
+  `failure` (`internal`) rather than a move: a game played blind says nothing about the agent, and the failure goes
+  into the result record. Hexfarer's agent first takes over what the referee's known rule differences change, else
+  rebuilds its game from `state` (its fair agent's beliefs take the change in as a public edit); only a game that
+  still differs then is lost. A board it doesn't write back as sent it turns down at `before` (`unsupported`).
 - Lean saves something only where the agent's copy writes the referee's state exactly, in practice an agent of the
   referee's own engine (Hexfarer's agent under Hexfarer's referee). Engines fill the state's open fields differently
   (`turn`, `played`, an `offer` left out or null), so under another engine's referee every lean decision costs a

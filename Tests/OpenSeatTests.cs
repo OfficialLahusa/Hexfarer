@@ -472,6 +472,184 @@ namespace Tests
             Assert.False(agent.Fair.FullKnowledge);
         }
 
+        // A land tile of the before's board other than the one the robber is on, as the state writes a tile
+        private static JsonNode OtherLand(JsonNode before, JsonNode state) =>
+            before["board"]!["tiles"]!.AsArray().Select(t => t!["tile"]!).First(tile =>
+                before["board"]!["tiles"]!.AsArray().First(t => OSPCodec.Canonical(t!["tile"]) == OSPCodec.Canonical(tile))!["tCode"]!.GetValue<string>() != "S"
+                && OSPCodec.Canonical(tile) != OSPCodec.Canonical(state["robber"])).DeepClone();
+
+        [Theory]
+        [InlineData("decide")]
+        [InlineData("step")]
+        public void TheFairAgentRebuildsWhereItCantTakeOverTheRefereesStateAndKeepsWhatItDoesntKnow(string where)
+        {
+            // Seat 0 of a recorded game with the fair agent. Once a steal seat 0 didn't see left another hand partly unknown,
+            // one message (a decision of seat 0, or a step) shows the robber elsewhere, which no takeover explains: the copy
+            // becomes the referee's state (at a step: at the next decision, the steps between left out), and the beliefs take
+            // the change in as an edit everyone sees, from the state the seat last saw. So they stay what an independent
+            // tracker of the same edits holds (a reset from the true state would make every hand known), the agent goes on
+            // deciding legal moves, and its game isn't lost
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU);
+            StringWriter log = new();
+            SeatAgent agent = new(net, 32, 0, log, leavesPerBatch: 16, fair: true);
+            Replica? expected = null;
+            BeliefTracker? seen = null;
+            JsonNode? before = null;
+            // The copy as the seat last saw it while the copy waits for a decision to rebuild from
+            GameState? staleFrom = null;
+            int rebuilds = 0, decidedAfter = 0;
+            bool moved = false, paid = false;
+            foreach (JsonNode recorded in Replay.Read(Fixture).Where(m => m["game_id"]!.GetValue<string>() == "catanatron-100"))
+            {
+                JsonNode message = recorded.DeepClone();
+                string type = message["type"]!.GetValue<string>();
+                if (type == "before") message["seat"] = 0;
+                if (type == "decide" && Int(message["seat"]) != 0) continue;
+                // The robber elsewhere in one message, once a hand is partly unknown to seat 0 (not at a robber's own move), and
+                // an ore from the bank in seat 2's hand, which the takeover takes in before it fails at the robber (so the
+                // state the seat last saw isn't the copy after it). The recorded steps carry no state: the step gets the state
+                // before its move, as the independent copy holds it
+                if (!moved && type == where && Enumerable.Range(1, 3).Any(p => seen!.Hand(p).Unknown > 0)
+                    && (type == "decide" || message["action"]![0]!.GetValue<string>() != "move_robber"))
+                {
+                    JsonNode glitched = type == "step" ? expected!.Codec.State(expected.State) : message["state"]!;
+                    if (Int(glitched["bank"]!["ore"]) > 0)
+                    {
+                        if (type == "step") message["state"] = glitched;
+                        glitched["robber"] = OtherLand(before!, glitched);
+                        // As parsed numbers, which read as any integer type (a referee's state comes as text)
+                        glitched["bank"]!["ore"] = JsonNode.Parse((Int(glitched["bank"]!["ore"]) - 1).ToString());
+                        glitched["players"]![2]!["hand"]!["ore"] = JsonNode.Parse((Int(glitched["players"]![2]!["hand"]!["ore"]) + 1).ToString());
+                        moved = true;
+                    }
+                }
+                // Later, after the rebuild, a difference a takeover explains (an ore from the bank in seat 3's hand, which the
+                // next state takes back): the beliefs take it in from the copy as it is, not from where it once stopped
+                if (moved && !paid && type == "decide" && decidedAfter == 3 && Int(message["state"]!["bank"]!["ore"]) > 0)
+                {
+                    JsonNode state = message["state"]!;
+                    state["bank"]!["ore"] = JsonNode.Parse((Int(state["bank"]!["ore"]) - 1).ToString());
+                    state["players"]![3]!["hand"]!["ore"] = JsonNode.Parse((Int(state["players"]![3]!["hand"]!["ore"]) + 1).ToString());
+                    paid = true;
+                }
+                JsonNode? answer = agent.Handle(message);
+                switch (type)
+                {
+                    case "before":
+                        before = message;
+                        expected = new Replica(message);
+                        seen = new BeliefTracker(0, expected.State);
+                        break;
+                    case "step":
+                        // Waiting for a decision to rebuild from, the copy follows no step
+                        if (staleFrom != null) break;
+                        if (message["state"] is JsonNode state && expected!.FirstDifference(state, "test") != null)
+                        {
+                            GameState untouched = new(expected.State);
+                            if (!expected.Patch(state))
+                            {
+                                staleFrom = untouched;
+                                break;
+                            }
+                            seen!.Observe(untouched, null, expected.State);
+                        }
+                        GameState pre = new(expected!.State);
+                        Assert.Null(expected.Follow(message));
+                        seen!.Observe(pre, expected.Applied, expected.State);
+                        break;
+                    case "decide":
+                        JsonNode theirs = message["state"]!;
+                        if (staleFrom != null || expected!.FirstDifference(theirs, "test") != null)
+                        {
+                            GameState untouched = staleFrom ?? new(expected!.State);
+                            if (staleFrom != null || !expected!.Patch(theirs))
+                            {
+                                expected!.Rebuild(theirs, message["legal"]!.AsArray());
+                                rebuilds++;
+                            }
+                            seen!.Observe(untouched, null, expected!.State);
+                            staleFrom = null;
+                        }
+                        // A move of the referee's legal ones, not a failure
+                        Assert.Equal("decide", answer!["type"]!.GetValue<string>());
+                        Assert.Contains(OSPCodec.Canonical(answer["action"]), message["legal"]!.AsArray().Select(OSPCodec.Canonical).ToHashSet());
+                        if (moved) decidedAfter++;
+                        break;
+                }
+                // After every message the seat knows what the independent tracker knows, no more and no less
+                if (type is "step" or "decide") Assert.Equal(seen, agent.Fair!.Beliefs);
+            }
+            Assert.True(moved, "the game has a hand seat 0 doesn't fully know");
+            Assert.True(paid, "a takeover after the rebuild");
+            Assert.True(rebuilds > 0 && decidedAfter > 5, $"{rebuilds} rebuilds, {decidedAfter} decisions after");
+            JsonNode stats = JsonNode.Parse(log.ToString().Trim().Split('\n').Last())!;
+            Assert.Equal((false, rebuilds, 0), (stats["lost"]!.GetValue<bool>(), Int(stats["rebuilds"]), Int(stats["resyncs"])));
+            Assert.False(agent.Fair!.FullKnowledge);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void AnAgentThatLostItsGameAnswersItsNextDecisionWithAFailure(bool fair)
+        {
+            // Seat 0 of a recorded game; at its fifth decision the referee's state gives seat 1 a point its buildings and cards
+            // don't give, which neither a takeover nor a rebuild can hold: the agent tells the referee with a failure for that
+            // decision (internal, naming what differs) instead of playing on with the first legal move, and its stats say why
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU);
+            StringWriter log = new();
+            SeatAgent agent = new(net, 16, 0, log, leavesPerBatch: 16, fair: fair);
+            int decisions = 0;
+            JsonNode? failure = null;
+            foreach (JsonNode recorded in Replay.Read(Fixture).Where(m => m["game_id"]!.GetValue<string>() == "catanatron-100"))
+            {
+                JsonNode message = recorded.DeepClone();
+                string type = message["type"]!.GetValue<string>();
+                if (type == "before") message["seat"] = 0;
+                if (type == "decide" && Int(message["seat"]) != 0) continue;
+                if (type == "decide" && ++decisions == 5)
+                {
+                    JsonNode player = message["state"]!["players"]![1]!;
+                    player["public_vp"] = Int(player["public_vp"]) + 1;
+                    player["vp"] = Int(player["vp"]) + 1;
+                }
+                JsonNode? answer = agent.Handle(message);
+                if (type == "decide" && decisions < 5) Assert.Equal("decide", answer!["type"]!.GetValue<string>());
+                if (type == "decide" && decisions == 5)
+                {
+                    failure = answer;
+                    Assert.Equal(("failure", "internal", "catanatron-100", Int(message["n"])),
+                        (failure!["type"]!.GetValue<string>(), failure["code"]!.GetValue<string>(), failure["game_id"]!.GetValue<string>(), Int(failure["n"])));
+                    Assert.Contains("public_vp", failure["message"]!.GetValue<string>());
+                }
+                // A referee that asks again anyway (as after a failure the agent sent on a step) gets the failure again
+                if (type == "decide" && decisions == 6)
+                {
+                    Assert.Equal(("failure", "internal", Int(message["n"])), (answer!["type"]!.GetValue<string>(), answer["code"]!.GetValue<string>(), Int(answer["n"])));
+                    agent.Handle(new JsonObject { ["type"] = "after", ["game_id"] = "catanatron-100" });
+                    break;
+                }
+            }
+            Assert.NotNull(failure);
+            JsonNode stats = JsonNode.Parse(log.ToString().Trim().Split('\n').Last())!;
+            Assert.True(stats["lost"]!.GetValue<bool>());
+            Assert.Contains("public_vp", stats["lost_why"]!.GetValue<string>());
+        }
+
+        [Fact]
+        public void AnAgentTurnsDownAGameWhoseBoardItCantHold()
+        {
+            // A board the codec doesn't write back as sent (here a key it doesn't know): the agent can't follow that game, so it
+            // turns it down (unsupported) instead of taking it and playing the first legal move throughout
+            StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU);
+            SeatAgent agent = new(net, 16, 0, new StringWriter(), leavesPerBatch: 16, fair: true);
+            JsonNode before = Replay.Read(Fixture).First(m => m["type"]!.GetValue<string>() == "before").DeepClone();
+            before["seat"] = 0;
+            before["board"]!["volcano"] = true;
+            JsonNode answer = agent.Handle(before)!;
+            Assert.Equal(("failure", "unsupported"), (answer["type"]!.GetValue<string>(), answer["code"]!.GetValue<string>()));
+            Assert.Contains("board", answer["message"]!.GetValue<string>());
+        }
+
         [Fact]
         public void ADecisionWithoutASearchAddsNoSearchWork()
         {

@@ -723,13 +723,14 @@ namespace Tests
         /// <summary>
         /// Hexfarer's Open Seat Agent (SeatAgent) in the same process, answering through the channel
         /// </summary>
-        private sealed class InProcessAgent(SeatAgent agent, bool dropSteps = false) : IOpenSeatChannel
+        private sealed class InProcessAgent(SeatAgent agent, bool dropSteps = false, Func<JsonNode, bool>? drop = null) : IOpenSeatChannel
         {
             private readonly Queue<JsonNode> _answers = new();
-            // Through text both ways, as over a process's streams; without the steps if asked
+            // Through text both ways, as over a process's streams; without the steps if asked, or without the messages drop picks
             public void Send(JsonNode message)
             {
                 if (dropSteps && message["type"]!.GetValue<string>() == "step") return;
+                if (drop?.Invoke(message) == true) return;
                 if (agent.Handle(JsonNode.Parse(message.ToJsonString())!) is JsonNode answer) _answers.Enqueue(JsonNode.Parse(answer.ToJsonString())!);
             }
             public JsonNode Receive(CancellationToken cancellation = default) => _answers.Dequeue();
@@ -1294,6 +1295,33 @@ namespace Tests
             Assert.False(stats["lost"]!.GetValue<bool>(), log.ToString());
             Assert.Equal(0, Int(stats["fallbacks"]));
             Assert.True(Int(stats["rebuilds"]) > 5, log.ToString());
+        }
+
+        [Fact]
+        public void HexfarersFairAgentRebuildsItsGameWhereAStepIsMissing()
+        {
+            // A gap in the steps the fair agent gets: another seat's first road after the setup never reaches it, so the next
+            // step's state shows a road its copy doesn't have, which no takeover explains. The copy waits for the next decision
+            // and becomes the referee's state there; the agent plays the game to its end without losing it, its beliefs never
+            // the true hands
+            StringWriter log = new();
+            SeatAgent seatAgent = new(new StateValueNet(TinyNet, provider: InferenceProvider.CPU), iterations: 16, seconds: 0, log, leavesPerBatch: 16, fair: true);
+            bool dropped = false;
+            bool Gap(JsonNode message)
+            {
+                if (dropped || message["type"]!.GetValue<string>() != "step" || Int(message["seat"]) == 1 || Int(message["n"]) < 20
+                    || message["action"]![0]!.GetValue<string>() != "build_road") return false;
+                dropped = true;
+                return true;
+            }
+            List<GameState> befores = PlayWithProxy(new InProcessAgent(seatAgent, drop: Gap), seed: 14, seat: 1);
+            Assert.True(dropped, "the game has a road built after the setup");
+            Assert.True(befores[^1].HasEnded);
+            JsonNode stats = JsonNode.Parse(log.ToString().Trim().Split('\n')[^1])!;
+            Assert.False(stats["lost"]!.GetValue<bool>(), log.ToString());
+            Assert.InRange(Int(stats["rebuilds"]), 1, 3);
+            Assert.Equal(0, Int(stats["fallbacks"]));
+            Assert.False(seatAgent.Fair!.FullKnowledge);
         }
 
         #region Agents as processes
