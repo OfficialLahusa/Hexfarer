@@ -1,6 +1,7 @@
 """
 Games of one Open Seat Agent against StacSettlers' agents in StacSettlers' headless simulation (OSPSimulation), with a
-summary: the agent's wins, its decisions and their time, fallbacks, failures, stalled moves and turns the server ended.
+summary: the agent's wins, its decisions and their time, fallbacks, failures, stalled moves, trade offers its robot
+declined and turns the server ended.
 
 Usage: python play.py --agent "COMMAND" --opponents stac|ss|pomcp|jsettlers|random|LINE --games N --out DIR
                       [--name NAME] [--fully-observable] [--no-chat] [--build]
@@ -42,7 +43,7 @@ def summary(output, our_name="Hexfarer"):
         games.append({"game": line["game_id"], "seat": seat["seat"], "winner": line["winner"], "won": line["winner"] == seat["seat"],
                       "vp": line["vp"], "turns": line["result"]["turns"], "decisions": seat["decisions"], "time_ms": seat["time_ms"],
                       "max_ms": seat["max_ms"], "robot_decisions": seat["robot_decisions"], "fallbacks": seat["fallbacks"],
-                      "failures": seat["failures"], "stalls": seat["stalls"], "agent": seat["agent"]})
+                      "failures": seat["failures"], "stalls": seat["stalls"], "declined": seat.get("declined"), "agent": seat["agent"]})
     decisions = sum(g["decisions"] for g in games)
     return {
         "games": len(games),
@@ -55,6 +56,7 @@ def summary(output, our_name="Hexfarer"):
         "fallbacks": sum(g["fallbacks"] for g in games),
         "failures": [f for g in games for f in g["failures"]],
         "stalls": sum(g["stalls"] for g in games),
+        "declined": sum(g["declined"] or 0 for g in games),
         "forced_turn_ends": output.count("force end turn"),
         "per_game": games,
     }
