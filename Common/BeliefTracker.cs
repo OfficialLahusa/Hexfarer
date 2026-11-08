@@ -219,8 +219,9 @@ namespace Common
                     // The offerer gives Give
                     Holds(offer.PlayerIndex, offer.Give);
                     break;
-                case RespondToTradeAction { Accept: true } accept when before.Turn.PendingTrade is TradeOffer pending:
-                    // Who accepts gives what the offer asks for
+                case RespondToTradeAction { Accept: true } accept when before.Turn.PendingTrade is TradeOffer pending && before.Settings.TradeFlow != TradeFlow.FirstAccept:
+                    // Who accepts gives what the offer asks for (under JSettlers' flow the accept already traded, which the
+                    // changes of the hands above took in)
                     Holds(accept.PlayerIndex, pending.Get);
                     break;
                 case CounterTradeAction counter:

@@ -1,9 +1,11 @@
 package osp.jsettlers;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 import soc.game.ResourceSet;
 import soc.game.SOCBoard;
@@ -19,6 +21,7 @@ import soc.game.SOCResourceSet;
 import soc.game.SOCRoad;
 import soc.game.SOCRoutePiece;
 import soc.game.SOCSettlement;
+import soc.game.SOCTradeOffer;
 
 /**
  * A JSettlers game (its SOCGame, which holds JSettlers' rules) in the Open Seat Protocol (see ../../PROTOCOL.md): its
@@ -101,7 +104,11 @@ public final class OSPGame
         return game.getGameState() >= SOCGame.OVER;
     }
 
-    /** The seat that acts now: the lowest one that has to discard, else the current player; -1 once the game is over */
+    /**
+     * The seat that acts now: the lowest one that has to discard; with an open offer the next addressed seat in seat order
+     * that hasn't answered, then the offerer (as Hexfarer orders them; under first_accept the others may answer first);
+     * else the current player; -1 once the game is over
+     */
     public int acting()
     {
         if (isOver())
@@ -110,12 +117,217 @@ public final class OSPGame
             for (int seat = 0; seat < game.maxPlayers; seat++)
                 if (game.getPlayer(playerOf(seat)).getNeedToDiscard())
                     return seat;
+        Map<String, Object> offer = offer();
+        if (offer != null)
+        {
+            int from = Json.integer(offer.get("from"));
+            for (int i = 1; i < game.maxPlayers; i++)
+            {
+                int seat = (from + i) % game.maxPlayers;
+                if (pending(offer, seat))
+                    return seat;
+            }
+            return from;
+        }
         return seatOf(game.getCurrentPlayerNumber());
+    }
+
+    // The offer JSettlers holds (its object: JSettlers makes one per offer) and the answers the protocol keeps for it: an
+    // answer stays what it was first (JSettlers lets a counteroffer be withdrawn after a while, or a decline be followed by
+    // an offer; the protocol's answers are final), until the offer closes or another one replaces it. The addressees' own
+    // offers that stood when it came are no counteroffers to it (JSettlers keeps an offer until its maker's turn or a
+    // trade clears it).
+    private SOCTradeOffer answeredOffer;
+    private Map<String, Object> answeredTerms;
+    private final Map<Integer, String> answers = new HashMap<>();
+    private final Map<Integer, Map<String, Object>> counterTerms = new HashMap<>();
+    // The counterers' own offers (JSettlers' objects) that are their counteroffers to it, and what the addressees offered
+    // before it
+    private final Map<Integer, SOCTradeOffer> counterOffers = new HashMap<>(), earlierOffers = new HashMap<>();
+    // An offer of the player on turn the protocol has closed though JSettlers still holds it: withdrawn when the player went
+    // on (closeOffer), or made before the roll (the protocol has no offers then; a robot's late counteroffer becomes one);
+    // and whether the protocol closed the offer answered so far (then its counteroffers don't keep it open)
+    private SOCTradeOffer closedOffer;
+    private boolean answeredClosed;
+
+    /**
+     * The protocol withdrew the open offer (its offerer went on with it standing): it is withdrawn at JSettlers too, so a
+     * late accept finds no offer there (JSettlers would otherwise trade on it); called under the game's monitor while the
+     * server handles the offerer's request
+     */
+    public synchronized void closeOffer()
+    {
+        int current = game.getCurrentPlayerNumber();
+        if (current >= 0 && game.getPlayer(current).getCurrentOffer() != null)
+        {
+            closedOffer = game.getPlayer(current).getCurrentOffer();
+            game.getPlayer(current).setCurrentOffer(null);
+        }
+        answeredClosed = true;
+    }
+
+    // No offer is open for the protocol: the answers are forgotten
+    private void forget()
+    {
+        answeredOffer = null;
+        answeredTerms = null;
+        answeredClosed = false;
+        answers.clear();
+        counterTerms.clear();
+        counterOffers.clear();
+        earlierOffers.clear();
+    }
+
+    // Whether a counteroffer to the offer answered so far still stands at JSettlers (its maker hasn't withdrawn it)
+    private boolean counterStanding()
+    {
+        for (Map.Entry<Integer, SOCTradeOffer> counter : counterOffers.entrySet())
+            if (game.getPlayer(playerOf(counter.getKey())).getCurrentOffer() == counter.getValue())
+                return true;
+        return false;
+    }
+
+    /**
+     * The open offer as the protocol has it under player_trading "first_accept": the standing offer of the player on turn
+     * (after the roll), each addressed seat's answer (none while pending, "decline", or "counter" with the terms of its own
+     * offer to the player on turn, written in the offerer's view), null without one or once every addressed seat declined
+     * (the protocol closes it then; JSettlers keeps it until it is withdrawn)
+     */
+    public synchronized Map<String, Object> offer()
+    {
+        int current = game.getCurrentPlayerNumber();
+        SOCTradeOffer standing = isOver() || current < 0 ? null : game.getPlayer(current).getCurrentOffer();
+        // An offer standing before the roll stays closed for the protocol
+        if (standing != null && game.getGameState() != SOCGame.PLAY1)
+            closedOffer = standing;
+        if (isOver() || current < 0 || game.getGameState() != SOCGame.PLAY1)
+        {
+            forget();
+            return null;
+        }
+        if (standing == null || standing == closedOffer)
+        {
+            // The offerer withdrew its offer (a JSettlers robot does when a counteroffer comes, then may take that one, which
+            // JSettlers keeps standing): for the protocol the counteroffers belong to the offer, which stays open while one
+            // of them stands, unless the protocol closed it
+            if (answeredOffer != null && ! answeredClosed && Json.integer(answeredTerms.get("from")) == seatOf(current) && counterStanding())
+                return written();
+            forget();
+            return null;
+        }
+        int from = seatOf(current);
+        List<Object> to = new ArrayList<>();
+        boolean[] addressed = standing.getTo();
+        for (int seat = 0; seat < game.maxPlayers; seat++)
+            if (seat != from && addressed[playerOf(seat)])
+                to.add((long) seat);
+        Map<String, Object> identity = Json.object("from", (long) from, "give", cardSet(standing.getGiveSet()), "get", cardSet(standing.getGetSet()), "to", to);
+        // Another offer than the one answered so far: its answers start anew, and what the addressees offered before it is
+        // no answer to it
+        if (standing != answeredOffer)
+        {
+            forget();
+            answeredOffer = standing;
+            answeredTerms = identity;
+            for (Object s : to)
+                earlierOffers.put(Json.integer(s), game.getPlayer(playerOf(Json.integer(s))).getCurrentOffer());
+        }
+        boolean[] waiting = standing.getWaitingReply();
+        for (Object s : to)
+        {
+            int seat = Json.integer(s), pn = playerOf(seat);
+            if (answers.containsKey(seat))
+                continue;
+            // An addressee's own offer to the player on turn is its counteroffer: in the offerer's terms the offerer gives
+            // what the counterer asks for and gets what it gives
+            SOCTradeOffer own = game.getPlayer(pn).getCurrentOffer();
+            if (own != null && own != earlierOffers.get(seat) && own.getTo()[current])
+            {
+                answers.put(seat, "counter");
+                counterTerms.put(seat, Json.object("give", cardSet(own.getGetSet()), "get", cardSet(own.getGiveSet())));
+                counterOffers.put(seat, own);
+            }
+            // JSettlers clears the reply flag when the addressee rejects
+            else if (! waiting[pn])
+                answers.put(seat, "decline");
+        }
+        // Everybody declined: closed, as the protocol has it
+        boolean open = false;
+        for (Object s : to)
+            open |= ! "decline".equals(answers.get(Json.integer(s)));
+        return open ? written() : null;
+    }
+
+    // The offer answered so far as the protocol writes it: its terms, the answers, the counteroffers
+    private Map<String, Object> written()
+    {
+        Map<String, Object> answerMap = new TreeMap<>(), counters = new TreeMap<>();
+        for (Map.Entry<Integer, String> answer : answers.entrySet())
+            answerMap.put(Integer.toString(answer.getKey()), answer.getValue());
+        for (Map.Entry<Integer, Map<String, Object>> counter : counterTerms.entrySet())
+            counters.put(Integer.toString(counter.getKey()), counter.getValue());
+        Map<String, Object> offer = Json.object("from", answeredTerms.get("from"), "give", answeredTerms.get("give"), "get", answeredTerms.get("get"),
+            "to", answeredTerms.get("to"), "answers", answerMap);
+        if (! counters.isEmpty())
+            offer.put("counters", counters);
+        return offer;
+    }
+
+    // Whether the seat is addressed by the offer and hasn't answered
+    @SuppressWarnings("unchecked")
+    static boolean pending(Map<String, Object> offer, int seat)
+    {
+        return ((List<Object>) offer.get("to")).contains((long) seat) && ! ((Map<String, Object>) offer.get("answers")).containsKey(Integer.toString(seat));
+    }
+
+    /** The answers the seat may give to the open offer while it is asked: accept if it holds what the offer asks for, decline */
+    public List<Object> answerMoves(int seat)
+    {
+        List<Object> moves = new ArrayList<>();
+        Map<String, Object> offer = offer();
+        if (offer == null || ! pending(offer, seat))
+            return moves;
+        if (game.getPlayer(playerOf(seat)).getResources().contains(resourceSet(offer.get("get"))))
+            moves.add(move("respond", Json.object("accept", true)));
+        moves.add(move("respond", Json.object("accept", false)));
+        return moves;
+    }
+
+    /** The offerer's picks: trading on a standing counteroffer both sides still hold the cards for, or withdrawing */
+    @SuppressWarnings("unchecked")
+    public List<Object> pickMoves(int seat)
+    {
+        List<Object> moves = new ArrayList<>();
+        Map<String, Object> offer = offer();
+        if (offer == null || Json.integer(offer.get("from")) != seat)
+            return moves;
+        Map<String, Object> counters = (Map<String, Object>) offer.get("counters");
+        if (counters != null)
+            for (Map.Entry<String, Object> counter : counters.entrySet())
+            {
+                int partner = Integer.parseInt(counter.getKey());
+                Map<String, Object> terms = (Map<String, Object>) counter.getValue();
+                // JSettlers trades on the counterer's standing offer: it may have been withdrawn since
+                SOCTradeOffer own = game.getPlayer(playerOf(partner)).getCurrentOffer();
+                if (own != null && game.getPlayer(playerOf(seat)).getResources().contains(resourceSet(terms.get("give")))
+                    && game.getPlayer(playerOf(partner)).getResources().contains(resourceSet(terms.get("get"))))
+                    moves.add(move("confirm", Json.object("partner", (long) partner)));
+            }
+        moves.add(move("cancel", null));
+        return moves;
     }
 
     /** The protocol's prompt: what the seat that acts has to do */
     public String prompt()
     {
+        Map<String, Object> offer = offer();
+        if (offer != null)
+        {
+            for (int seat = 0; seat < game.maxPlayers; seat++)
+                if (pending(offer, seat))
+                    return "answer_offer";
+            return "pick_partner";
+        }
         switch (game.getGameState())
         {
         case SOCGame.START1A: case SOCGame.START2A: return "setup_settlement";
@@ -272,7 +484,7 @@ public final class OSPGame
         state.put("buildings", Json.object("settlements", settlements, "cities", cities, "roads", roads));
         state.put("bank", bank);
         state.put("players", players);
-        state.put("offer", null);
+        state.put("offer", offer());
         return viewer < 0 ? state : hide(state, viewer);
     }
 
@@ -320,6 +532,12 @@ public final class OSPGame
         SOCPlayer player = game.getPlayer(pn);
         switch (prompt())
         {
+        case "answer_offer":
+            legal.addAll(answerMoves(seat));
+            break;
+        case "pick_partner":
+            legal.addAll(pickMoves(seat));
+            break;
         case "setup_settlement":
             for (int node : board.nodes())
                 if (player.canPlaceSettlement(node))
@@ -481,6 +699,17 @@ public final class OSPGame
         amounts[type] = 0;
     }
 
+    // An accepted offer, as SOCGameMessageHandler.executeTrade makes it: the trade if JSettlers allows it, then every offer
+    // cleared
+    private void trade(int offering, int accepting)
+    {
+        if (! game.canMakeTrade(offering, accepting))
+            return;
+        game.makeTrade(offering, accepting);
+        for (int pn = 0; pn < game.maxPlayers; pn++)
+            game.getPlayer(pn).setCurrentOffer(null);
+    }
+
     /**
      * Plays a legal move of the seat by JSettlers' rules and returns its result as the referee knows it: the dice, the
      * card bought, the card stolen (null if none), the cards a monopoly took from each other seat; null for other moves
@@ -573,6 +802,37 @@ public final class OSPGame
         }
         case "end_turn":
             game.endTurn();
+            return null;
+        // Trades between players as SOCGameMessageHandler handles their requests (player_trading "first_accept")
+        case "offer":
+        {
+            Map<String, Object> offer = (Map<String, Object>) value;
+            boolean[] to = new boolean[game.maxPlayers];
+            for (Object s : (List<Object>) offer.get("to"))
+                to[playerOf(Json.integer(s))] = true;
+            player.setCurrentOffer(new SOCTradeOffer(game.getName(), pn, to, resourceSet(offer.get("give")), resourceSet(offer.get("get"))));
+            return null;
+        }
+        case "respond":
+            if (Boolean.TRUE.equals(((Map<String, Object>) value).get("accept")))
+                trade(game.getCurrentPlayerNumber(), pn);
+            else
+                game.rejectTradeOffersTo(pn);
+            return null;
+        case "counter":
+        {
+            // The counterer's own offer to the player on turn: in its own terms it gives the offerer's get
+            Map<String, Object> terms = (Map<String, Object>) value;
+            boolean[] to = new boolean[game.maxPlayers];
+            to[game.getCurrentPlayerNumber()] = true;
+            player.setCurrentOffer(new SOCTradeOffer(game.getName(), pn, to, resourceSet(terms.get("get")), resourceSet(terms.get("give"))));
+            return null;
+        }
+        case "confirm":
+            trade(playerOf(Json.integer(((Map<String, Object>) value).get("partner"))), pn);
+            return null;
+        case "cancel":
+            player.setCurrentOffer(null);
             return null;
         default:
             throw new IllegalArgumentException("No JSettlers move for " + type);

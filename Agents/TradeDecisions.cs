@@ -36,8 +36,8 @@ namespace Agents
         {
             if (state.Turn.PendingTrade is not TradeOffer offer) return null;
 
-            // The agent's answer is due
-            if (offer.NextResponder == player)
+            // The agent's answer is due (in seat order, or under JSettlers' flow whenever it hasn't answered yet)
+            if (RespondToTradeAction.MayAnswer(state, player))
             {
                 RespondToTradeAction reject = new RespondToTradeAction(player, false), accept = new RespondToTradeAction(player, true);
                 // Without the asked cards it can only turn the offer down
@@ -55,14 +55,17 @@ namespace Agents
                 return accept;
             }
 
-            // The agent's own offer and every answer is in: pick a partner or let the offer go
-            if (offer.Offerer == player && offer.NextResponder == null)
+            // The agent's own offer and every answer is in (under JSettlers' flow: whenever it is asked): pick a partner or let
+            // the offer go
+            if (ConfirmTradeAction.MayPick(state, player))
             {
                 // Letting it go keeps the position; a partner has to beat that, and the best one wins
                 Action best = new CancelTradeAction(player);
                 GameState bestState = state;
-                // One confirm per player who accepted
-                foreach (Action confirm in ConfirmTradeAction.GetActionsForState(state, player))
+                // One confirm per player who accepted or countered (under JSettlers' flow only counteroffers stand)
+                IEnumerable<Action> confirms = Enumerable.Range(0, state.Players.Length).Select(partner => (Action)new ConfirmTradeAction(player, (sbyte)partner))
+                    .Where(confirm => confirm.IsValidFor(state));
+                foreach (Action confirm in confirms)
                 {
                     GameState after = new GameState(state);
                     confirm.Apply(after);

@@ -6,8 +6,10 @@ shows: whether the seat's own hand, cards and points are there, and whether ever
 --observe it asks for every move (step), and with --full it writes each message whole. To test the referee it can be
 lean (--lean, with --observe: it asks for the state whenever a decision comes without it), answer its third decision
 with a move that isn't listed (--illegal), turn every game down (--refuse), or stall SECONDS before its first decision
-after the setup (--stall SECONDS), past a short turn limit of the server.
-Usage: python first_move_agent.py [--needs truth|view|world] [--builds] [--observe] [--full] [--lean] [--illegal] [--refuse] [--stall S]
+after the setup (--stall SECONDS), past a short turn limit of the server. With --trades it proposes where a decision names
+trades: once per turn an offer of one card of the resource it holds most for one it holds least, to every seat named,
+and a counteroffer (one card of its own for the offer's give) when it can't accept an offer.
+Usage: python first_move_agent.py [--needs truth|view|world] [--builds] [--observe] [--full] [--lean] [--illegal] [--refuse] [--stall S] [--trades]
 """
 
 import json
@@ -22,7 +24,8 @@ def main():
     full = "--full" in sys.argv
     lean, illegal, refuse = "--lean" in sys.argv, "--illegal" in sys.argv, "--refuse" in sys.argv
     stall = float(sys.argv[sys.argv.index("--stall") + 1]) if "--stall" in sys.argv else 0
-    decisions, stalled = 0, False
+    trades = "--trades" in sys.argv
+    decisions, stalled, offered_at = 0, False, -100
     for line in sys.stdin:
         if not line.strip():
             continue
@@ -53,6 +56,21 @@ def main():
             legal = message["legal"]
             preferred = [m for m in legal if m[0].startswith(("build_", "play_"))] if builds else []
             move = ["no_such_move"] if illegal and decisions == 3 else (preferred or legal)[0]
+            named = message.get("trades") or {}
+            hand = message["state"]["players"][message["seat"]]["hand"] or {}
+            held = sorted((count, name) for name, count in hand.items() if count > 0)
+            if trades and "offer" in named and held and message["n"] - offered_at > 30:
+                # About once a turn: one of what it holds most for one of what it holds least (or none of)
+                offered_at = message["n"]
+                most = held[-1][1]
+                least = min((hand.get(r, 0), r) for r in ("brick", "lumber", "ore", "grain", "wool") if r != most)[1]
+                move = ["offer", {"give": {most: 1}, "get": {least: 1}, "to": named["offer"]["to"]}]
+            elif trades and "counter" in named and ["respond", {"accept": True}] not in legal:
+                offer = message["state"]["offer"]
+                mine = [name for _, name in held if name not in offer["give"]]
+                if mine:
+                    # In the offerer's terms: the offerer gives what it offered, gets one card of the counterer's
+                    move = ["counter", {"give": offer["give"], "get": {mine[-1]: 1}}]
             answer = {"type": "decide", "game_id": message["game_id"], "n": message["n"], "action": move}
         else:
             continue

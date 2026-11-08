@@ -130,7 +130,7 @@ namespace Agents
             Func<IReadOnlyList<GameState>, double[]> utilities)
         {
             // Only the player whose answer is due
-            if (!Counters || state.Turn.PendingTrade is not TradeOffer offer || offer.NextResponder != player) return null;
+            if (!Counters || state.Turn.PendingTrade is not TradeOffer offer || !RespondToTradeAction.MayAnswer(state, player)) return null;
             // Nobody helps a player about to win
             if (IsAboutToWin(state, offer.Offerer)) return null;
 

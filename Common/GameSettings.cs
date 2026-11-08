@@ -2,6 +2,24 @@
 
 namespace Common
 {
+    /// <summary>
+    /// How trades between players go (with FreeTrade on)
+    /// </summary>
+    public enum TradeFlow
+    {
+        /// <summary>
+        /// The rulebook: the addressed players answer one after another in seat order (accept, decline or counter), then
+        /// the offerer trades with one who accepted or countered, or lets the offer go
+        /// </summary>
+        Rulebook,
+        /// <summary>
+        /// As JSettlers plays it: the addressed players answer in any order, the first accept trades at once and closes the
+        /// offer, and the offerer may take a standing counteroffer or withdraw at any time. The engine still has one player
+        /// to act (the next addressed one in seat order, then the offerer); the freedom is in what is valid.
+        /// </summary>
+        FirstAccept,
+    }
+
     public class GameSettings
     {
         // Maximum allowed number of resource cards before discarding is required
@@ -21,6 +39,12 @@ namespace Common
         /// </summary>
         [YamlMember(DefaultValuesHandling = DefaultValuesHandling.OmitDefaults)]
         public int MaxTradeOffersPerTurn { get; set; }
+
+        /// <summary>
+        /// How trades between players go (see TradeFlow); the rulebook unless the referee plays JSettlers' flow
+        /// </summary>
+        [YamlMember(DefaultValuesHandling = DefaultValuesHandling.OmitDefaults)]
+        public TradeFlow TradeFlow { get; set; }
 
         public const int DefaultMaxTradeOffersPerTurn = 10;
 
@@ -51,6 +75,7 @@ namespace Common
             VictoryPoints = copy.VictoryPoints;
             FreeTrade = copy.FreeTrade;
             MaxTradeOffersPerTurn = copy.MaxTradeOffersPerTurn;
+            TradeFlow = copy.TradeFlow;
             ShowTrackedCards = copy.ShowTrackedCards;
         }
 
@@ -61,12 +86,13 @@ namespace Common
                    VictoryPoints == settings.VictoryPoints &&
                    FreeTrade == settings.FreeTrade &&
                    MaxTradeOffersPerTurn == settings.MaxTradeOffersPerTurn &&
+                   TradeFlow == settings.TradeFlow &&
                    ShowTrackedCards == settings.ShowTrackedCards;
         }
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(RobberCardLimit, VictoryPoints, FreeTrade, MaxTradeOffersPerTurn, ShowTrackedCards);
+            return HashCode.Combine(RobberCardLimit, VictoryPoints, FreeTrade, MaxTradeOffersPerTurn, TradeFlow, ShowTrackedCards);
         }
     }
 }

@@ -22,7 +22,7 @@ namespace OpenSeat
                    OpenSeat relay LOG [LOG ...] --save DIR [--max-games N]
                    OpenSeat relay LOG|DIR --live [--port P] [--bind ADDRESS] [--delay S]
                    OpenSeat agent [--net MODEL.onnx] [--iterations N | --seconds S] [--provider auto|cpu|dml|cuda] [--leaves-per-batch B]
-                                  [--threads T] [--serial] [--fair]
+                                  [--threads T] [--serial] [--fair] [--decline-trades]
                    OpenSeat boards --seed-base S --count N --out FILE
                    OpenSeat bench [--games N] [--seed S]
 
@@ -50,6 +50,7 @@ namespace OpenSeat
             build, net and provider; an iteration budget doesn't keep to the referee's decide_ms, so the referee has to allow
             the time.
             --fair plays like Hexfarer's fair agents (Information Set MCTS over what the seat knows) instead of open-hand.
+            --decline-trades declines every offer between players and makes none (a seat without trades at a table with them).
 
             boards: writes the boards of the map seeds S to S+N-1 as the Arena generates them, one protocol board per line.
 
@@ -154,7 +155,10 @@ namespace OpenSeat
                         bool fair = args.Contains("--fair");
                         // Decisions with only the state's hash, checked against its own copy of the game
                         bool lean = args.Contains("--lean");
-                        new SeatAgent(net, iterations, seconds, Console.Error, leavesPerBatch, parallelSelection: !serial, fair: fair, lean: lean, threads: threads).Run(Console.In, protocol);
+                        // Every offer declined, none made
+                        bool declineTrades = args.Contains("--decline-trades");
+                        new SeatAgent(net, iterations, seconds, Console.Error, leavesPerBatch, parallelSelection: !serial, fair: fair, lean: lean, threads: threads,
+                            declineTrades: declineTrades).Run(Console.In, protocol);
                         return 0;
                     }
                 case "boards":

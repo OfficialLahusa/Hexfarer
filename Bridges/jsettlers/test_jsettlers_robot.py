@@ -26,9 +26,9 @@ def free_port():
         return s.getsockname()[1]
 
 
-def play(games, agent_command, logs, record=None, turn_seconds=60):
+def play(games, agent_command, logs, record=None, turn_seconds=60, trading=False):
     """Robot-only games with one Open Seat Agent robot and three of JSettlers' (the server's referee logs into the
-    directory record, if given); the server's standard error"""
+    directory record, if given), without trades between players unless trading; the server's standard error"""
     properties = {
         "jsettlers.startrobots": "4",
         "jsettlers.bots.start3p": "1,osp.jsettlers.OSPRobotClient",
@@ -39,9 +39,10 @@ def play(games, agent_command, logs, record=None, turn_seconds=60):
         "jsettlers.bots.botgames.wait_sec": "3",
         "jsettlers.bots.fast_pause_percent": "1",
         "jsettlers.bots.timeout.turn": str(turn_seconds),
-        "jsettlers.gameopt.NT": "t",
         "jsettlers.allow.debug": "N",
     }
+    if not trading:
+        properties["jsettlers.gameopt.NT"] = "t"
     arguments = ["java", f"-Dosp.agent={agent_command}", f"-Dosp.log={logs}", "-Dosp.debug=true", "-cp", jsettlers.classpath(), "osp.jsettlers.OSPServer"]
     if record:
         arguments.insert(3, f"-Dosp.record={record}")

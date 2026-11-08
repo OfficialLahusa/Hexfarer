@@ -46,10 +46,16 @@ Contents:
     JSettlers' own robots one strategy (it starts 30% fast, the rest smart). Each game ends with its result record (see
     `PROTOCOL.md`) as an `osp-result` line on standard error: the players by seat, the winner, and per seat the agent and
     its decisions, their time, resyncs, fallbacks and failures, its moves, its decisions with a choice (only in a recorded
-    game) and its robot brain's CPU time. An agent that fails is told why where it still listens, and the robot plays
+    game), its trade decisions that expired before they went out, and its robot brain's CPU time. An agent that fails is told why where it still listens, and the robot plays
     the first legal move for the rest of the game. A record never overwrites one of an earlier server run (JSettlers
     numbers its games afresh): the second `GAME.jsonl` is written as `GAME-2.jsonl`.
-  - Tests: `python -m unittest test_jsettlers_board test_jsettlers_game test_jsettlers_robot test_jsettlers_steps` (with
+    Without the game option NT the players trade as JSettlers lets them, which the protocol names `player_trading`
+    `first_accept`: JSettlers' robots offer, decline, counter and accept, the move log writes each trade request as a
+    step (answers in the order they came, an accept trading at once), and the agent's robot answers every offer made to
+    its seat as it stands, offers on its turn where its decision names `trades`, waits for the answers to its own offer
+    (5 s, -Dosp.offerWait=MILLIS), then takes a counteroffer or withdraws. JSettlers' robots wait 5 s for an answer from a
+    robot seat, so an answer has to come quickly: a decision whose offer was taken or withdrawn meanwhile is dropped.
+  - Tests: `python -m unittest test_jsettlers_board test_jsettlers_game test_jsettlers_robot test_jsettlers_steps test_jsettlers_trading` (with
     JSETTLERS_JAR set).
 
 On Hexfarer's side, outside this folder: `OpenSeat replay LOG` plays a referee's log through Hexfarer's rules and lists

@@ -164,6 +164,24 @@ namespace Common.OSP
         };
 
         /// <summary>
+        /// The Hexfarer action of an answer to an open offer, a pick of a partner or a withdrawal, made by the seat (under
+        /// JSettlers' flow these can come from another seat than the one in seat order); null for any other move or one that
+        /// doesn't read as one of these. Whether the rules allow it is the caller's to check.
+        /// </summary>
+        public static Action? AnswerAction(JsonNode? move, sbyte seat)
+        {
+            if (move is not JsonArray { Count: >= 1 } named || named[0] is not JsonValue first || !first.TryGetValue(out string? kindName)) return null;
+            JsonObject? terms = named.Count > 1 ? named[1] as JsonObject : null;
+            if (kindName == "respond" && terms is not null && terms["accept"] is JsonValue accept && accept.TryGetValue(out bool accepted))
+                return new RespondToTradeAction(seat, accepted);
+            if (kindName == "confirm" && terms is not null && terms["partner"] is JsonValue partner && partner.TryGetValue(out int with) && with is >= 0 and < 8)
+                return new ConfirmTradeAction(seat, (sbyte)with);
+            if (kindName == "cancel")
+                return new CancelTradeAction(seat);
+            return null;
+        }
+
+        /// <summary>
         /// The Hexfarer action of a trade move that no legal list holds, since its cards can be any (an offer or a
         /// counteroffer), made by the seat; null for any other move or one that doesn't read as either. Whether the rules
         /// allow it is the caller's to check.
@@ -304,7 +322,10 @@ namespace Common.OSP
         /// </summary>
         public JsonObject State(GameState state)
         {
-            int current = state.Turn.MustDiscard ? Array.IndexOf(state.Turn.AwaitedPlayerDiscards, true) : state.Turn.PlayerIndex;
+            // Who acts now: the lowest seat still discarding after a 7, with an open offer the next addressee in seat order (then
+            // the offerer), else the player on turn
+            int current = state.Turn.MustDiscard ? Array.IndexOf(state.Turn.AwaitedPlayerDiscards, true)
+                : state.Turn.PendingTrade is TradeOffer offer ? offer.NextResponder ?? offer.Offerer : state.Turn.PlayerIndex;
             JsonArray settlements = [], cities = [], roads = [];
             for (int i = 0; i < Board.Intersections.Count; i++)
             {
@@ -405,6 +426,8 @@ namespace Common.OSP
         {
             JsonObject ruleset = new() { ["preset"] = "standard" };
             if (!settings.FreeTrade) ruleset["player_trading"] = "none";
+            // JSettlers' flow: answers in any order, the first accept trades at once
+            else if (settings.TradeFlow == TradeFlow.FirstAccept) ruleset["player_trading"] = "first_accept";
             if (settings.VictoryPoints != 10) ruleset["victory_points"] = settings.VictoryPoints;
             if (settings.RobberCardLimit != 7) ruleset["discard_limit"] = settings.RobberCardLimit;
             // The rulebook has no limit on offers; Hexfarer's referee has one (10 unless set otherwise)
@@ -495,6 +518,10 @@ namespace Common.OSP
             if (prompt == "discard")
                 for (int seat = current; seat < players.Count; seat++)
                     t.AwaitedPlayerDiscards[seat] = seat == current || Size(players[seat]!, "hand_size", "hand") > game.Settings.RobberCardLimit;
+            // An open offer between players, with its answers and counteroffers (Offer writes it); it counts as one offer of
+            // the turn, since the state doesn't say how many came before it
+            t.PendingTrade = TradeOfferOf(state["offer"], players.Count);
+            if (t.PendingTrade != null) t.TradeOffersThisTurn = Math.Max(t.TradeOffersThisTurn, 1);
 
             // Hands, development cards, played knights, pieces, Longest Road and Largest Army; the cards held or played count
             // against the deck (of the played ones the referee may count only knights, as Hexfarer does)
@@ -556,6 +583,32 @@ namespace Common.OSP
             for (int seat = 0; seat < players.Count; seat++)
                 game.Players[seat].VictoryPoints.LongestRoadPoints = (byte)(players[seat]!["has_longest_road"]!.GetValue<bool>() ? 2 : 0);
             return game;
+        }
+
+        /// <summary>
+        /// The open offer of a protocol state (as Offer writes it), or null without one
+        /// </summary>
+        public static TradeOffer? TradeOfferOf(JsonNode? offer, int players)
+        {
+            if (offer is not JsonObject open) return null;
+            // Seats as numbers however they were written (parsed text, or values of any integer type)
+            static int Seat(JsonNode n) => int.Parse(n.ToJsonString());
+            byte recipients = 0;
+            foreach (JsonNode? seat in open["to"]!.AsArray())
+                recipients |= (byte)(1 << Seat(seat!));
+            TradeOffer trade = new((sbyte)Seat(open["from"]!), Cards(open["give"]!), Cards(open["get"]!), recipients, players);
+            foreach ((string seat, JsonNode? answer) in open["answers"]?.AsObject() ?? [])
+                trade.Responses[int.Parse(seat)] = answer!.GetValue<string>() switch
+                {
+                    "accept" => TradeResponse.Accepted,
+                    "decline" => TradeResponse.Rejected,
+                    "counter" => TradeResponse.Countered,
+                    _ => TradeResponse.Pending,
+                };
+            // Counteroffers in seat order, as Offer writes them (in the order they came: seat order under the rulebook)
+            foreach ((string seat, JsonNode? terms) in (open["counters"]?.AsObject() ?? []).OrderBy(c => int.Parse(c.Key)))
+                trade.Counters.Add(new TradeCounter(sbyte.Parse(seat), Cards(terms!["give"]!), Cards(terms["get"]!)));
+            return trade;
         }
 
         /// <summary>

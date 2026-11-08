@@ -23,7 +23,7 @@ The rules of an Open Seat Protocol game (see `PROTOCOL.md`) are a set of options
 |---|---|---|---|
 | `victory_points` | 10 | 10 | 10 |
 | `discard_limit` | 7 | 7 | 7 |
-| `player_trading` | `rulebook` | `none` | `rulebook`, `none` with game option NT |
+| `player_trading` | `rulebook` | `none` | `first_accept`, `none` with game option NT |
 | `counteroffers` | `true` | `false` | `true` |
 | `bank_shortage` | `rulebook` | `nobody` | `unlimited` |
 | `win_timing` | `own_turn` | `any_time` | `own_turn`, by Largest Army only after the robber moved |
@@ -31,7 +31,7 @@ The rules of an Open Seat Protocol game (see `PROTOCOL.md`) are a set of options
 | `bank_rates` | `all` | `best_only` | `best_only` |
 | `road_building` | `optional` | `forced` | `forced` |
 | `turn_limit` | none | 1000 | none |
-| `offer_limit` | none | none (no trading) | not measured (our robot plays without trades) |
+| `offer_limit` | none | none (no trading) | none |
 
 The JSettlers column comes from replaying 100 random JSettlers games through Hexfarer's rules (`Recorder` and
 `OpenSeat replay`). Its `unlimited` bank and its Largest Army timing are what its engine does, not values an agent
@@ -47,6 +47,10 @@ can ask for; its robot names the bank in the ruleset, so an agent that can't pla
   - `rulebook` (default): the player on turn trades with the others after the roll. An offer gives at least one card
     and asks for at least one, never the same resource on both sides; it goes to some or all other players, who
     accept, decline or counter in seat order, and the offerer then trades with one who accepted, or withdraws.
+  - `first_accept`: as JSettlers plays them. The player on turn offers as under `rulebook`, but the addressed players
+    answer in any order, the first accept trades at once and closes the offer, a counteroffer stands until the offerer
+    takes it or the offer closes, and the offerer may take one or withdraw while others are still asked (see
+    PROTOCOL.md, trades between players).
   - `none`: only trades with the bank and the harbors.
 - **`counteroffers`** (boolean, default `true`): whether a player may answer an offer with one of their own terms
   (only with `player_trading` `rulebook`).

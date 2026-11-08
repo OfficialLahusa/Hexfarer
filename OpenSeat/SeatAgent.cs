@@ -23,7 +23,7 @@ namespace OpenSeat
     /// MCTS over worlds drawn from what its seat knows (BeliefTracker), which takes in every move as the seat sees it.
     /// </summary>
     internal sealed class SeatAgent(StateValueNet net, long iterations, double seconds, TextWriter log, int leavesPerBatch = MCTSAgent.DefaultLeavesPerBatch,
-        bool parallelSelection = true, bool fair = false, bool lean = false, int threads = 0)
+        bool parallelSelection = true, bool fair = false, bool lean = false, int threads = 0, bool declineTrades = false)
     {
         private Replica? _replica;
         private MCTSAgent? _agent;
@@ -289,6 +289,11 @@ namespace OpenSeat
             return Choose(decide);
         }
 
+        // Whether the seat has a decision in the state: it is the one to act, or it may answer the open offer or pick on it now
+        private static bool MayDecide(GameState state, sbyte seat) =>
+            Enumerable.Range(0, state.Players.Length).FirstOrDefault(state.CanPlayerAct, -1) == seat
+            || RespondToTradeAction.MayAnswer(state, seat) || ConfirmTradeAction.MayPick(state, seat);
+
         /// <summary>
         /// Which trades a decision names (see PROTOCOL.md): an offer (with offers left this turn, or no limit), a
         /// counteroffer
@@ -376,10 +381,21 @@ namespace OpenSeat
                 }
                 else if (difference != null) TookOver(untouched);
             }
-            if (_lost || _replica!.Acting() != _seat) return Answer(legal[0]!);
+            // The copy has to say the seat decides: it acts in seat order, or (under JSettlers' flow) answers an offer or picks on
+            // its own before the others are through
+            if (_lost || !MayDecide(_replica!.State, _seat)) return Answer(legal[0]!);
 
             // A single legal move needs no search, unless the decision names trades the agent may propose instead
             JsonNode? trades = decide["trades"];
+            // Told not to trade (a comparison's seat without trades at a table with them): every offer declined, a standing
+            // offer of its own withdrawn, none made
+            if (declineTrades)
+            {
+                string decline = OSPCodec.Canonical(_replica.Codec.Move(new RespondToTradeAction(_seat, false)));
+                string withdraw = OSPCodec.Canonical(_replica.Codec.Move(new CancelTradeAction(_seat)));
+                if (legal.FirstOrDefault(m => OSPCodec.Canonical(m) is string move && (move == decline || move == withdraw)) is JsonNode no) return Answer(no);
+                trades = null;
+            }
             if (legal.Count == 1 && trades == null) return Answer(legal[0]!);
             // A copy without a legal move (it would have to be lost) can't search
             if (!_replica.Legal().Any())

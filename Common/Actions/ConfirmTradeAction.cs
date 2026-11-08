@@ -32,7 +32,7 @@ namespace Common.Actions
 
             TradeOffer offer = state.Turn.PendingTrade!;
             (CardSet<ResourceCardType> give, CardSet<ResourceCardType> get) = offer.TermsWith(Partner)!.Value;
-            Transfer(state, give, get);
+            Transfer(state, PlayerIndex, Partner, give, get);
             History = new TradeOffer(offer);
             state.Turn.PendingTrade = null;
         }
@@ -41,16 +41,16 @@ namespace Common.Actions
         {
             TradeOffer offer = new TradeOffer(History!);
             (CardSet<ResourceCardType> give, CardSet<ResourceCardType> get) = offer.TermsWith(Partner)!.Value;
-            Transfer(state, get, give);
+            Transfer(state, PlayerIndex, Partner, get, give);
             state.Turn.PendingTrade = offer;
         }
 
         /// <summary>
         /// The offerer gives one set to the partner and gets the other from them
         /// </summary>
-        private void Transfer(GameState state, CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)
+        internal static void Transfer(GameState state, sbyte offererIdx, sbyte partnerIdx, CardSet<ResourceCardType> give, CardSet<ResourceCardType> get)
         {
-            CardSet<ResourceCardType> offerer = state.Players[PlayerIndex].ResourceCards, partner = state.Players[Partner].ResourceCards;
+            CardSet<ResourceCardType> offerer = state.Players[offererIdx].ResourceCards, partner = state.Players[partnerIdx].ResourceCards;
             offerer.Remove(give);
             partner.Add(give);
             partner.Remove(get);
@@ -59,7 +59,7 @@ namespace Common.Actions
 
         public override bool IsValidFor(GameState state)
         {
-            if (!IsTurnValid(state.Turn, PlayerIndex) || Partner < 0 || Partner >= state.Players.Length) return false;
+            if (!MayPick(state, PlayerIndex) || Partner < 0 || Partner >= state.Players.Length) return false;
             if (state.Turn.PendingTrade!.TermsWith(Partner) is not { } terms) return false;
             return state.Players[PlayerIndex].ResourceCards.Contains(terms.give) && state.Players[Partner].ResourceCards.Contains(terms.get);
         }
@@ -70,6 +70,16 @@ namespace Common.Actions
         public static bool IsTurnValid(TurnState turn, int playerIdx)
         {
             return turn.PendingTrade is TradeOffer offer && offer.Offerer == playerIdx && offer.NextResponder == null;
+        }
+
+        /// <summary>
+        /// Whether the player may take a partner or withdraw the open offer now: the offerer once everyone answered, or under
+        /// JSettlers' flow the offerer at any time
+        /// </summary>
+        public static bool MayPick(GameState state, int playerIdx)
+        {
+            if (IsTurnValid(state.Turn, playerIdx)) return true;
+            return state.Settings.TradeFlow == TradeFlow.FirstAccept && state.Turn.PendingTrade is TradeOffer offer && offer.Offerer == playerIdx;
         }
 
         public bool HasHistory() => History != null;

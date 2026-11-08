@@ -1,9 +1,11 @@
 package osp.jsettlers;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -14,6 +16,7 @@ import soc.game.SOCPlayer;
 import soc.game.SOCPlayingPiece;
 import soc.game.SOCRoad;
 import soc.game.SOCSettlement;
+import soc.game.SOCTradeOffer;
 import soc.message.SOCMessage;
 import soc.message.SOCTimingPing;
 import soc.robot.SOCRobotBrain;
@@ -40,10 +43,28 @@ import soc.util.SOCRobotParameters;
  */
 public class OSPRobotBrain extends SOCRobotBrain
 {
-    // The rules JSettlers plays, as the protocol names them: the rulebook without trades between players, narrower where
-    // JSettlers is (see Recorder)
-    static final Map<String, Object> RULESET = Json.object("preset", "standard", "player_trading", "none", "bank_shortage", "unlimited",
-        "bank_rates", "best_only", "robber_victims", "with_cards", "road_building", "forced");
+    /**
+     * The rules JSettlers plays, as the protocol names them: the rulebook, narrower where JSettlers is (see Recorder), and
+     * trades between players as JSettlers makes them (player_trading first_accept: answers in any order, the first accept
+     * trades at once; no limit on offers), or none with the game option NT
+     */
+    static Map<String, Object> ruleset(SOCGame game)
+    {
+        boolean trading = ! game.isGameOptionSet("NT");
+        Map<String, Object> ruleset = Json.object("preset", "standard", "player_trading", trading ? "first_accept" : "none", "bank_shortage", "unlimited",
+            "bank_rates", "best_only", "robber_victims", "with_cards", "road_building", "forced");
+        if (trading)
+            ruleset.put("offer_limit", null);
+        return ruleset;
+    }
+
+    // How long the seat's own offer waits for its answers before the agent takes a counteroffer or it is withdrawn (JSettlers'
+    // robots wait 5 s for a robot's answer; ours count as robots), and after how long a trade request that made no step is
+    // decided again (e.g. a counteroffer withdrawn while the seat took it)
+    private static final long OFFER_WAIT_MILLIS = Long.getLong("osp.offerWait", 5_000), TRADE_RETRY_MILLIS = 3_000;
+    // The seat's own offers per turn that its decisions name at most: JSettlers has no limit, but an agent that repeated
+    // itself would hold the game up for good (the robots answer every offer)
+    private static final int MAX_OFFERS_PER_TURN = 10;
     // The game's budget: how long the agent may think about one decision; the handshake and ready get a minute
     private static final long DECIDE_MILLIS = 120_000, HANDSHAKE_MILLIS = 60_000;
     // Any threads and a GPU allowed, as at every referee unless the game says otherwise
@@ -70,6 +91,15 @@ public class OSPRobotBrain extends SOCRobotBrain
     private int pendingFrom;
     private int decisions, asked, fallbacks;
     private long thinkingMillis;
+    // Trades between players: when the seat's own offer went out, the offer (as the protocol has it) the seat last made a
+    // trade request on and when, and a trade move decided but not yet sent (it is sent at the next look if the offer it
+    // answers still stands, else it expired and the seat's record counts it)
+    private long offeredAt, tradeAt;
+    private String tradeSnapshot;
+    private List<Object> tradeMove;
+    private String tradeFor;
+    // The seat's offers this turn (counted from its roll)
+    private int offersThisTurn;
 
     public OSPRobotBrain(SOCRobotClient rc, SOCRobotParameters params, SOCGame ga, CappedQueue<SOCMessage> mq)
     {
@@ -185,6 +215,14 @@ public class OSPRobotBrain extends SOCRobotBrain
         long moves, progress, gaps;
         List<Map<String, Object>> steps;
         MoveLog log;
+        // Trades between players: the open offer (as the protocol has it), the seat's answers while it is asked, whether the
+        // offer is the seat's own and still waits for answers, and the seat's picks on it; whether the game trades at all
+        Map<String, Object> offer;
+        List<Object> answers, picks;
+        boolean ourOffer, waiting, trading;
+        String prompt;
+        // The seat's resources as read (an offer or counteroffer of the agent's is checked against them)
+        soc.game.SOCResourceSet hand;
     }
 
     // Reads the true game under the server's locks, or null if there's no game to play yet
@@ -200,8 +238,9 @@ public class OSPRobotBrain extends SOCRobotBrain
             // JSettlers empties a game it destroys
             if (truthGame.getPlayer(0) == null || truthGame.getBoard() == null)
                 return null;
+            // The move log's view of the game, so that both see the same answers to an open offer (OSPGame.offer)
             if (osp == null)
-                osp = new OSPGame(truthGame);
+                osp = log != null ? log.osp : new OSPGame(truthGame);
             Seen seen = new Seen();
             seen.log = log;
             seen.over = osp.isOver();
@@ -212,6 +251,18 @@ public class OSPRobotBrain extends SOCRobotBrain
             int seat = osp.seatOf(ourPlayerNumber);
             seen.legal = seen.acting == seat && ! seen.over ? osp.legal(seat) : null;
             seen.stranded = seen.acting == seat && ! seen.over && osp.strandedFreeRoad();
+            seen.trading = ! truthGame.isGameOptionSet("NT");
+            seen.prompt = osp.prompt();
+            seen.offer = seen.over ? null : osp.offer();
+            seen.answers = seen.offer == null ? new ArrayList<>() : osp.answerMoves(seat);
+            seen.ourOffer = seen.offer != null && Json.integer(seen.offer.get("from")) == seat;
+            boolean waiting = false;
+            if (seen.ourOffer)
+                for (int s = 0; s < truthGame.maxPlayers; s++)
+                    waiting |= OSPGame.pending(seen.offer, s);
+            seen.waiting = waiting;
+            seen.picks = seen.ourOffer ? osp.pickMoves(seat) : null;
+            seen.hand = new soc.game.SOCResourceSet(truthGame.getPlayer(osp.playerOf(seat)).getResources());
             seen.moves = log != null ? log.size() : 0;
             seen.progress = log != null ? log.size() + log.gaps() : 0;
             seen.gaps = log != null ? log.gaps() : 0;
@@ -260,16 +311,149 @@ public class OSPRobotBrain extends SOCRobotBrain
             client.cancelBuildRequest(game, SOCPlayingPiece.ROAD);
             return;
         }
+        if (trade(seat, seen, state))
+            return;
         if (acting != seat || seen.progress == actedAt || legal.isEmpty())
             return;
         decisions++;
         if (seen.log != null)
             seen.log.seatRecord(seat).robotDecided();
+        // On its turn, with trades on and no offer open, the seat may offer (any cards, to any of the others), up to
+        // MAX_OFFERS_PER_TURN a turn (counted from its roll)
+        if ("roll".equals(seen.prompt))
+        {
+            offersThisTurn = 0;
+        }
+        Map<String, Object> trades = seen.trading && "main".equals(seen.prompt) && seen.offer == null && offersThisTurn < MAX_OFFERS_PER_TURN
+            ? Json.object("offer", Json.object("to", others(seat), "left", null)) : null;
         @SuppressWarnings("unchecked")
-        List<Object> move = (List<Object>) (legal.size() == 1 ? legal.get(0) : ask(seat, legal, seen));
+        List<Object> move = (List<Object>) (legal.size() == 1 && trades == null ? legal.get(0) : ask(seat, legal, seen, trades));
         actedAt = seen.progress;
         pendingFrom = state;
+        if ("offer".equals(move.get(0)))
+        {
+            offeredAt = System.currentTimeMillis();
+            offersThisTurn++;
+        }
         firstStep(move, state);
+    }
+
+    // The other seats, in order
+    private List<Object> others(int seat)
+    {
+        List<Object> others = new ArrayList<>();
+        for (int s = 0; s < game.maxPlayers; s++)
+            if (s != seat)
+                others.add((long) s);
+        return others;
+    }
+
+    // The offer's terms and addressees: what an answer or a pick is about
+    private static String identity(Map<String, Object> offer)
+    {
+        return offer == null ? null : Json.write(Json.object("from", offer.get("from"), "give", offer.get("give"), "get", offer.get("get"), "to", offer.get("to")), true);
+    }
+
+    /**
+     * Trades between players (player_trading first_accept): an offer to the seat is answered whenever it stands, in any
+     * order (with a counteroffer if the agent makes one); the seat's own offer waits for its answers (OFFER_WAIT_MILLIS at
+     * most), then the agent takes a counteroffer or the offer is withdrawn. A decided move is sent at the next look, if the
+     * offer it is about still stands as it did (else the decision expired: JSettlers' other players don't wait). Returns
+     * whether the seat is busy with a trade.
+     */
+    @SuppressWarnings("unchecked")
+    private boolean trade(int seat, Seen seen, int state) throws Exception
+    {
+        // A decided move: sent if its offer still stands and the move is still one the seat may make, else dropped
+        if (tradeMove != null)
+        {
+            List<Object> move = tradeMove;
+            tradeMove = null;
+            boolean answer = ! seen.ourOffer;
+            boolean still = Objects.equals(identity(seen.offer), tradeFor)
+                && (answer ? ! seen.answers.isEmpty() && (seen.answers.contains(move) || "counter".equals(move.get(0)))
+                    : seen.picks != null && seen.picks.contains(move));
+            if (! still)
+            {
+                if (record != null)
+                    record.tradeExpired();
+                debug("trade decision expired: " + Json.write(move));
+                return seen.offer != null && (! seen.answers.isEmpty() || seen.ourOffer);
+            }
+            tradeSnapshot = Json.write(seen.offer, true);
+            tradeAt = System.currentTimeMillis();
+            tradeStep(move, seen.offer);
+            return true;
+        }
+        if (seen.offer == null || (seen.answers.isEmpty() && ! seen.ourOffer))
+            return false;
+        long now = System.currentTimeMillis();
+        // A request about the offer as it stands went out already: wait for the server (or, if it made no step, decide again
+        // after a while)
+        if (Json.write(seen.offer, true).equals(tradeSnapshot) && now - tradeAt < TRADE_RETRY_MILLIS)
+            return true;
+        List<Object> moves;
+        Map<String, Object> trades = null;
+        if (! seen.answers.isEmpty())
+        {
+            moves = seen.answers;
+            trades = Json.object("counter", Json.object());
+        }
+        else
+        {
+            // The seat's own offer: the answers first
+            if (seen.waiting && now - offeredAt < OFFER_WAIT_MILLIS)
+                return true;
+            moves = seen.picks;
+        }
+        decisions++;
+        if (seen.log != null)
+            seen.log.seatRecord(seat).robotDecided();
+        tradeMove = (List<Object>) (moves.size() == 1 && trades == null ? moves.get(0) : ask(seat, moves, seen, trades));
+        tradeFor = identity(seen.offer);
+        // Sent at the next look, outside the brain's lock (which a server thread may wait for while it holds the game)
+        gameEventQ.put(new SOCTimingPing(game.getName()));
+        return true;
+    }
+
+    // Sends a trade move: an answer to the offer (accept, decline or a counteroffer, the seat's own offer to the offerer in
+    // its own terms), or the offerer's pick (taking a counteroffer, which JSettlers makes an accept of the counterer's offer)
+    // or withdrawal
+    @SuppressWarnings("unchecked")
+    private void tradeStep(List<Object> move, Map<String, Object> offer)
+    {
+        debug("trade: " + Json.write(move));
+        String type = (String) move.get(0);
+        Map<String, Object> value = move.size() > 1 ? (Map<String, Object>) move.get(1) : null;
+        int offerer = osp.playerOf(Json.integer(offer.get("from")));
+        switch (type)
+        {
+        case "respond":
+            if (Boolean.TRUE.equals(value.get("accept")))
+                client.acceptOffer(game, offerer);
+            else
+                client.rejectOffer(game);
+            break;
+        case "counter":
+        {
+            boolean[] to = new boolean[game.maxPlayers];
+            to[offerer] = true;
+            client.offerTrade(game, new SOCTradeOffer(game.getName(), ourPlayerNumber, to, OSPGame.resourceSet(value.get("get")), OSPGame.resourceSet(value.get("give"))));
+            break;
+        }
+        case "confirm":
+            client.acceptOffer(game, osp.playerOf(Json.integer(value.get("partner"))));
+            break;
+        case "cancel":
+            // The offer and the counteroffers to it: those stand at JSettlers until their makers withdraw them, which they do
+            // once their offer is turned down
+            client.clearOffer(game);
+            if (offer.get("counters") != null)
+                client.rejectOffer(game);
+            break;
+        default:
+            System.err.println(client.getNickname() + " in " + game.getName() + ": no JSettlers request for " + type);
+        }
     }
 
     /** A failure of the agent's seat: its code (see PROTOCOL.md) and whether the agent reported it itself */
@@ -310,6 +494,84 @@ public class OSPRobotBrain extends SOCRobotBrain
     // Asks the agent; the first legal move once it failed
     private Object ask(int seat, List<Object> legal, Seen seen)
     {
+        return ask(seat, legal, seen, null);
+    }
+
+    /**
+     * Whether a trade the agent wrote is one the decision named, with valid terms: an offer to some of the seats named (or
+     * a counteroffer, in the offerer's terms), giving at least one card and asking for at least one, of resources only and
+     * none on both sides, with the seat holding what it gives
+     */
+    @SuppressWarnings("unchecked")
+    private boolean namedTrade(Object answer, Map<String, Object> trades, soc.game.SOCResourceSet hand)
+    {
+        if (trades == null || ! (answer instanceof List) || ((List<Object>) answer).size() != 2 || ! (((List<Object>) answer).get(1) instanceof Map))
+            return false;
+        List<Object> move = (List<Object>) answer;
+        Map<String, Object> terms = (Map<String, Object>) move.get(1);
+        int[] give = cards(terms.get("give")), get = cards(terms.get("get"));
+        if (give == null || get == null)
+            return false;
+        int gives = 0, gets = 0;
+        for (int type = 0; type < give.length; type++)
+        {
+            if (give[type] > 0 && get[type] > 0)
+                return false;
+            gives += give[type];
+            gets += get[type];
+        }
+        if (gives == 0 || gets == 0)
+            return false;
+        // What the seat gives: an offer's give, a counteroffer's get (it is written in the offerer's terms)
+        boolean offer = "offer".equals(move.get(0)) && trades.containsKey("offer");
+        boolean counter = "counter".equals(move.get(0)) && trades.containsKey("counter");
+        if (! offer && ! counter)
+            return false;
+        if (! hand.contains(OSPGame.resourceSet(OSPGame.cardSet(offer ? give : get))))
+            return false;
+        if (counter)
+            return terms.size() == 2;
+        if (! (terms.get("to") instanceof List) || ((List<Object>) terms.get("to")).isEmpty() || terms.size() != 3)
+            return false;
+        List<Object> named = (List<Object>) ((Map<String, Object>) trades.get("offer")).get("to");
+        List<Object> to = new ArrayList<>();
+        for (Object s : (List<Object>) terms.get("to"))
+        {
+            if (! (s instanceof Long) || ! named.contains(s) || to.contains(s))
+                return false;
+            to.add(s);
+        }
+        return true;
+    }
+
+    // A card set of the protocol (resource names and positive counts) as counts by JSettlers' resource type, or null
+    @SuppressWarnings("unchecked")
+    private static int[] cards(Object set)
+    {
+        if (! (set instanceof Map))
+            return null;
+        int[] counts = new int[soc.game.SOCResourceConstants.WOOD + 1];
+        for (Map.Entry<String, Object> card : ((Map<String, Object>) set).entrySet())
+        {
+            int type;
+            try
+            {
+                type = OSPGame.resourceType(card.getKey());
+            }
+            catch (RuntimeException e)
+            {
+                return null;
+            }
+            if (! (card.getValue() instanceof Long) || (Long) card.getValue() <= 0 || type < 0 || type >= counts.length)
+                return null;
+            counts[type] += (int) (long) (Long) card.getValue();
+        }
+        return counts;
+    }
+
+    // Asks the agent, naming the trades it may propose in this decision (null for none); the first legal move once it failed
+    private Object ask(int seat, List<Object> legal, Seen seen, Map<String, Object> trades)
+    {
         asked++;
         long started = System.currentTimeMillis();
         Long n = seen.moves;
@@ -328,6 +590,8 @@ public class OSPRobotBrain extends SOCRobotBrain
             if (! lean || force)
                 decide.put("state", state);
             decide.put("legal", legal);
+            if (trades != null)
+                decide.put("trades", trades);
             agent.send(decide);
             while (true)
             {
@@ -365,7 +629,13 @@ public class OSPRobotBrain extends SOCRobotBrain
                         record.decided(System.currentTimeMillis() - started);
                         return move;
                     }
-                throw fail(n, "illegal", "the agent answered " + chosen + ", not a legal move", null);
+                // Or a trade the decision named, with terms of the agent's own
+                if (namedTrade(answer.get("action"), trades, seen.hand))
+                {
+                    record.decided(System.currentTimeMillis() - started);
+                    return answer.get("action");
+                }
+                throw fail(n, "illegal", "the agent answered " + chosen + ", which is neither one of the legal moves nor a trade with valid terms", null);
             }
         }
         catch (AgentFailure e)
@@ -470,7 +740,7 @@ public class OSPRobotBrain extends SOCRobotBrain
         if (! observe)
             sent = (int) seen.moves;
         agent.send(Json.object("type", "before", "game_id", game.getName(), "seat", (long) seat, "players", (long) game.maxPlayers,
-            "ruleset", RULESET, "budget", BUDGET, "seed", (long) seen.log.seed, "board", osp.board.boardJson(), "state", truth ? from : OSPGame.hide(from, seat)));
+            "ruleset", ruleset(osp.game), "budget", BUDGET, "seed", (long) seen.log.seed, "board", osp.board.boardJson(), "state", truth ? from : OSPGame.hide(from, seat)));
         // The agent takes the game or turns it down
         Map<String, Object> ready = receiveOrTimeout(HANDSHAKE_MILLIS, null);
         if ("failure".equals(ready.get("type")))
@@ -554,6 +824,15 @@ public class OSPRobotBrain extends SOCRobotBrain
             break;
         }
         case "discard": client.discard(game, OSPGame.resourceSet(value)); break;
+        case "offer":
+        {
+            Map<String, Object> offer = (Map<String, Object>) value;
+            boolean[] to = new boolean[game.maxPlayers];
+            for (Object s : (List<Object>) offer.get("to"))
+                to[osp.playerOf(Json.integer(s))] = true;
+            client.offerTrade(game, new SOCTradeOffer(game.getName(), ourPlayerNumber, to, OSPGame.resourceSet(offer.get("give")), OSPGame.resourceSet(offer.get("get"))));
+            break;
+        }
         case "bank_trade":
         {
             Map<String, Object> trade = (Map<String, Object>) value;

@@ -49,7 +49,10 @@ namespace OpenSeat
             // The options Hexfarer's engine plays itself: points to win, the discard limit, trades between players and offers
             State.Settings.VictoryPoints = ruleset?["victory_points"]?.GetValue<int>() ?? 10;
             State.Settings.RobberCardLimit = ruleset?["discard_limit"]?.GetValue<int>() ?? 7;
-            State.Settings.FreeTrade = Option("player_trading", "rulebook", "none") == "rulebook";
+            string trading = Option("player_trading", "rulebook", "none");
+            State.Settings.FreeTrade = trading is "rulebook" or "first_accept";
+            // JSettlers' flow: the addressed players answer in any order and the first accept trades at once
+            State.Settings.TradeFlow = trading == "first_accept" ? TradeFlow.FirstAccept : TradeFlow.Rulebook;
             State.Settings.MaxTradeOffersPerTurn = ruleset?["offer_limit"]?.GetValue<int>() ?? int.MaxValue;
         }
 
@@ -57,7 +60,7 @@ namespace OpenSeat
         private static readonly Dictionary<string, string[]?> Options = new()
         {
             ["victory_points"] = null, ["discard_limit"] = null, ["turn_limit"] = null, ["offer_limit"] = null,
-            ["player_trading"] = ["rulebook", "none"], ["bank_shortage"] = ["rulebook", "nobody", "unlimited"],
+            ["player_trading"] = ["rulebook", "first_accept", "none"], ["bank_shortage"] = ["rulebook", "nobody", "unlimited"],
             ["win_timing"] = ["own_turn", "any_time"], ["robber_victims"] = ["adjacent", "with_cards"], ["bank_rates"] = ["all", "best_only"],
             ["road_building"] = ["optional", "forced"],
         };
@@ -93,7 +96,20 @@ namespace OpenSeat
         /// Takes the game from the referee's full state where following its moves can't (no steps came, or a rule
         /// difference changed the board): the copy becomes that state, with what the legal moves tell (OSPCodec.BuildState)
         /// </summary>
-        public void Rebuild(JsonNode state, JsonArray legal) => State = Codec.BuildState(state, legal);
+        public void Rebuild(JsonNode state, JsonArray legal)
+        {
+            // The state says where the game is, the ruleset how it is played: the settings stay the before's
+            GameSettings settings = State.Settings;
+            TurnState was = State.Turn;
+            State = Codec.BuildState(state, legal);
+            State.Settings = new GameSettings(settings);
+            // The state doesn't say how many offers came this turn: within the same turn (the same player, after the roll in
+            // both) the copy's count stays, so the offer limit and an agent's memory of its offers this turn hold
+            TurnState now = State.Turn;
+            if (was.PlayerIndex == now.PlayerIndex && was.TypeOfRound == TurnState.RoundType.Normal && now.TypeOfRound == TurnState.RoundType.Normal
+                && !was.MustRoll && !now.MustRoll)
+                now.TradeOffersThisTurn = Math.Max(now.TradeOffersThisTurn, was.TradeOffersThisTurn);
+        }
 
         /// <summary>
         /// Whether the board as Hexfarer holds it writes back as the referee sent it
@@ -149,13 +165,20 @@ namespace OpenSeat
         /// The legal move of the protocol's move (after Legal's folding), also an offer or counteroffer the rules allow, or
         /// null if Hexfarer doesn't allow it
         /// </summary>
-        public Action? Find(JsonNode move)
+        public Action? Find(JsonNode move, sbyte? seat = null)
         {
             string wanted = OSPCodec.Canonical(move);
-            Action? listed = Legal().Where(m => OSPCodec.Canonical(m.move) == wanted).Select(m => m.action).FirstOrDefault();
+            // The legal list is the seat's whose turn it is in seat order: a move doesn't name its seat, so it is only looked up
+            // there when the step comes from that seat (under JSettlers' flow an answer can come from another addressee)
+            sbyte acting = Acting();
+            Action? listed = seat is sbyte from && from != acting ? null
+                : Legal().Where(m => OSPCodec.Canonical(m.move) == wanted).Select(m => m.action).FirstOrDefault();
             if (listed != null) return listed;
-            // Offers and counteroffers can be any cards, so no legal list holds them: read from the move, checked by the rules
-            return OSPCodec.TradeAction(move, Acting()) is Action trade && trade.IsValidFor(State) ? trade : null;
+            // Offers and counteroffers can be any cards, so no legal list holds them; under JSettlers' flow an answer, a pick or
+            // a withdrawal can come from another seat than the one in seat order. Read from the move for the seat that made it
+            // (the step's, else the one to act), checked by the rules.
+            sbyte by = seat ?? acting;
+            return (OSPCodec.TradeAction(move, by) ?? OSPCodec.AnswerAction(move, by)) is Action trade && trade.IsValidFor(State) ? trade : null;
         }
 
         /// <summary>
@@ -165,7 +188,7 @@ namespace OpenSeat
         {
             string at = $"move {step["n"]}";
             string move = OSPCodec.Canonical(step["action"]);
-            Action? action = Find(step["action"]!);
+            Action? action = Find(step["action"]!, step["seat"] is JsonValue seat && seat.TryGetValue(out int by) ? (sbyte)by : null);
             if (action == null) return ($"step: Hexfarer doesn't allow {MoveType(move)}", $"{at}: {move}");
 
             // The referee's result decides the move's randomness

@@ -20,6 +20,7 @@ import soc.game.SOCDevCardConstants;
 import soc.game.SOCGame;
 import soc.game.SOCPlayer;
 import soc.game.SOCPlayingPiece;
+import soc.message.SOCAcceptOffer;
 import soc.message.SOCBankTrade;
 import soc.message.SOCChoosePlayer;
 import soc.message.SOCDiscard;
@@ -114,7 +115,7 @@ final class MoveLog
                     file = new File(dir, name + "-" + copy + ".jsonl");
                 record = new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8);
                 write(Json.object("type", "before", "game_id", gameId, "players", (long) game.maxPlayers, "jsettlers_first", (long) osp.first,
-                    "ruleset", OSPRobotBrain.RULESET, "seed", (long) seed, "board", osp.board.boardJson(), "state", start));
+                    "ruleset", OSPRobotBrain.ruleset(game), "seed", (long) seed, "board", osp.board.boardJson(), "state", start));
             }
             catch (IOException e)
             {
@@ -133,7 +134,7 @@ final class MoveLog
     {
         private String agent, needs;
         private Boolean observe, lean;
-        private int decisions, resyncs, fallbacks, robotDecisions;
+        private int decisions, resyncs, fallbacks, robotDecisions, expiredTrades;
         private long timeMs, maxMs;
         private final List<Object> failures = new ArrayList<>();
 
@@ -162,6 +163,12 @@ final class MoveLog
             fallbacks++;
         }
 
+        // A trade decision of the agent whose offer was taken or withdrawn before its answer went out (dropped, not sent)
+        synchronized void tradeExpired()
+        {
+            expiredTrades++;
+        }
+
         synchronized void robotDecided()
         {
             robotDecisions++;
@@ -176,7 +183,8 @@ final class MoveLog
         {
             return Json.object("seat", (long) seat, "agent", agent, "needs", needs, "observe", observe, "lean", lean,
                 "decisions", (long) decisions, "time_ms", timeMs, "max_ms", maxMs, "resyncs", (long) resyncs, "fallbacks", (long) fallbacks,
-                "failures", new ArrayList<>(failures), "robot_decisions", (long) robotDecisions);
+                "failures", new ArrayList<>(failures), "robot_decisions", (long) robotDecisions,
+                "expired_trades", (long) expiredTrades);
         }
     }
 
@@ -263,7 +271,9 @@ final class MoveLog
                 int acting = log.osp.acting();
                 // Listed only for the record's decide lines (and its choices), not on every request of the message thread
                 List<Object> legal = ! log.recording ? null
-                    : message.getType() == SOCMessage.DISCARD && seat >= 0 ? log.osp.discardMoves(seat) : acting >= 0 ? log.osp.legal(acting) : new ArrayList<>();
+                    : message.getType() == SOCMessage.DISCARD && seat >= 0 ? log.osp.discardMoves(seat)
+                    : isTrade(message) && seat >= 0 && seat != acting ? tradeMoves(log.osp, seat)
+                    : acting >= 0 ? log.osp.legal(acting) : new ArrayList<>();
                 List<Integer> mustDiscard = new ArrayList<>();
                 for (int s = 0; s < game.maxPlayers; s++)
                     if (game.getPlayer(log.osp.playerOf(s)).getNeedToDiscard())
@@ -297,6 +307,20 @@ final class MoveLog
         }
     }
 
+    // Whether a request is one of a trade between players
+    private static boolean isTrade(SOCMessageForGame message)
+    {
+        int type = message.getType();
+        return type == SOCMessage.MAKEOFFER || type == SOCMessage.REJECTOFFER || type == SOCMessage.ACCEPTOFFER || type == SOCMessage.CLEAROFFER;
+    }
+
+    // The trade moves of a seat that isn't the one to act in seat order: its answers while it is asked, else the offerer's picks
+    private static List<Object> tradeMoves(OSPGame osp, int seat)
+    {
+        List<Object> answers = osp.answerMoves(seat);
+        return ! answers.isEmpty() ? answers : osp.pickMoves(seat);
+    }
+
     /** A request JSettlers is handling: who sent it, and the game before it */
     private static final class InFlight
     {
@@ -317,6 +341,8 @@ final class MoveLog
     }
 
     private InFlight inFlight;
+    // Whether the request just handled withdrew an open offer that JSettlers still holds (see handled)
+    private boolean closedAfter;
 
     // Whether JSettlers still has the game (it empties a destroyed one)
     private boolean alive()
@@ -345,9 +371,11 @@ final class MoveLog
                 if (! setup(last) && ! Objects.equals(last.get("on_turn"), request.before.get("on_turn")))
                     turns++;
             }
+            closedAfter = false;
             if (request.seat >= 0)
                 handled(request.message, request.seat, request.before, after, request.legal, request.mustDiscard);
-            last = after;
+            // A withdrawn offer JSettlers still holds is closed from now on: the next request starts from the state without it
+            last = closedAfter ? osp.state(-1) : after;
             if (osp.isOver() && game.getPlayerWithWin() != null)
                 end(after);
         }
@@ -394,6 +422,21 @@ final class MoveLog
         // The states are maps, lists and values as OSPGame writes them, so they compare as their JSON would
         if (before.equals(after))
             return;
+        if (isTrade(message))
+        {
+            traded(message, seat, before, after, legal);
+            return;
+        }
+        // JSettlers lets the player on turn build, trade with the bank, play a card or end the turn with its offer standing;
+        // the protocol's offer has to close first: the move withdraws it, and the offer stays closed though JSettlers still
+        // holds it (its robots sometimes go on so; ours withdraws first)
+        if (before.get("offer") != null && seat == Json.integer(before.get("on_turn")))
+        {
+            step(seat, Json.array("cancel"), null, before, legal);
+            before = withoutOffer(before);
+            osp.closeOffer();
+            closedAfter = true;
+        }
         switch (message.getType())
         {
         case SOCMessage.ROLLDICE:
@@ -518,6 +561,98 @@ final class MoveLog
             // A request no protocol move makes changed the game
             gaps++;
         }
+    }
+
+    /**
+     * A trade request's steps under player_trading "first_accept", by what changed in the protocol's offer: the player on
+     * turn offers (withdrawing a standing offer first), an addressee declines, counters (its own offer to the player on
+     * turn) or accepts (the trade happens at once), the player on turn takes a counteroffer or withdraws. A change none of
+     * these explains is a gap.
+     */
+    @SuppressWarnings("unchecked")
+    private void traded(SOCMessageForGame message, int seat, Map<String, Object> before, Map<String, Object> after, List<Object> legal)
+    {
+        Map<String, Object> was = (Map<String, Object>) before.get("offer"), is = (Map<String, Object>) after.get("offer");
+        int onTurn = Json.integer(before.get("on_turn"));
+        String key = Integer.toString(seat);
+        switch (message.getType())
+        {
+        case SOCMessage.MAKEOFFER:
+            if (seat == onTurn)
+            {
+                // A new offer while one stands replaces it: the protocol withdraws the old one first
+                Map<String, Object> from = before;
+                if (was != null)
+                {
+                    step(seat, Json.array("cancel"), null, before, legal);
+                    from = withoutOffer(before);
+                }
+                if (is != null && Json.integer(is.get("from")) == seat)
+                    step(seat, Json.array("offer", Json.object("give", is.get("give"), "get", is.get("get"), "to", is.get("to"))), null, from, legal);
+                return;
+            }
+            // An addressee's own offer to the player on turn: its counteroffer
+            if (was != null && is != null && OSPGame.pending(was, seat) && "counter".equals(answer(is, key)))
+            {
+                step(seat, Json.array("counter", ((Map<String, Object>) is.get("counters")).get(key)), null, before, legal);
+                return;
+            }
+            break;
+        case SOCMessage.REJECTOFFER:
+            // An addressee's no (the last one closes the offer)
+            if (was != null && seat != onTurn && OSPGame.pending(was, seat) && (is == null || "decline".equals(answer(is, key))))
+            {
+                step(seat, Json.array("respond", Json.object("accept", false)), null, before, legal);
+                return;
+            }
+            break;
+        case SOCMessage.ACCEPTOFFER:
+        {
+            int offering = osp.seatOf(((SOCAcceptOffer) message).getOfferingNumber());
+            // An addressee's accept: the trade happened at once and closed the offer
+            if (was != null && is == null && seat != onTurn && offering == onTurn && OSPGame.pending(was, seat))
+            {
+                step(seat, Json.array("respond", Json.object("accept", true)), null, before, legal);
+                return;
+            }
+            // The player on turn takes a counteroffer
+            if (was != null && is == null && seat == onTurn && "counter".equals(answer(was, Integer.toString(offering))))
+            {
+                step(seat, Json.array("confirm", Json.object("partner", (long) offering)), null, before, legal);
+                return;
+            }
+            break;
+        }
+        case SOCMessage.CLEAROFFER:
+            // The offer closed without a trade: the player on turn withdrew it, or (it had withdrawn it already) the last
+            // counteroffer that kept it open went. The protocol's withdrawal is the offerer's.
+            if (was != null && is == null)
+            {
+                step(Json.integer(was.get("from")), Json.array("cancel"), null, before, legal);
+                return;
+            }
+            break;
+        default:
+            break;
+        }
+        // A change of the game no protocol step explains (e.g. a trade on an offer nobody asked for)
+        gaps++;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object answer(Map<String, Object> offer, String seat)
+    {
+        return ((Map<String, Object>) offer.get("answers")).get(seat);
+    }
+
+    // The state after the open offer closed without a trade: the player on turn goes on
+    private static Map<String, Object> withoutOffer(Map<String, Object> state)
+    {
+        Map<String, Object> closed = OSPGame.copy(state);
+        closed.put("offer", null);
+        closed.put("prompt", "main");
+        closed.put("current", closed.get("on_turn"));
+        return closed;
     }
 
     private void pending(String kind, Object value, Map<String, Object> before, List<Object> legal)

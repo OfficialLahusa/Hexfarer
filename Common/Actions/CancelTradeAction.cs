@@ -35,7 +35,7 @@ namespace Common.Actions
 
         public override bool IsValidFor(GameState state)
         {
-            return ConfirmTradeAction.IsTurnValid(state.Turn, PlayerIndex);
+            return ConfirmTradeAction.MayPick(state, PlayerIndex);
         }
 
         public bool HasHistory() => History != null;

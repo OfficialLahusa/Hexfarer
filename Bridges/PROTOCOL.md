@@ -195,6 +195,18 @@ An agent that doesn't know `trades` ignores it, plays only what `legal` lists, a
    accepted (on the offer's terms) or countered (on the counteroffer's terms), or `cancel`.
 4. Every answer is a decision with the game's budget, and the steps tell observers each one.
 
+With `player_trading` `first_accept` (JSettlers' flow) the moves and the state are the same, but the order is free:
+- The addressed seats may answer in any order, as the referee sees the answers come; a step's seat can then be another
+  than its state's `current` (which names the next addressee in seat order, then the offerer).
+- An accept trades at once on the offer's terms and closes the offer: there is no partner to pick among plain accepts.
+- A counteroffer stands until the offerer takes it (`confirm`, which trades at once) or the offer closes; the offerer may
+  take one, or withdraw (`cancel`), while others are still asked.
+- When every addressed seat declined, the offer closes, as under `rulebook`.
+
+A referee whose players answer at the same time can't wait for a slow agent: a decision about an offer can expire before
+its answer comes (another seat accepted, the offerer withdrew). The referee then drops the answer instead of playing it,
+and the agent learns from the steps what happened instead.
+
 ## Coordinates (SGN)
 
 - **Hex:** `[q, r]` axial, pointy-top. `q` grows to the east, `r` to the south-east, and the center hex is `[0, 0]`. The

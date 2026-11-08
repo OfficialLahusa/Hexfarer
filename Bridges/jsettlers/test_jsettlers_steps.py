@@ -176,6 +176,13 @@ class StepTests(unittest.TestCase):
                 elif message["type"] == "decide":
                     self.assertEqual(seen, message["n"], message["n"])
 
+    def test_an_agent_without_trades_gets_the_ruleset_without_them(self):
+        # These games run with the game option NT: the ruleset says no trades between players, and no offer stands
+        for messages in self.games:
+            self.assertEqual("none", messages[1]["ruleset"]["player_trading"])
+            self.assertNotIn("offer_limit", messages[1]["ruleset"])
+            self.assertTrue(all(m["state"]["offer"] is None for m in messages if m["type"] == "step"))
+
     def test_each_step_explains_the_change_to_the_next_state(self):
         for messages in self.games:
             steps = [m for m in messages if m["type"] == "step"]

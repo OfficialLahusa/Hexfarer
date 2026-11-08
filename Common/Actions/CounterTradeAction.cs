@@ -42,7 +42,7 @@ namespace Common.Actions
 
         public override bool IsValidFor(GameState state)
         {
-            return RespondToTradeAction.IsTurnValid(state.Turn, PlayerIndex)
+            return RespondToTradeAction.MayAnswer(state, PlayerIndex)
                 && TradeOffer.AreValidTerms(Give, Get)
                 && state.Players[PlayerIndex].ResourceCards.Contains(Get);
         }

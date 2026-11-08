@@ -99,7 +99,7 @@ namespace Tests
         /// The true state lies within the observer's belief: known cards are held, the counts add up, the cards beyond the
         /// known ones are of candidate types, and the hidden development cards are exactly those the observer can't see
         /// </summary>
-        private static void AssertSupports(BeliefTracker tracker, GameState truth)
+        internal static void AssertSupports(BeliefTracker tracker, GameState truth)
         {
             for (int player = 0; player < truth.Players.Length; player++)
             {
