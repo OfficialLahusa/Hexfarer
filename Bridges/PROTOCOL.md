@@ -86,7 +86,7 @@ Every message that is answered may also be answered with `failure`.
 - StacSettlers' robot sends no steps yet (it would need a recorder of its server's requests): the one exception to
   serving `observe` as asked. An agent that asks for steps gets none, every decision carries the full state (a lean
   agent asks for it each time), and the result record says `"observe":false`. Hexfarer's agent then rebuilds its game
-  from each decision's state.
+  from each decision's state. Its decisions' `n` count the seat's own decisions, since it sees no other seat's moves.
 
 ### `before` and `ready`
 
