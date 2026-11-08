@@ -14,6 +14,7 @@
 		- Unter anbietenden Bots: bis 3:3 mit Gegenangeboten 29,8 %, Gegenangebote allein +1,3 Pp; faire Antworten Standard; Angebotsmodell mit fairen Partnern halbiert die Angebote (20,9 %) => Modell nimmt jeden Gewinn an
 		- Gesamt unter Bots mit den ursprünglichen Standards: 30-33 % (800-5000 Iter.), gegen nur antwortende Bots 46,4 %; Bot mit alter Antwortregel unter den neuen 21-23 %
 		- Nachteile: faire Antworten drücken Anbieter gegen nur antwortende Bots von 42,8 auf 29,5 %; Handel verkürzt Partien 19,3 => 16,6 Runden; Arena-Runde mit 4 Anbietern 2,1x so lang; was Angebote verraten, ist wenig wert (Bot, der es ignoriert, 26,0 %)
+		- Prüfen, ob der faire Handelsagent implizit Dirty Monopolies spielt (Rohstoff X weghandeln, kurz darauf Monopol auf X): in Aufnahmen Monopole nach eigenen Tauschen, die X abgeben, gegen die Basisrate zählen
 - Client-UI für echtes interaktives Spielen durch Menschen überarbeiten und fertigstellen
 	- Umgesetzt: Modi Play, Spectate, Edit (Ghosts aus den legalen Moves, Dialoge, Ertragspartikel, Hidden Info im Play, Policy-Heatmap und Eval-Bar im Spectate, Edit mit Undo/Redo und Log), HUD skaliert mit der Fensterhöhe; Hauptmenü (auf diesem Computer mit Mensch oder Bot pro Sitz, MCTS Hard als Standard-Bot, Hosten mit derselben Sitzwahl, Beitreten, Laden; Einstellungen für Sounds, Lautstärke, Partikel und Bot-Tempo in %AppData%\Hexfarer\settings.json); --selftest spielt Partien über die UI-Pfade und das Menü
 	- Hot-Seat mit verdeckter Übergabe ist umgesetzt (Vorhang zwischen zwei Menschen)
