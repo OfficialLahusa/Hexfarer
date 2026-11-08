@@ -299,6 +299,8 @@ namespace Tests
             (GameState state, sbyte active) = FirstAcceptGame();
             // On its turn with trades named: a legal move, no offer
             (SeatAgent onTurn, OSPCodec codec) = SeatedAgent(state, active, declineTrades: true);
+            // Any offer would seem worth it: only the option keeps the agent from making one
+            onTurn.Search!.Offers.Margin = -100;
             JsonArray main = new(LegalActionProvider.GetActionsForState(state, active).Select(a => (JsonNode)codec.Move(a)).ToArray());
             JsonObject offers = new() { ["offer"] = new JsonObject { ["to"] = new JsonArray((JsonNode)(int)Seat(active, 1), (int)Seat(active, 2), (int)Seat(active, 3)), ["left"] = null } };
             JsonNode move = onTurn.Handle(Decision(codec, state, active, main, offers))!;
@@ -309,6 +311,8 @@ namespace Tests
             foreach (sbyte seat in new[] { Seat(active, 1), Seat(active, 3) })
             {
                 (SeatAgent agent, OSPCodec seatCodec) = SeatedAgent(state, seat, declineTrades: true);
+                // Any trade would seem worth accepting: only the option keeps the agent from it
+                agent.Search!.AnswerMargin = -100;
                 JsonArray legal = [seatCodec.Move(new RespondToTradeAction(seat, true)), seatCodec.Move(new RespondToTradeAction(seat, false))];
                 JsonNode answer = agent.Handle(Decision(seatCodec, state, seat, legal, JsonNode.Parse("""{"counter":{}}""")))!;
                 Assert.Equal(OSPCodec.Canonical(seatCodec.Move(new RespondToTradeAction(seat, false))), OSPCodec.Canonical(answer["action"]));

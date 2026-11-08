@@ -209,6 +209,16 @@ public final class TradeLogCheck
             t.expectHand(1, 2, 2);
             t.expectGaps(0);
         });
+        // An addressee that countered and then accepts the offer after all: JSettlers trades, the protocol's answers are final,
+        // so it is a gap, not an accept
+        scenario("an addressee that countered accepts after all", (t) ->
+        {
+            t.offer(1, LUMBER, 1, ORE, 1, 2, 3);
+            t.counter(1, ORE, 1, LUMBER, 2);
+            t.accept(1);
+            t.expect("offer", "counter");
+            t.expectGaps(1);
+        });
         System.out.println(failures == 0 ? "trade steps checked" : failures + " trade check(s) failed");
         System.exit(failures == 0 ? 0 : 1);
     }
