@@ -257,9 +257,9 @@ namespace Tests
         }
 
         // Hexfarer's Open Seat Agent at a referee with JSettlers' flow, seated at the seat, after its handshake and before
-        private static (SeatAgent agent, OSPCodec codec) SeatedAgent(GameState state, sbyte seat, bool declineTrades = false)
+        private static (SeatAgent agent, OSPCodec codec) SeatedAgent(GameState state, sbyte seat, bool declineTrades = false, string net = "sensitive_tiny.onnx")
         {
-            SeatAgent agent = new(Net("sensitive_tiny.onnx"), iterations: 16, seconds: 0, new StringWriter(), leavesPerBatch: 8, declineTrades: declineTrades);
+            SeatAgent agent = new(Net(net), iterations: 16, seconds: 0, new StringWriter(), leavesPerBatch: 8, declineTrades: declineTrades);
             OSPCodec codec = new(state.Board);
             agent.Handle(JsonNode.Parse("""{"type":"handshake","protocol":"osp","version":2}""")!);
             JsonNode ready = agent.Handle(new JsonObject
@@ -291,6 +291,68 @@ namespace Tests
             JsonArray legal = [codec.Move(new RespondToTradeAction(last, true)), codec.Move(new RespondToTradeAction(last, false))];
             JsonNode answer = agent.Handle(Decision(codec, state, last, legal, JsonNode.Parse("""{"counter":{}}""")))!;
             Assert.Equal(OSPCodec.Canonical(codec.Move(new RespondToTradeAction(last, false))), OSPCodec.Canonical(answer["action"]));
+        }
+
+        [Fact]
+        public void HexfarersOpenSeatAgentAcceptsOutOfSeatOrderWhenTheSeatBeforeItCannot()
+        {
+            (GameState state, sbyte active) = FirstAcceptGame();
+            // The first addressee in seat order has no ore (back in the bank), so its legal moves hold no accept
+            sbyte first = Seat(active, 1), last = Seat(active, 3);
+            state.Players[first].ResourceCards.Remove(Cards((Ore, 2)));
+            state.ResourceBank.Add(Cards((Ore, 2)));
+            Play(state, LumberForOre(state, active));
+            Assert.False(new RespondToTradeAction(first, true).IsValidFor(state));
+            (SeatAgent agent, OSPCodec codec) = SeatedAgent(state, last);
+            // Any trade seems worth it: the agent accepts, and the accept has to reach the referee, not the first legal move
+            agent.Search!.AnswerMargin = -100;
+            agent.Search.AnswerFairness = 0;
+            JsonArray legal = [codec.Move(new RespondToTradeAction(last, false)), codec.Move(new RespondToTradeAction(last, true))];
+            JsonNode answer = agent.Handle(Decision(codec, state, last, legal, JsonNode.Parse("""{"counter":{}}""")))!;
+            Assert.Equal(OSPCodec.Canonical(codec.Move(new RespondToTradeAction(last, true))), OSPCodec.Canonical(answer["action"]));
+
+            // A referee that doesn't allow the accept gets a move it allows, though the agent would accept
+            (SeatAgent strict, OSPCodec strictCodec) = SeatedAgent(state, last);
+            strict.Search!.AnswerMargin = -100;
+            strict.Search.AnswerFairness = 0;
+            JsonArray declineOnly = [strictCodec.Move(new RespondToTradeAction(last, false))];
+            JsonNode declined = strict.Handle(Decision(strictCodec, state, last, declineOnly, JsonNode.Parse("""{"counter":{}}""")))!;
+            Assert.Equal(OSPCodec.Canonical(declineOnly[0]), OSPCodec.Canonical(declined["action"]));
+        }
+
+        [Fact]
+        public void HexfarersOpenSeatAgentPicksOnItsOfferBeforeEveryoneAnswered()
+        {
+            List<Action> decided = [];
+            // Counteroffers in the offerer's terms (it gives, it gets): the plain test net puts some above the agent's margin and the
+            // others below it, so the agent takes some and withdraws from others
+            CardSet<ResourceCardType>[][] counters =
+            [
+                [Cards((Lumber, 1)), Cards((Ore, 2))], [Cards((Lumber, 2)), Cards((Ore, 1))], [Cards((Lumber, 1)), Cards((Grain, 1))],
+                [Cards((Lumber, 1)), Cards((Wool, 2))], [Cards((Lumber, 2), (Brick, 2)), Cards((Ore, 1))], [Cards((Brick, 1)), Cards((Grain, 1))],
+                [Cards((Lumber, 1)), Cards((Ore, 2), (Grain, 2), (Wool, 2), (Brick, 2))], [Cards((Wool, 2)), Cards((Ore, 1))],
+            ];
+            foreach (CardSet<ResourceCardType>[] terms in counters)
+            {
+                (GameState state, sbyte active) = FirstAcceptGame();
+                Play(state, LumberForOre(state, active));
+                sbyte counterer = Seat(active, 2);
+                Play(state, new CounterTradeAction(counterer, terms[0], terms[1]));
+                // The first addressee hasn't answered yet: in seat order it is the one to act, but the offerer may pick now
+                Assert.Equal(Seat(active, 1), state.Turn.PendingTrade!.NextResponder);
+                (SeatAgent agent, OSPCodec codec) = SeatedAgent(state, active, net: "plain_tiny.onnx");
+                Action expected = agent.Search!.DecideTrade(new GameState(state))!;
+                Assert.True(expected is ConfirmTradeAction or CancelTradeAction, $"decided {expected}");
+                decided.Add(expected);
+                Action other = expected is CancelTradeAction ? new ConfirmTradeAction(active, counterer) : new CancelTradeAction(active);
+                // The other choice first: the agent's own has to reach the referee, not the first legal move
+                JsonArray legal = [codec.Move(other), codec.Move(expected)];
+                JsonNode answer = agent.Handle(Decision(codec, state, active, legal, null))!;
+                Assert.Equal(OSPCodec.Canonical(codec.Move(expected)), OSPCodec.Canonical(answer["action"]));
+            }
+            // Both picks were made: taking the counteroffer and withdrawing
+            Assert.Contains(decided, a => a is ConfirmTradeAction);
+            Assert.Contains(decided, a => a is CancelTradeAction);
         }
 
         [Fact]

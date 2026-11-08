@@ -433,6 +433,13 @@ namespace OpenSeat
             {
                 if (action is OfferTradeAction or CounterTradeAction)
                     return Proposable(action, trades) ? _replica!.Codec.Move(action) : null;
+                // An answer, pick or withdrawal names no seat, and under JSettlers' flow the seat may make it before its turn in
+                // seat order, where the copy's legal list is another seat's: checked by the rules for this seat instead
+                if (action is RespondToTradeAction or ConfirmTradeAction or CancelTradeAction)
+                {
+                    JsonArray answer = _replica!.Codec.Move(action);
+                    return action.IsValidFor(_replica.State) && allowed.Contains(OSPCodec.Canonical(answer)) ? answer : null;
+                }
                 string wanted = OSPCodec.Canonical(_replica!.Codec.Move(action));
                 foreach ((Action legalAction, JsonArray encoded) in _replica.Legal())
                 {
