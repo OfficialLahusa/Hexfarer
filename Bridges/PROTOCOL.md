@@ -22,7 +22,7 @@ version, its adapter disappears.
 ## Roles and transport
 
 - **Referee:** holds the true game and runs it (a Hexfarer match or Arena duel, a Catanatron game, a JSettlers server
-  through its adapter).
+  or a StacSettlers simulation through its adapter).
 - **Agent:** a bot process that plays one or more seats. A program that plays seats over OSP is an **Open Seat Agent**:
   the adapters in this folder make Catanatron's and JSettlers' bots Open Seat Agents, and Hexfarer's agents play as one
   under other engines' referees.
@@ -83,6 +83,10 @@ Every message that is answered may also be answered with `failure`.
 - JSettlers' robot sends steps; its server makes them from the players' requests, in the protocol's order (simultaneous
   discards from the lowest seat up, each with the state that order gives it). A change the server makes on its own (a
   slow player's turn ended) comes as no step; the next decision then carries the full state (see lean decisions).
+- StacSettlers' robot sends steps the same way, from its server's requests. A trade its agents make in chat comes as
+  the two steps it takes under `player_trading` `first_accept`: the offer of the player on turn to the partner, on
+  exactly the terms that changed hands, and the partner's accept; the negotiation before it (offers declined, withdrawn
+  or countered) makes no step.
 
 ### `before` and `ready`
 
@@ -109,7 +113,9 @@ Every message that is answered may also be answered with `failure`.
   down instead of answering ready.
 - The answers to `handshake` and `before` have 60 s, for starting a process and loading a net.
 - Defaults, where whoever starts the game sets none: Hexfarer's referee 300 000 ms, Catanatron's driver 300 000 ms,
-  JSettlers' robot 120 000 ms (its server also ends a robot's turn after its own limit); any threads, a GPU allowed.
+  JSettlers' robot 120 000 ms (its server also ends a robot's turn after its own limit), StacSettlers' robot 120 000 ms
+  (its simulation should run with ForceEndTurns=false, else the server ends a turn after 30 s); any threads, a GPU
+  allowed.
 
 ### `decide`, lean decisions and `resync`
 
@@ -168,8 +174,8 @@ without a game ends the connection. The referee records every failure in the gam
 | `internal` | either | the side's own error, say an exception in the agent's search |
 
 What happens to the seat is the referee's choice, recorded with the result: a Hexfarer match pauses (resuming starts
-the agent again), the Arena drops the game, Catanatron's driver ends the game, and JSettlers' robot plays on with the
-first legal move (as `fallbacks`).
+the agent again), the Arena drops the game, Catanatron's driver ends the game, and JSettlers' and StacSettlers' robots
+play on with the first legal move (as `fallbacks`).
 
 ### Trades between players
 
