@@ -18,9 +18,10 @@ import soc.server.logger.SOCLogger;
  * StacSettlers' server (SOCServer) as OSPSimulation runs it, made reachable for the Open Seat Agents' robots
  * (OSPRobotBrain), which run in the same process: they read the true game they play in (game), under the lock every
  * client request is handled with (read), so they never see a request half handled; a game's record (GameRecord) keeps
- * its result record, and before the server removes a game its robots tell their agents its end. With the system
- * property osp.record=DIR every request of a started game also passes through the game's move log (MoveLog), which
- * writes the game as a referee log of every seat's moves. Nothing else of the server changes.
+ * its result record, and before the server removes a game its robots tell their agents its end. Every request of a
+ * started game passes through the game's move log (MoveLog), which turns it into protocol steps for the agents that
+ * observe and, with the system property osp.record=DIR, writes the game as a referee log of every seat's moves. Nothing
+ * else of the server changes.
  */
 public final class OSPServer extends SOCServer
 {
@@ -73,7 +74,7 @@ public final class OSPServer extends SOCServer
         }
     }
 
-    // Where each game is written as a referee log while it runs (osp.record), or null; each recorded game's move log
+    // Where each game is written as a referee log while it runs (osp.record), or null; each started game's move log
     private static final String RECORD = System.getProperty("osp.record");
     private static final Map<String, MoveLog> LOGS = new ConcurrentHashMap<>();
 
@@ -82,7 +83,7 @@ public final class OSPServer extends SOCServer
     {
         synchronized (REQUESTS)
         {
-            SOCMessage message = RECORD == null ? null : SOCMessage.toMsg(command);
+            SOCMessage message = SOCMessage.toMsg(command);
             MoveLog log = message == null ? null : logOf(message);
             if (log == null)
             {
@@ -111,14 +112,21 @@ public final class OSPServer extends SOCServer
         game.takeMonitor();
         try
         {
-            log = new MoveLog(game, RECORD);
+            return logIn(game);
         }
         finally
         {
             game.releaseMonitor();
         }
-        LOGS.put(name, log);
-        return log;
+    }
+
+    /**
+     * The move log of a started game, begun now if the game has none yet: at its first request, or when a robot of ours
+     * first looks at it (the caller holds the request lock and the game's monitor)
+     */
+    static MoveLog logIn(SOCGame game)
+    {
+        return LOGS.computeIfAbsent(game.getName(), name -> new MoveLog(game, RECORD));
     }
 
     @Override

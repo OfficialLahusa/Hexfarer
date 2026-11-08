@@ -42,6 +42,34 @@ public final class OSPGame
     public static final Map<String, Object> RULESET = java.util.Collections.unmodifiableMap(Json.object("preset", "standard",
         "player_trading", "none", "bank_shortage", "unlimited", "robber_victims", "with_cards", "road_building", "forced"));
 
+    /**
+     * The rules of this process's games: RULESET, with player_trading first_accept where StacSettlers' agents trade among
+     * themselves (its simulation's Trades=true), so their trades come to observers as offers and accepts (MoveLog); the
+     * seat of an Open Seat Agent still takes no part (its robot declines every offer and makes none)
+     */
+    public static Map<String, Object> ruleset()
+    {
+        Map<String, Object> ruleset = new LinkedHashMap<>(RULESET);
+        if (tradesBetweenPlayers())
+            ruleset.put("player_trading", "first_accept");
+        return ruleset;
+    }
+
+    /** Whether StacSettlers' robots trade with each other: its switch SOCRobotBrain.disableTrades, set by Trades= */
+    static boolean tradesBetweenPlayers()
+    {
+        try
+        {
+            java.lang.reflect.Field disabled = soc.robot.SOCRobotBrain.class.getDeclaredField("disableTrades");
+            disabled.setAccessible(true);
+            return ! disabled.getBoolean(null);
+        }
+        catch (ReflectiveOperationException e)
+        {
+            throw new IllegalStateException("StacSettlers without its trades switch", e);
+        }
+    }
+
     // The protocol's resource names by StacSettlers' resource type (the same numbers as JSettlers 2), and back
     private static final String[] RESOURCE_NAMES = new String[SOCResourceConstants.WOOD + 1];
     static

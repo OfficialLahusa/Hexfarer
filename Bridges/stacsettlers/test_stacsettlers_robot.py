@@ -117,11 +117,11 @@ class RobotTests(unittest.TestCase):
             self.assertEqual("after", kinds[-1])
             self.assertTrue(all(k == "decide" for k in kinds[2:-1]))
             before = got[1]
-            self.assertEqual({"preset": "standard", "player_trading": "none", "bank_shortage": "unlimited", "robber_victims": "with_cards",
+            self.assertEqual({"preset": "standard", "player_trading": "first_accept", "bank_shortage": "unlimited", "robber_victims": "with_cards",
                               "road_building": "forced"}, before["ruleset"])
             self.assertEqual({"decide_ms": 120000, "game_ms": None, "threads": None, "gpu": True}, before["budget"])
             self.assertEqual(37, len(before["board"]["tiles"]))
-            # Every decision carries the true state (no steps come), numbered in order, its seat the one that acts
+            # Every decision carries the true state (the agent doesn't observe), numbered in order, its seat the one that acts
             decides = got[2:-1]
             numbers = [m["n"] for m in decides]
             self.assertEqual(numbers, sorted(numbers))

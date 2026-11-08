@@ -65,8 +65,9 @@ Contents:
     by its own code) with one more agent kind, `osp`: `Agent=1,Hexfarer,osp` seats a robot whose decisions the Open Seat
     Agent of `-Dosp.agent=COMMAND` makes (`OSPRobotBrain`). The games run on `OSPServer`, StacSettlers' server through
     which the robot reads the true game under the lock the server handles requests with; the robot serves its agent
-    the true state or its seat's view, as it asks, but no steps yet (every decision carries the full state; Hexfarer's
-    agent rebuilds its game from it), and plays the answer through StacSettlers' requests. It takes no part in the trades
+    the true state or its seat's view, as it asks, and if it observes, every move of the game as a step from the
+    game's start (`MoveLog`, which turns the requests of all seats, StacSettlers' agents' too, into protocol moves), and
+    plays the answer through StacSettlers' requests. It takes no part in the trades
     StacSettlers' agents negotiate in chat: it never announces that it participates (so Stac agents don't wait for its
     answers) and declines every offer made to it (Dobre's MCTS agents wait for the answer);
     with the bank and the harbors it trades as usual. Each game ends with its result record as an `osp-result` line on
@@ -79,15 +80,16 @@ Contents:
     any agent line) with a summary of its wins, decision times and failures, e.g.
     `python play.py --agent "OpenSeat agent --net NET --iterations 5000" --opponents stac --games 10 --out DIR`
     (`--opponents ss --fully-observable` for SmartSettlers).
-  - `-Dosp.record=DIR` (on `OSPSimulation`): every game is written as a referee log while it runs (`MoveLog`, which
-    turns the requests of all seats, StacSettlers' agents' too, into protocol moves: two-step moves joined, discards
-    in the protocol's order), the input of `OpenSeat replay`. A trade between players, which StacSettlers' agents make in
-    chat, is no protocol move: it shows as a gap (counted in the log's `after`), where a replay stops; for a replay of
-    the rules, record with `Trades=false`. `record.py --games N --out DIR` records Stac-only games that way.
+  - `MoveLog`: the steps, from the requests of every seat: two-step moves joined, discards in the protocol's order, and a
+    trade StacSettlers' agents make in chat (with `Trades=true`) as the offer of the player on turn and the partner's
+    accept under `player_trading` `first_accept`, which the games then announce (`none` with `Trades=false`). Anything
+    else that changes the game counts as a gap (in the log's `after`). With `-Dosp.record=DIR` (on `OSPSimulation`)
+    every game is also written as a referee log while it runs, the input of `OpenSeat replay`; `record.py --games N
+    --out DIR [--trades]` records Stac-only games that way.
   - `Recorder --games N --out games.jsonl.gz`: random games by StacSettlers' rules as referee messages, each move
     checked as its server would check the request.
   - Tests: `python -m unittest test_stacsettlers_board test_stacsettlers_game test_stacsettlers_robot
-    test_stacsettlers_record` (with STACSETTLERS_JAR set; the robot tests play against three Stac agents with the test
+    test_stacsettlers_record test_stacsettlers_steps` (with STACSETTLERS_JAR set; the robot tests play against three Stac agents with the test
     agent of `jsettlers/`, one of them against three cheap POMCP agents for about 3 minutes; about 5 minutes in all).
 
 On Hexfarer's side, outside this folder: `OpenSeat replay LOG` plays a referee's log through Hexfarer's rules and lists

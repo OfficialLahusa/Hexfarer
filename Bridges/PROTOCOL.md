@@ -83,10 +83,10 @@ Every message that is answered may also be answered with `failure`.
 - JSettlers' robot sends steps; its server makes them from the players' requests, in the protocol's order (simultaneous
   discards from the lowest seat up, each with the state that order gives it). A change the server makes on its own (a
   slow player's turn ended) comes as no step; the next decision then carries the full state (see lean decisions).
-- StacSettlers' robot sends no steps yet (it would need a recorder of its server's requests): the one exception to
-  serving `observe` as asked. An agent that asks for steps gets none, every decision carries the full state (a lean
-  agent asks for it each time), and the result record says `"observe":false`. Hexfarer's agent then rebuilds its game
-  from each decision's state. Its decisions' `n` count the seat's own decisions, since it sees no other seat's moves.
+- StacSettlers' robot sends steps the same way, from its server's requests. A trade its agents make in chat comes as
+  the two steps it takes under `player_trading` `first_accept`: the offer of the player on turn to the partner, on
+  exactly the terms that changed hands, and the partner's accept; the negotiation before it (offers declined, withdrawn
+  or countered) makes no step.
 
 ### `before` and `ready`
 

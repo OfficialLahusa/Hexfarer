@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import soc.game.SOCDevCardConstants;
 import soc.game.SOCGame;
@@ -29,17 +30,20 @@ import soc.message.SOCPlayDevCardRequest;
 import soc.message.SOCPutPiece;
 
 /**
- * Every move of a StacSettlers game on OSPServer as Open Seat Protocol steps (see ../../PROTOCOL.md), written as a
- * referee log while the game runs (-Dosp.record=DIR: GAME.jsonl, or GAME-2.jsonl and so on if an earlier run wrote that
- * game's name), the input of Hexfarer's replay harness (OpenSeat replay): before, a decide (the true state, the legal
- * moves by StacSettlers' rules) and a step per move of every seat, after with the winner. StacSettlers' server handles
- * each player's request on its one request thread; OSPServer passes it through dispatch here, which reads the game
- * before and after StacSettlers handles it and turns the change into a step: one protocol move where StacSettlers takes
- * two requests (a bought piece and its place, a card and its resources, a robber move and its victim), and the discards
- * after a 7, which StacSettlers' players make at the same time, one after another from the lowest seat, each with the
- * state the protocol's order gives it. A change no protocol move makes counts as a gap: a trade between players
- * (StacSettlers' agents negotiate them in chat and the server executes them), or a request the protocol has no move for;
- * the next decide then starts from another state than the last step ended in, where a replay stops.
+ * Every move of a StacSettlers game on OSPServer as Open Seat Protocol steps (see ../../PROTOCOL.md), with its result as
+ * the referee knows it and the true state before it: the steps the robots of Open Seat Agents that observe send them
+ * (OSPRobotBrain), and with -Dosp.record=DIR a referee log written while the game runs (GAME.jsonl, or GAME-2.jsonl and
+ * so on if an earlier run wrote that game's name), the input of Hexfarer's replay harness (OpenSeat replay): before, a
+ * decide (the true state, the legal moves by StacSettlers' rules) and a step per move of every seat, after with the
+ * winner. StacSettlers' server handles each player's request on its one request thread; OSPServer passes it through
+ * dispatch here, which reads the game before and after StacSettlers handles it and turns the change into a step: one
+ * protocol move where StacSettlers takes two requests (a bought piece and its place, a card and its resources, a robber
+ * move and its victim), and the discards after a 7, which StacSettlers' players make at the same time, one after another
+ * from the lowest seat, each with the state the protocol's order gives it. A trade between players, which StacSettlers'
+ * agents negotiate in chat and its server executes on the offerer's confirmation, becomes the two steps it takes under
+ * player_trading first_accept: the player on turn offers the partner exactly what changed hands, the partner accepts
+ * (the negotiation before, offers declined or withdrawn, makes no step). A change no protocol move makes counts as a
+ * gap: the next decision then starts from another state than the last step ended in, where a replay stops.
  */
 final class MoveLog
 {
@@ -65,17 +69,23 @@ final class MoveLog
     private List<Integer> discarders;
     private final Map<Integer, Object[]> discarded = new TreeMap<>();
     private int discardsDone;
-    private int gaps;
-    private long steps;
+    private volatile int gaps;
     private boolean ended;
     private Writer record;
+    // The steps so far (read without the server's lock by a brain finishing its game), and the state before the first
+    private final List<Map<String, Object>> steps = new CopyOnWriteArrayList<>();
+    private final Map<String, Object> start;
 
+    /** The game's move log from now (call holding the game's monitor), recorded into the directory if one is given */
     MoveLog(SOCGame game, String directory)
     {
         this.game = game;
         this.gameId = game.getName();
         this.osp = new OSPGame(game);
         this.last = osp.state(-1);
+        this.start = last;
+        if (directory == null)
+            return;
         try
         {
             new File(directory).mkdirs();
@@ -89,7 +99,7 @@ final class MoveLog
             for (int seat = 0; seat < game.maxPlayers; seat++)
                 players.add(game.getPlayer(osp.playerOf(seat)).getName());
             write(Json.object("type", "before", "game_id", gameId, "players", (long) game.maxPlayers, "stacsettlers_first", (long) osp.first,
-                "names", players, "ruleset", OSPGame.RULESET, "board", osp.board.boardJson(), "state", last));
+                "names", players, "ruleset", OSPGame.ruleset(), "board", osp.board.boardJson(), "state", last));
         }
         catch (IOException e)
         {
@@ -101,6 +111,44 @@ final class MoveLog
     int gaps()
     {
         return gaps;
+    }
+
+    /** The state before the game's first move */
+    Map<String, Object> start()
+    {
+        return start;
+    }
+
+    /** How many moves the game has had so far (the next one's n) */
+    int size()
+    {
+        return steps.size();
+    }
+
+    /** The steps from the index on */
+    List<Map<String, Object>> stepsFrom(int index)
+    {
+        Object[] all = steps.toArray();
+        List<Map<String, Object>> from = new ArrayList<>();
+        for (int i = index; i < all.length; i++)
+        {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> step = (Map<String, Object>) all[i];
+            from.add(step);
+        }
+        return from;
+    }
+
+    /**
+     * The state the next move starts from, in the protocol's order: the true state, or while discards go on, the state
+     * before the first discard with the discards before the next seat's made (call under the server's lock and the game's
+     * monitor)
+     */
+    Map<String, Object> state()
+    {
+        if (discardStart != null)
+            return discardState(discardsDone);
+        return osp.state(-1);
     }
 
     /** A request StacSettlers is handling: who sent it, and the game before it */
@@ -339,9 +387,73 @@ final class MoveLog
             step(seat, Json.array("end_turn"), null, before, legal);
             break;
         default:
-            // A request no protocol move makes changed the game (a trade between players, executed after their chat)
-            gap();
+            // A trade between players (executed after their chat), or else a change no protocol move makes
+            if (! traded(before, after))
+                gap();
         }
+    }
+
+    /**
+     * A trade between the player on turn and one other, which StacSettlers executes on the offerer's confirmation in
+     * chat: written as the steps of player_trading first_accept, the offer of what changed hands to the partner and the
+     * partner's accept; false if the change was no such trade
+     */
+    private boolean traded(Map<String, Object> before, Map<String, Object> after)
+    {
+        int onTurn = Json.integer(before.get("on_turn"));
+        int partner = -1;
+        int[] gives = new int[soc.game.SOCResourceConstants.WOOD + 1], gets = new int[soc.game.SOCResourceConstants.WOOD + 1];
+        for (int seat = 0; seat < game.maxPlayers; seat++)
+        {
+            Map<String, Object> had = hand(before, seat), has = hand(after, seat);
+            if (had.equals(has))
+                continue;
+            if (seat != onTurn)
+            {
+                if (partner >= 0)
+                    return false;
+                partner = seat;
+                continue;
+            }
+            for (String name : has.keySet())
+            {
+                int change = Json.integer(has.get(name)) - Json.integer(had.get(name));
+                if (change < 0)
+                    gives[OSPGame.resourceType(name)] = -change;
+                else
+                    gets[OSPGame.resourceType(name)] = change;
+            }
+        }
+        if (partner < 0)
+            return false;
+        // The partner's hand changed by the opposite, and nothing but the two hands did
+        Map<String, Object> traded = OSPGame.copy(before);
+        Map<String, Object> mine = hand(traded, onTurn), theirs = hand(traded, partner);
+        for (String name : new ArrayList<>(mine.keySet()))
+        {
+            int change = gets[OSPGame.resourceType(name)] - gives[OSPGame.resourceType(name)];
+            mine.put(name, (long) (Json.integer(mine.get(name)) + change));
+            theirs.put(name, (long) (Json.integer(theirs.get(name)) - change));
+        }
+        for (int seat : new int[] {onTurn, partner})
+        {
+            long size = 0;
+            for (Object count : hand(traded, seat).values())
+                size += Json.integer(count);
+            player(traded, seat).put("hand_size", size);
+        }
+        Map<String, Object> give = OSPGame.cardSet(gives), get = OSPGame.cardSet(gets);
+        if (give.isEmpty() || get.isEmpty() || ! traded.equals(after))
+            return false;
+        step(onTurn, Json.array("offer", Json.object("give", give, "get", get, "to", Json.array((long) partner))), null, before, null);
+        // While the offer stands the partner answers it
+        Map<String, Object> offered = OSPGame.copy(before);
+        offered.put("prompt", "answer_offer");
+        offered.put("current", (long) partner);
+        offered.put("offer", Json.object("from", (long) onTurn, "give", give, "get", get, "to", Json.array((long) partner), "answers", new LinkedHashMap<>()));
+        step(partner, Json.array("respond", Json.object("accept", true)), null, offered,
+            Json.array(Json.array("respond", Json.object("accept", true)), Json.array("respond", Json.object("accept", false))));
+        return true;
     }
 
     private void pending(String kind, Object value, Map<String, Object> before, List<Object> legal)
@@ -418,7 +530,8 @@ final class MoveLog
     private void step(int seat, List<Object> action, Map<String, Object> result, Map<String, Object> before, List<Object> legal)
     {
         pendingKind = null;
-        long n = steps++;
+        long n = steps.size();
+        steps.add(Json.object("type", "step", "game_id", gameId, "n", n, "seat", (long) seat, "action", action, "result", result, "state", before));
         write(Json.object("type", "decide", "game_id", gameId, "n", n, "seat", (long) seat, "state", before, "legal", legal));
         write(Json.object("type", "step", "game_id", gameId, "n", n, "seat", (long) seat, "action", action, "result", result));
     }

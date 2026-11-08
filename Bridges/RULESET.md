@@ -24,7 +24,7 @@ The rules of an Open Seat Protocol game (see `PROTOCOL.md`) are a set of options
 |---|---|---|---|---|
 | `victory_points` | 10 | 10 | 10 | 10 |
 | `discard_limit` | 7 | 7 | 7 | 7 |
-| `player_trading` | `rulebook` | `none` | `rulebook`, `none` with game option NT | `none` for our seat (it declines their offers; its own agents trade among themselves in chat) |
+| `player_trading` | `rulebook` | `none` | `rulebook`, `none` with game option NT | `first_accept` with Trades=true (its agents trade among themselves in chat; our seat declines every offer), `none` with Trades=false |
 | `counteroffers` | `true` | `false` | `true` | (no trades for our seat) |
 | `bank_shortage` | `rulebook` | `nobody` | `unlimited` | `unlimited` |
 | `win_timing` | `own_turn` | `any_time` | `own_turn`, by Largest Army only after the robber moved | `own_turn`, by Largest Army only after the robber moved |
@@ -100,4 +100,4 @@ How long an agent may think is no rule of the game: it is the game's budget in `
 | Catanatron's referee (`drive.py`) | `catanatron` | |
 | Catanatron's agent (`open_seat_agent.py`) | `standard`, `catanatron` | rebuilds its game from the referee's state at each decision |
 | JSettlers' server with our robot | `standard` | sends `player_trading` `none`, `bank_shortage` `unlimited`, `bank_rates` `best_only`, `robber_victims` `with_cards`, `road_building` `forced` |
-| StacSettlers' simulation with our robot | `standard` | sends `player_trading` `none`, `bank_shortage` `unlimited`, `robber_victims` `with_cards`, `road_building` `forced` |
+| StacSettlers' simulation with our robot | `standard` | sends `player_trading` `first_accept` (Trades=true, its agents' trades as offers and accepts) or `none`, `bank_shortage` `unlimited`, `robber_victims` `with_cards`, `road_building` `forced` |

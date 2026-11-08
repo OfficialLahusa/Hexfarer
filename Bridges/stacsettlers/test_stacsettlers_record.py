@@ -3,9 +3,10 @@ StacSettlers' games recorded while they run (MoveLog.java, -Dosp.record=DIR on O
 (here four Stac agents) as a referee log of protocol steps, the input of Hexfarer's replay harness. Each game starts
 with before and ends with after (the winner at 10 points); decide and step alternate, numbered from 0, the deciding seat
 is the state's current one, and each move played is one of the legal moves listed (two-step moves joined, discards in
-the protocol's order). A trade between players, which the Stac agents make in chat, is no protocol move: it shows as a
-gap (counted in after), where the next state starts elsewhere than the last step ended. Needs a JDK and StacSettlers'
-jar in STACSETTLERS_JAR. Run: python -m unittest test_stacsettlers_record
+the protocol's order). A trade between players, which the Stac agents make in chat, is the offer of the player on turn
+and the partner's accept (player_trading first_accept; an offer's terms can't be listed among the legal moves), so no
+change of the game is left between the steps (a gap, counted in after). Needs a JDK and StacSettlers' jar in
+STACSETTLERS_JAR. Run: python -m unittest test_stacsettlers_record
 """
 
 import json
@@ -57,6 +58,10 @@ class RecordTests(unittest.TestCase):
                 self.assertEqual((n, n), (decide["n"], step["n"]))
                 self.assertEqual(decide["seat"], step["seat"])
                 self.assertEqual(decide["seat"], decide["state"]["current"], decide["n"])
+                if step["action"][0] == "offer":
+                    # The player on turn offering: terms no list of legal moves holds
+                    self.assertEqual((None, decide["state"]["on_turn"]), (decide["legal"], step["seat"]))
+                    continue
                 self.assertIn(canonical(step["action"]), {canonical(m) for m in decide["legal"]}, f"{game[0]['game_id']} move {n}")
 
     def test_a_game_ends_with_a_winner_at_ten_points(self):
@@ -87,8 +92,27 @@ class RecordTests(unittest.TestCase):
         for game in self.games:
             self.assertEqual(0, game[-1]["gaps"], game[0]["game_id"])
 
-    def test_trades_between_players_are_gaps(self):
-        self.assertGreater(sum(game[-1]["gaps"] for game in self.trading), 0)
+    def test_trades_between_players_are_offers_and_accepts(self):
+        # Every change of the game is a step, also with trades between players
+        self.assertEqual([0] * len(self.trading), [game[-1]["gaps"] for game in self.trading])
+        self.assertTrue(all(game[0]["ruleset"]["player_trading"] == "first_accept" for game in self.trading))
+        self.assertTrue(all(game[0]["ruleset"]["player_trading"] == "none" for game in self.games))
+        offers = 0
+        for game in self.trading:
+            states = [m["state"] for m in game if "state" in m]
+            steps = [m for m in game if m["type"] == "step"]
+            for offer, answer in zip(steps, steps[1:]):
+                if offer["action"][0] != "offer":
+                    continue
+                offers += 1
+                terms = offer["action"][1]
+                self.assertEqual((terms["to"], ["respond", {"accept": True}]), ([answer["seat"]], answer["action"]))
+                # The cards went the way the offer says: the offerer gave its give and got its get, the partner the reverse
+                before, after = states[offer["n"] + 1], states[answer["n"] + 2]
+                for seat, gives, gets in ((offer["seat"], terms["give"], terms["get"]), (answer["seat"], terms["get"], terms["give"])):
+                    had, has = before["players"][seat]["hand"], after["players"][seat]["hand"]
+                    self.assertEqual({r: had[r] - gives.get(r, 0) + gets.get(r, 0) for r in had}, has, offer)
+        self.assertGreater(offers, 0)
 
     def test_every_kind_of_move_comes_up(self):
         moves = Counter(m["action"][0] for game in self.games for m in game if m["type"] == "step")
