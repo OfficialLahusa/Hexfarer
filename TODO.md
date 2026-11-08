@@ -268,6 +268,7 @@
 	- 7. Stärkere Gegner aus der JSettlers-Familie: StacSettlers (Fork von JSettlers 1.1.x der Universität Edinburgh) mit Stac-Agent und Dobres MCTS-Agenten mit Belief-Modellen (POMCP, ISMCTS; 53,65 % gegen Stac bei 40k It., 2-3 s pro Entscheidung) => stärkste veröffentlichte Gegner; braucht unseren Robot auf ihrem alten Server oder ihre Agenten als Open Seat Agent (~1 Woche)
 	- 8. SmartSettlers als Baseline (MCTS auf JSettlers, Szita et al. 2009): Code und Regeländerungen klären, dann als Robot oder Open Seat Agent
 	- 9. Ausführlichere Recherche nach weiteren starken Baselines (Paper, Code, Turniere, Bots anderer Plattformen) mit Stärke und Verfügbarkeit, bevor Leaderboard-Ergebnisse als Stand der Technik gelten
+	- 10. Mit unserem Aufbau die Kernzahlen der Baselines nachstellen (Siegquoten und Rechenzeiten, z.B. POMCP-TS-CR 40,70 %/53,65 % gegen 3 Stac bei 10k/40k, SmartSettlers 27 %/49 % gegen 3 JSettlers 1.x bei 1k/10k), bevor eigene Vergleiche gegen sie zählen
 - Interface für JSettlers Agents/Server
 - Tabletalking über LLMs
 	- Zusätzlich zu Value Functions von einem Basisbot
