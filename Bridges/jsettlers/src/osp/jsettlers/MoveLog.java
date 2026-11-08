@@ -269,16 +269,21 @@ final class MoveLog
             {
                 Map<String, Object> before = log.osp.state(-1);
                 int acting = log.osp.acting();
-                // Listed only for the record's decide lines (and its choices), not on every request of the message thread
+                // Listed only for the record's decide lines (and its choices), not on every request of the message thread: the
+                // sending seat's moves (with an offer open, a seat that isn't the one to act in seat order can answer or pick)
+                Map<String, Object> offer = (Map<String, Object>) before.get("offer");
                 List<Object> legal = ! log.recording ? null
                     : message.getType() == SOCMessage.DISCARD && seat >= 0 ? log.osp.discardMoves(seat)
-                    : isTrade(message) && seat >= 0 && seat != acting ? tradeMoves(log.osp, seat)
+                    : offer != null && seat >= 0 && seat != acting ? tradeMoves(log.osp, seat)
                     : acting >= 0 ? log.osp.legal(acting) : new ArrayList<>();
+                // The offerer's picks, for a withdrawal that another seat's request makes (the last counteroffer going)
+                int offerer = offer == null ? -1 : Json.integer(offer.get("from"));
+                List<Object> offererLegal = ! log.recording || offer == null ? null : offerer == acting ? log.osp.legal(acting) : log.osp.pickMoves(offerer);
                 List<Integer> mustDiscard = new ArrayList<>();
                 for (int s = 0; s < game.maxPlayers; s++)
                     if (game.getPlayer(log.osp.playerOf(s)).getNeedToDiscard())
                         mustDiscard.add(s);
-                log.inFlight = new InFlight(message, seat, before, legal, mustDiscard);
+                log.inFlight = new InFlight(message, seat, before, legal, offererLegal, mustDiscard);
             }
             finally
             {
@@ -328,14 +333,16 @@ final class MoveLog
         final int seat;
         final Map<String, Object> before;
         final List<Object> legal;
+        final List<Object> offererLegal;
         final List<Integer> mustDiscard;
 
-        InFlight(SOCMessageForGame message, int seat, Map<String, Object> before, List<Object> legal, List<Integer> mustDiscard)
+        InFlight(SOCMessageForGame message, int seat, Map<String, Object> before, List<Object> legal, List<Object> offererLegal, List<Integer> mustDiscard)
         {
             this.message = message;
             this.seat = seat;
             this.before = before;
             this.legal = legal;
+            this.offererLegal = offererLegal;
             this.mustDiscard = mustDiscard;
         }
     }
@@ -373,7 +380,7 @@ final class MoveLog
             }
             closedAfter = false;
             if (request.seat >= 0)
-                handled(request.message, request.seat, request.before, after, request.legal, request.mustDiscard);
+                handled(request.message, request.seat, request.before, after, request.legal, request.offererLegal, request.mustDiscard);
             // A withdrawn offer JSettlers still holds is closed from now on: the next request starts from the state without it
             last = closedAfter ? osp.state(-1) : after;
             if (osp.isOver() && game.getPlayerWithWin() != null)
@@ -417,14 +424,14 @@ final class MoveLog
 
     // Turns a handled request into its step, if it made one
     private void handled(SOCMessageForGame message, int seat, Map<String, Object> before, Map<String, Object> after, List<Object> legal,
-        List<Integer> mustDiscard)
+        List<Object> offererLegal, List<Integer> mustDiscard)
     {
         // The states are maps, lists and values as OSPGame writes them, so they compare as their JSON would
         if (before.equals(after))
             return;
         if (isTrade(message))
         {
-            traded(message, seat, before, after, legal);
+            traded(message, seat, before, after, legal, offererLegal);
             return;
         }
         // JSettlers lets the player on turn build, trade with the bank, play a card or end the turn with its offer standing;
@@ -436,6 +443,8 @@ final class MoveLog
             before = withoutOffer(before);
             osp.closeOffer();
             closedAfter = true;
+            // The legal moves were the withdrawal's; those of the move after it, with the offer closed, weren't listed
+            legal = null;
         }
         switch (message.getType())
         {
@@ -570,7 +579,8 @@ final class MoveLog
      * these explains is a gap.
      */
     @SuppressWarnings("unchecked")
-    private void traded(SOCMessageForGame message, int seat, Map<String, Object> before, Map<String, Object> after, List<Object> legal)
+    private void traded(SOCMessageForGame message, int seat, Map<String, Object> before, Map<String, Object> after, List<Object> legal,
+        List<Object> offererLegal)
     {
         Map<String, Object> was = (Map<String, Object>) before.get("offer"), is = (Map<String, Object>) after.get("offer");
         int onTurn = Json.integer(before.get("on_turn"));
@@ -587,8 +597,9 @@ final class MoveLog
                     step(seat, Json.array("cancel"), null, before, legal);
                     from = withoutOffer(before);
                 }
+                // After a withdrawal the legal moves listed were its own; those with the offer closed weren't listed
                 if (is != null && Json.integer(is.get("from")) == seat)
-                    step(seat, Json.array("offer", Json.object("give", is.get("give"), "get", is.get("get"), "to", is.get("to"))), null, from, legal);
+                    step(seat, Json.array("offer", Json.object("give", is.get("give"), "get", is.get("get"), "to", is.get("to"))), null, from, was != null ? null : legal);
                 return;
             }
             // An addressee's own offer to the player on turn: its counteroffer
@@ -628,7 +639,7 @@ final class MoveLog
             // counteroffer that kept it open went. The protocol's withdrawal is the offerer's.
             if (was != null && is == null)
             {
-                step(Json.integer(was.get("from")), Json.array("cancel"), null, before, legal);
+                step(Json.integer(was.get("from")), Json.array("cancel"), null, before, offererLegal);
                 return;
             }
             break;

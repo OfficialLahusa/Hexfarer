@@ -126,12 +126,17 @@ namespace OpenSeat
             {
                 string at = $"move {decide["n"]}";
                 if (!Compare(decide["state"]!, at)) return;
-                sbyte seat = _replica.Acting();
-                if (seat != decide["seat"]!.GetValue<int>()) { Diverge("seat", $"{at}: seat {decide["seat"]} acts, Hexfarer expects {seat}"); return; }
+                sbyte acting = _replica.Acting(), seat = (sbyte)decide["seat"]!.GetValue<int>();
+                // The seat that acts, or under JSettlers' flow one that answers the open offer or picks on it before its turn
+                // in seat order
+                var legal = seat == acting ? _replica.Legal().ToList() : _replica.OutOfOrder(seat).ToList();
+                if (seat != acting && legal.Count == 0) { Diverge("seat", $"{at}: seat {decide["seat"]} acts, Hexfarer expects {acting}"); return; }
+                // A referee may leave out the legal moves of a decision it can't list them for
+                if (decide["legal"] is not JsonArray listed) return;
 
                 // The legal moves of both, as sets of protocol moves
-                HashSet<string> ours = _replica.Legal().Select(m => OSPCodec.Canonical(m.move)).ToHashSet();
-                HashSet<string> theirs = decide["legal"]!.AsArray().Select(OSPCodec.Canonical).ToHashSet();
+                HashSet<string> ours = legal.Select(m => OSPCodec.Canonical(m.move)).ToHashSet();
+                HashSet<string> theirs = listed.Select(OSPCodec.Canonical).ToHashSet();
                 string prompt = decide["state"]!["prompt"]!.GetValue<string>();
                 foreach (string missing in theirs.Except(ours))
                     Note($"legal: only the referee allows {Replica.MoveType(missing)} ({prompt})", $"{at}: {missing}");

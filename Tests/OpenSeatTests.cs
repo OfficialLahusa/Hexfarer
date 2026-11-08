@@ -52,6 +52,42 @@ namespace Tests
             Assert.InRange(report.Moves, steps * 3 / 4, steps);
         }
 
+        // Two robot-only games at JSettlers 2.6.10 with trading on (player_trading first_accept), recorded by the JSettlers
+        // bridge (test_jsettlers_trading, with first_move_agent.py --trades in one seat)
+        private static string TradingFixture => TestUtil.FixturePath("OpenSeat", "jsettlers-trading.jsonl.gz");
+
+        [Fact]
+        public void JSettlersTradingGamesReplayThroughHexfarersRules()
+        {
+            List<JsonNode> messages = Replay.Read(TradingFixture).ToList();
+            // Answers out of seat order and an offerer's picks before everyone answered are in it
+            Assert.Contains(messages, m => m["type"]!.GetValue<string>() == "decide" && Int(m["seat"]) != Int(m["state"]!["current"]) && m["state"]!["prompt"]!.GetValue<string>() == "answer_offer");
+            Assert.Contains(messages, m => m["type"]!.GetValue<string>() == "step" && m["action"]![0]!.GetValue<string>() is "confirm" or "cancel");
+            Replay.Report report = new Replay().Run(messages);
+
+            // Every move as its seat's, every state and every seat's list of legal moves agree to the end
+            Assert.Equal(2, report.Games);
+            Assert.Equal(0, report.Diverged);
+            Assert.Empty(report.Counts);
+            Assert.Equal(messages.Count(m => m["type"]!.GetValue<string>() == "step"), report.Moves);
+        }
+
+        [Fact]
+        public void AnAnswerFromASeatThatAnsweredAlreadyDiverges()
+        {
+            // An answer out of seat order, given instead to an addressee that has answered already
+            List<JsonNode> messages = Replay.Read(TradingFixture).ToList();
+            JsonNode decide = messages.First(m => m["type"]!.GetValue<string>() == "decide" && Int(m["seat"]) != Int(m["state"]!["current"])
+                && m["state"]!["prompt"]!.GetValue<string>() == "answer_offer" && m["state"]!["offer"]!["answers"]!.AsObject().Count > 0);
+            int answered = int.Parse(decide["state"]!["offer"]!["answers"]!.AsObject().First().Key);
+            JsonNode step = messages.First(m => m["type"]!.GetValue<string>() == "step" && Int(m["n"]) == Int(decide["n"]) && m["game_id"]!.GetValue<string>() == decide["game_id"]!.GetValue<string>());
+            decide["seat"] = answered;
+            step["seat"] = answered;
+            Replay.Report report = new Replay().Run(messages);
+            Assert.Equal(1, report.Diverged);
+            Assert.Equal(["seat"], report.Counts.Keys);
+        }
+
         [Fact]
         public void KnownDifferencesAreNamedOnlyForTheEngineThatHasThem()
         {

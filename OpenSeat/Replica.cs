@@ -127,6 +127,27 @@ namespace OpenSeat
         }
 
         /// <summary>
+        /// The moves the seat may make now though another seat acts (JSettlers' flow): answering the open offer before an
+        /// earlier addressee in seat order, or the offerer taking a standing counteroffer or withdrawing before everyone
+        /// answered; nothing for the seat that acts (Legal lists its moves) or under the rulebook
+        /// </summary>
+        public IEnumerable<(Action action, JsonArray move)> OutOfOrder(sbyte seat)
+        {
+            if (seat < 0 || seat >= State.Players.Length || seat == Acting() || State.Turn.PendingTrade == null) yield break;
+            List<Action> moves = [];
+            // An addressee who hasn't answered: a decline, or an accept with the cards for it
+            if (RespondToTradeAction.MayAnswer(State, seat)) moves.AddRange([new RespondToTradeAction(seat, true), new RespondToTradeAction(seat, false)]);
+            // The offerer: a standing counteroffer both sides still hold the cards for, or the withdrawal
+            if (ConfirmTradeAction.MayPick(State, seat))
+            {
+                for (sbyte partner = 0; partner < State.Players.Length; partner++) moves.Add(new ConfirmTradeAction(seat, partner));
+                moves.Add(new CancelTradeAction(seat));
+            }
+            foreach (Action action in moves)
+                if (action.IsValidFor(State)) yield return (action, Codec.Move(action));
+        }
+
+        /// <summary>
         /// Hexfarer's legal moves with the referee's narrower rules folded in (Catanatron's, if its ruleset says so): a
         /// robber move against a victim without cards steals from nobody, only the best bank rate per resource is offered,
         /// the roads of a Road Building card have to be placed before anything else, and the card needs a road left and a

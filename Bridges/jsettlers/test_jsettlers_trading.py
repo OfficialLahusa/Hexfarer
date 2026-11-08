@@ -9,6 +9,7 @@ Needs a JDK and JSettlers' full jar in JSETTLERS_JAR. Run: python -m unittest te
 """
 
 import copy
+import json
 import os
 import sys
 import tempfile
@@ -149,6 +150,35 @@ class TradingTests(unittest.TestCase):
             for step in steps:
                 if step["action"][0] in ("respond", "counter") and step["state"]["current"] != step["seat"]:
                     out_of_order += 1
+        self.assertGreater(out_of_order, 0)
+
+    def test_each_recorded_move_is_among_its_decisions_legal_moves(self):
+        # The record's decide line lists the moves of the seat that moved (an addressee answering out of seat order, the
+        # offerer withdrawing or taking a counteroffer), so a replay can check them; offers and counteroffers can be any cards
+        # and no list holds them, and a list left out (null) is unknown
+        checked = out_of_order = offers = 0
+        for name in sorted(os.listdir(self.records)):
+            decisions = {}
+            for message in read(os.path.join(self.records, name)):
+                if message["type"] == "decide":
+                    decisions[message["n"]] = message
+                elif message["type"] == "step" and message["action"][0] == "offer":
+                    # An offer is made with the offer closed: its list holds no answers or picks of a standing one
+                    legal = decisions[message["n"]]["legal"]
+                    if legal is not None:
+                        self.assertFalse([m for m in legal if m[0] in ("respond", "confirm", "cancel")], f"{name} move {message['n']}: {legal}")
+                        offers += 1
+                elif message["type"] == "step" and message["action"][0] != "counter":
+                    decide = decisions[message["n"]]
+                    self.assertEqual(decide["seat"], message["seat"])
+                    if decide["legal"] is None:
+                        continue
+                    listed = [json.dumps(m, sort_keys=True) for m in decide["legal"]]
+                    self.assertIn(json.dumps(message["action"], sort_keys=True), listed, f"{name} move {message['n']} seat {message['seat']}: {decide['legal']}")
+                    checked += 1
+                    out_of_order += decide["state"]["current"] != message["seat"]
+        self.assertGreater(checked, 100)
+        self.assertGreater(offers, 0)
         self.assertGreater(out_of_order, 0)
 
     def test_the_agents_robot_trades_without_a_fallback(self):
