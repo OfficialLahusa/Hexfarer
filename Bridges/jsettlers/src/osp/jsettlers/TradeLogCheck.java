@@ -7,7 +7,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
 
+import soc.game.SOCDevCardConstants;
 import soc.game.SOCGame;
+import soc.game.SOCInventory;
 import soc.game.SOCPlayer;
 import soc.game.SOCResourceConstants;
 import soc.game.SOCResourceSet;
@@ -19,6 +21,8 @@ import soc.message.SOCEndTurn;
 import soc.message.SOCRollDice;
 import soc.message.SOCMakeOffer;
 import soc.message.SOCMessageForGame;
+import soc.message.SOCPickResourceType;
+import soc.message.SOCPlayDevCardRequest;
 import soc.message.SOCRejectOffer;
 
 /**
@@ -219,6 +223,15 @@ public final class TradeLogCheck
             t.expect("offer", "counter");
             t.expectGaps(1);
         });
+        // Not a trade, but a two-request move the same log writes: a Monopoly that takes nothing (nobody else holds ore) leaves
+        // the state as the card's play left it, and its step still comes, with nothing taken
+        scenario("a Monopoly that takes nothing", (t) ->
+        {
+            t.monopoly(ORE);
+            t.expect("play_monopoly");
+            t.expectAction(0, Json.array("play_monopoly", "ore"));
+            t.expectGaps(0);
+        });
         System.out.println(failures == 0 ? "trade steps checked" : failures + " trade check(s) failed");
         System.exit(failures == 0 ? 0 : 1);
     }
@@ -380,6 +393,18 @@ public final class TradeLogCheck
         {
             SOCResourceSet giving = OSPGame.resourceSet(trade.get("give")), getting = OSPGame.resourceSet(trade.get("get"));
             send(offset, new SOCBankTrade(game.getName(), giving, getting, pn(offset)), () -> game.makeBankTrade(giving, getting));
+        }
+
+        // The player on turn plays a Monopoly on the resource while nobody else holds any, as JSettlers' server handles its two
+        // requests (the card, then the resource); the log starts anew after the hands and the card are set
+        void monopoly(int type) throws Exception
+        {
+            for (int offset = 1; offset < game.maxPlayers; offset++)
+                game.getPlayer(pn(offset)).getResources().setAmount(0, type);
+            game.getPlayer(pn(0)).getInventory().addDevCard(1, SOCInventory.OLD, SOCDevCardConstants.MONO);
+            log = new MoveLog(game, osp.state(-1));
+            send(0, new SOCPlayDevCardRequest(game.getName(), SOCDevCardConstants.MONO), game::playMonopoly);
+            send(0, new SOCPickResourceType(game.getName(), type), () -> game.doMonopolyAction(type));
         }
 
         void endTurn(int offset) throws Exception

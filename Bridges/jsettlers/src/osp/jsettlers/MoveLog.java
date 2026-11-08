@@ -426,8 +426,10 @@ final class MoveLog
     private void handled(SOCMessageForGame message, int seat, Map<String, Object> before, Map<String, Object> after, List<Object> legal,
         List<Object> offererLegal, List<Integer> mustDiscard)
     {
-        // The states are maps, lists and values as OSPGame writes them, so they compare as their JSON would
-        if (before.equals(after))
+        // The states are maps, lists and values as OSPGame writes them, so they compare as their JSON would; a Monopoly that
+        // takes nothing changes nothing after its card was played, and its step still comes
+        boolean monopolyPick = message.getType() == SOCMessage.PICKRESOURCETYPE && "play_monopoly".equals(pendingKind);
+        if (before.equals(after) && ! monopolyPick)
             return;
         if (isTrade(message))
         {
