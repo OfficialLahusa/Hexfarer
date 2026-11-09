@@ -42,7 +42,7 @@ F12 saves a screenshot. The developer tools (menu) hold map generation, renderin
 The Open Seat Protocol (OSP) lets a bot of any CATAN engine play a seat under the referee of any other: one JSON object per line over the bot's standard input and output, with the board in SGN coordinates and the rules as options of each game. Lanzenbrecher's agents play under Catanatron's referee and as a robot inside JSettlers' server, and both engines' bots play in Lanzenbrecher's matches and duels. The messages are in [Bridges/PROTOCOL.md](Bridges/PROTOCOL.md), the ruleset options in [Bridges/RULESET.md](Bridges/RULESET.md), the adapters in [Bridges](Bridges/README.md).
 
 ## Value Net
-The ML-based agents and the client's state evaluation use an ONNX state value network hosted at [Lahusa/hexfarer-state-value-net](https://huggingface.co/Lahusa/hexfarer-state-value-net). The build downloads it into `Agents/Artifacts/` when it is missing and verifies its checksum (disable with `-p:DownloadStateValueNet=false`). The deployed model is set by `StateValueNetModel` in `Agents/Agents.csproj`.
+The ML-based agents and the client's state evaluation use an ONNX state value network hosted at [Lahusa/lanzenbrecher-state-value-net](https://huggingface.co/Lahusa/lanzenbrecher-state-value-net). The build downloads it into `Agents/Artifacts/` when it is missing and verifies its checksum (disable with `-p:DownloadStateValueNet=false`). The deployed model is set by `StateValueNetModel` in `Agents/Agents.csproj`.
 
 ## Credits
 Developed by Lasse Huber-Saffer. Since 2026, development has been supported by AI coding assistants; the design, decisions and review are my own.
