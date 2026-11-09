@@ -1,6 +1,6 @@
 """
 Catanatron's own speed, without search, on one thread: random games (moves applied, the bots choosing from the legal
-moves), legal move lists and game copies per second, comparable with Hexfarer's `OpenSeat bench`. One JSON line.
+moves), legal move lists and game copies per second, comparable with Lanzenbrecher's `OpenSeat bench`. One JSON line.
 
 Usage: python bench.py [--games N] [--seed S]
 """

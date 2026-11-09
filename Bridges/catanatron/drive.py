@@ -147,7 +147,7 @@ class OpenSeatAgent:
 
     def receive(self, seconds):
         """The agent's next message within the time; a timeout or an end of its output fails. Lines that aren't a JSON
-        object (an agent's or a library's logging) are skipped, as Hexfarer's and JSettlers' referees skip them, and the
+        object (an agent's or a library's logging) are skipped, as Lanzenbrecher's and JSettlers' referees skip them, and the
         last few are kept for the failure's message."""
         deadline = time.perf_counter() + seconds
         while True:

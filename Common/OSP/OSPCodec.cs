@@ -8,8 +8,8 @@ using Action = Common.Actions.Action;
 namespace Common.OSP
 {
     /// <summary>
-    /// Hexfarer's boards, moves and states in the Open Seat Protocol (see Bridges/PROTOCOL.md): hexes as axial [q, r], an
-    /// intersection as its three hexes, a path as its two intersections, cards by name. Seats are Hexfarer's player
+    /// Lanzenbrecher's boards, moves and states in the Open Seat Protocol (see Bridges/PROTOCOL.md): hexes as axial [q, r], an
+    /// intersection as its three hexes, a path as its two intersections, cards by name. Seats are Lanzenbrecher's player
     /// indices, which are the turn order. One codec per board, since the keys depend only on its geometry.
     /// </summary>
     public sealed class OSPCodec
@@ -130,7 +130,7 @@ namespace Common.OSP
         }
 
         /// <summary>
-        /// The protocol's move of a Hexfarer action
+        /// The protocol's move of a Lanzenbrecher action
         /// </summary>
         public JsonArray Move(Action action) => action switch
         {
@@ -164,7 +164,7 @@ namespace Common.OSP
         };
 
         /// <summary>
-        /// The Hexfarer action of an answer to an open offer, a pick of a partner or a withdrawal, made by the seat (under
+        /// The Lanzenbrecher action of an answer to an open offer, a pick of a partner or a withdrawal, made by the seat (under
         /// JSettlers' flow these can come from another seat than the one in seat order); null for any other move or one that
         /// doesn't read as one of these. Whether the rules allow it is the caller's to check.
         /// </summary>
@@ -182,7 +182,7 @@ namespace Common.OSP
         }
 
         /// <summary>
-        /// The Hexfarer action of a trade move that no legal list holds, since its cards can be any (an offer or a
+        /// The Lanzenbrecher action of a trade move that no legal list holds, since its cards can be any (an offer or a
         /// counteroffer), made by the seat; null for any other move or one that doesn't read as either. Whether the rules
         /// allow it is the caller's to check.
         /// </summary>
@@ -250,11 +250,11 @@ namespace Common.OSP
         }
 
         /// <summary>
-        /// A Hexfarer board from the protocol's board (a classic board: 19 land hexes, the sea ring, harbors on coastal paths)
+        /// A Lanzenbrecher board from the protocol's board (a classic board: 19 land hexes, the sea ring, harbors on coastal paths)
         /// </summary>
         public static Board BuildBoard(JsonNode board)
         {
-            // Positions on Hexfarer's map by axial hex, through the cube coordinates of any classic board
+            // Positions on Lanzenbrecher's map by axial hex, through the cube coordinates of any classic board
             Board template = MapGenerator.GenerateRandomClassic();
             (int x, int y) Position(JsonNode hex)
             {
@@ -318,7 +318,7 @@ namespace Common.OSP
 
         /// <summary>
         /// The full state in the protocol's shape (every hand, as the referee sees it). Of the played development cards
-        /// Hexfarer counts only the knights.
+        /// Lanzenbrecher counts only the knights.
         /// </summary>
         public JsonObject State(GameState state)
         {
@@ -430,7 +430,7 @@ namespace Common.OSP
             else if (settings.TradeFlow == TradeFlow.FirstAccept) ruleset["player_trading"] = "first_accept";
             if (settings.VictoryPoints != 10) ruleset["victory_points"] = settings.VictoryPoints;
             if (settings.RobberCardLimit != 7) ruleset["discard_limit"] = settings.RobberCardLimit;
-            // The rulebook has no limit on offers; Hexfarer's referee has one (10 unless set otherwise)
+            // The rulebook has no limit on offers; Lanzenbrecher's referee has one (10 unless set otherwise)
             if (settings.FreeTrade) ruleset["offer_limit"] = settings.TradeOfferLimit;
             return ruleset;
         }
@@ -454,7 +454,7 @@ namespace Common.OSP
         /// banks, points, Longest Road and Largest Army, whose turn it is and what has to be done. What the state doesn't
         /// say comes from the legal moves the referee listed for the player on turn: which of its development cards it may
         /// play now (the others count as bought this turn, or as none playable after one was played). The development bank
-        /// holds the cards nobody holds or played (Hexfarer's state counts only the knights played), as many as the state
+        /// holds the cards nobody holds or played (Lanzenbrecher's state counts only the knights played), as many as the state
         /// says. A finished game, an open offer between players and the last roll aren't rebuilt.
         /// </summary>
         public GameState BuildState(JsonNode state, JsonArray legal)
@@ -524,7 +524,7 @@ namespace Common.OSP
             if (t.PendingTrade != null) t.TradeOffersThisTurn = Math.Max(t.TradeOffersThisTurn, 1);
 
             // Hands, development cards, played knights, pieces, Longest Road and Largest Army; the cards held or played count
-            // against the deck (of the played ones the referee may count only knights, as Hexfarer does)
+            // against the deck (of the played ones the referee may count only knights, as Lanzenbrecher does)
             uint[] heldCards = new uint[Enum.GetValues<DevelopmentCardType>().Length];
             for (int seat = 0; seat < players.Count; seat++)
             {
@@ -577,7 +577,7 @@ namespace Common.OSP
             game.DevelopmentBank = new CardSet<DevelopmentCardType>();
             foreach (DevelopmentCardType type in deck) game.DevelopmentBank.Add(type, 1);
 
-            // Each road's length by Hexfarer's count, as every move from here on counts it (a referee may count differently);
+            // Each road's length by Lanzenbrecher's count, as every move from here on counts it (a referee may count differently);
             // the award stays the referee's
             for (int seat = 0; seat < players.Count; seat++) game.CalculateLongestRoad(seat);
             for (int seat = 0; seat < players.Count; seat++)

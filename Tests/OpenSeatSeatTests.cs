@@ -18,8 +18,8 @@ namespace Tests
     {
         private static string TinyNet => TestUtil.FixturePath("ValueNet", "placements_tiny.onnx");
 
-        // Hexfarer's own Open Seat Agent, built next to the tests
-        private static ExternalAgent Hexfarer => new("Hexfarer test agent",
+        // Lanzenbrecher's own Open Seat Agent, built next to the tests
+        private static ExternalAgent Lanzenbrecher => new("Lanzenbrecher test agent",
             $"dotnet \"{Path.Combine(AppContext.BaseDirectory, "OpenSeat.dll")}\" agent --net \"{TinyNet}\" --iterations 16 --leaves-per-batch 16 --provider cpu");
 
         private static bool WaitFor(Func<bool> condition, int milliseconds)
@@ -42,9 +42,9 @@ namespace Tests
         [Fact]
         public void AnOpenSeatAgentPlaysItsSeatInAMatch()
         {
-            using Match match = NewMatch([SeatKind.OpenSeatAgent, SeatKind.Random, SeatKind.Random, SeatKind.Random], Hexfarer);
+            using Match match = NewMatch([SeatKind.OpenSeatAgent, SeatKind.Random, SeatKind.Random, SeatKind.Random], Lanzenbrecher);
             using LocalSimulation admin = new(match);
-            admin.Send(new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = [Hexfarer.Name, null, null, null] }));
+            admin.Send(new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = [Lanzenbrecher.Name, null, null, null] }));
             admin.Send(new SetPlayback(PlaybackState.Default with { PaceSeconds = 0 }));
             Assert.True(WaitFor(() => match.AgentOf(0) is OpenSeatAgentProxy, 30000), "the seat should get the agent");
             Assert.Empty(admin.ProcessEvents().OfType<ErrorEvent>());
@@ -58,7 +58,7 @@ namespace Tests
         [Fact]
         public void AnUnknownOpenSeatAgentLeavesTheSeatToTheBuilderWithAnError()
         {
-            using Match match = NewMatch([SeatKind.OpenSeatAgent, SeatKind.Random, SeatKind.Random, SeatKind.Random], Hexfarer);
+            using Match match = NewMatch([SeatKind.OpenSeatAgent, SeatKind.Random, SeatKind.Random, SeatKind.Random], Lanzenbrecher);
             using LocalSimulation admin = new(match);
             admin.Send(new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = ["nobody", null, null, null] }));
             List<MatchEvent> events = [];
@@ -70,7 +70,7 @@ namespace Tests
         [Fact]
         public void AnAgentThatCantStartLeavesTheSeatToTheBuilderWithAnError()
         {
-            ExternalAgent broken = new("broken", "no-such-program-for-hexfarer");
+            ExternalAgent broken = new("broken", "no-such-program-for-lanzenbrecher");
             using Match match = NewMatch([SeatKind.OpenSeatAgent, SeatKind.Random, SeatKind.Random, SeatKind.Random], broken);
             using LocalSimulation admin = new(match);
             admin.Send(new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = ["broken", null, null, null] }));
@@ -83,10 +83,10 @@ namespace Tests
         [Fact]
         public void AReplacedOrDisposedOpenSeatAgentIsClosed()
         {
-            using (Match match = NewMatch([SeatKind.OpenSeatAgent, SeatKind.OpenSeatAgent, SeatKind.Random, SeatKind.Random], Hexfarer))
+            using (Match match = NewMatch([SeatKind.OpenSeatAgent, SeatKind.OpenSeatAgent, SeatKind.Random, SeatKind.Random], Lanzenbrecher))
             {
                 using LocalSimulation admin = new(match);
-                admin.Send(new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = [Hexfarer.Name, Hexfarer.Name, null, null] }));
+                admin.Send(new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = [Lanzenbrecher.Name, Lanzenbrecher.Name, null, null] }));
                 Assert.True(WaitFor(() => match.AgentOf(0) is OpenSeatAgentProxy && match.AgentOf(1) is OpenSeatAgentProxy, 30000));
                 Assert.Equal(2, OpenSeatAgentProcess.Running);
                 // Another seat kind: its agent goes
@@ -100,9 +100,9 @@ namespace Tests
         [Fact]
         public void AFailedAgentPausesTheMatchOnceAndResumingStartsItAgain()
         {
-            using Match match = NewMatch([SeatKind.OpenSeatAgent, SeatKind.Random, SeatKind.Random, SeatKind.Random], Hexfarer);
+            using Match match = NewMatch([SeatKind.OpenSeatAgent, SeatKind.Random, SeatKind.Random, SeatKind.Random], Lanzenbrecher);
             using LocalSimulation admin = new(match);
-            admin.Send(new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = [Hexfarer.Name, null, null, null] }));
+            admin.Send(new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = [Lanzenbrecher.Name, null, null, null] }));
             admin.Send(new SetPlayback(PlaybackState.Default with { PaceSeconds = 0 }));
             Assert.True(WaitFor(() => match.AgentOf(0) is OpenSeatAgentProxy, 30000), "the seat should get the agent");
             // The agent's process ends before its first move, as a crash would
@@ -129,8 +129,8 @@ namespace Tests
         [Fact]
         public void AnAgentReplacedWhileItThinksFailsWithoutAWord()
         {
-            // Hexfarer's agent with 30 s per decision: still thinking when its seat gets another kind
-            ExternalAgent slow = new("slow", Hexfarer.Command + " --seconds 30");
+            // Lanzenbrecher's agent with 30 s per decision: still thinking when its seat gets another kind
+            ExternalAgent slow = new("slow", Lanzenbrecher.Command + " --seconds 30");
             using Match match = NewMatch([SeatKind.OpenSeatAgent, SeatKind.Random, SeatKind.Random, SeatKind.Random], slow);
             using LocalSimulation admin = new(match);
             admin.Send(new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = ["slow", null, null, null] }));
@@ -173,12 +173,12 @@ namespace Tests
         [Fact]
         public void ANewGameWithItsAgentsStartsTheSeatsAgents()
         {
-            using Match match = NewMatch([SeatKind.Random, SeatKind.Random, SeatKind.Random, SeatKind.Random], Hexfarer);
+            using Match match = NewMatch([SeatKind.Random, SeatKind.Random, SeatKind.Random, SeatKind.Random], Lanzenbrecher);
             using LocalSimulation admin = new(match);
             admin.Send(new NewGame([SeatKind.Random, SeatKind.OpenSeatAgent, SeatKind.Random, SeatKind.Random], false,
-                Agents: AgentSettings.Default with { OpenSeatAgents = [null, Hexfarer.Name, null, null] }));
+                Agents: AgentSettings.Default with { OpenSeatAgents = [null, Lanzenbrecher.Name, null, null] }));
             Assert.True(WaitFor(() => match.AgentOf(1) is OpenSeatAgentProxy, 30000), "the seat should get the agent");
-            Assert.Equal([null, Hexfarer.Name, null, null], match.AgentSettings.OpenSeatAgents!);
+            Assert.Equal([null, Lanzenbrecher.Name, null, null], match.AgentSettings.OpenSeatAgents!);
             Assert.Empty(admin.ProcessEvents().OfType<ErrorEvent>());
         }
 
@@ -186,17 +186,17 @@ namespace Tests
         public void TheSeatPickersListTheConfiguredAgentsAfterTheBuiltInKinds()
         {
             ExternalAgent other = new("Catanatron AB:2", "python open_seat_agent.py");
-            IReadOnlyList<SeatChoice> choices = Simulation.Seats.Choices([Hexfarer, other]);
+            IReadOnlyList<SeatChoice> choices = Simulation.Seats.Choices([Lanzenbrecher, other]);
             // The built-in kinds first, in their order, then each agent by its name
             Assert.Equal(Simulation.Seats.Ordered, choices.Take(Simulation.Seats.Ordered.Length).Select(c => c.Kind));
             Assert.All(choices.Take(Simulation.Seats.Ordered.Length), c => Assert.Null(c.Agent));
-            Assert.Equal([Hexfarer.Name, other.Name], choices.Skip(Simulation.Seats.Ordered.Length).Select(c => c.Agent));
+            Assert.Equal([Lanzenbrecher.Name, other.Name], choices.Skip(Simulation.Seats.Ordered.Length).Select(c => c.Agent));
             Assert.All(choices.Skip(Simulation.Seats.Ordered.Length), c => Assert.Equal(SeatKind.OpenSeatAgent, c.Kind));
             Assert.Contains(other.Name, choices[^1].Label);
             // A seat finds its choice by kind and, for an agent, its name; an agent no longer set up finds none
             Assert.Equal(Array.IndexOf(Simulation.Seats.Ordered, SeatKind.Random), Simulation.Seats.ChoiceIndex(choices, SeatKind.Random, null));
             Assert.Equal(choices.Count - 1, Simulation.Seats.ChoiceIndex(choices, SeatKind.OpenSeatAgent, other.Name));
-            Assert.Equal(choices.Count - 2, Simulation.Seats.ChoiceIndex(choices, SeatKind.OpenSeatAgent, Hexfarer.Name));
+            Assert.Equal(choices.Count - 2, Simulation.Seats.ChoiceIndex(choices, SeatKind.OpenSeatAgent, Lanzenbrecher.Name));
             Assert.Equal(-1, Simulation.Seats.ChoiceIndex(choices, SeatKind.OpenSeatAgent, "gone"));
             // Without agents the pickers are the built-in kinds
             Assert.Equal(Simulation.Seats.Ordered.Length, Simulation.Seats.Choices([]).Count);
@@ -205,9 +205,9 @@ namespace Tests
         [Fact]
         public void ASeatThatGetsAnAgentStartsOneGameOfIt()
         {
-            using Match match = NewMatch([SeatKind.Random, SeatKind.Random, SeatKind.Random, SeatKind.Random], Hexfarer);
+            using Match match = NewMatch([SeatKind.Random, SeatKind.Random, SeatKind.Random, SeatKind.Random], Lanzenbrecher);
             using LocalSimulation admin = new(match);
-            admin.Send(new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = [null, Hexfarer.Name, null, null] }));
+            admin.Send(new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = [null, Lanzenbrecher.Name, null, null] }));
             admin.Send(new SetSeat(1, SeatKind.OpenSeatAgent));
             Assert.True(WaitFor(() => match.AgentOf(1) is OpenSeatAgentProxy, 30000));
             // A new agent isn't reset right away, which would end its first game and start another
@@ -219,9 +219,9 @@ namespace Tests
         [Fact]
         public void AnUndoStartsTheAgentsGameAgainAndItPlaysOn()
         {
-            using Match match = NewMatch([SeatKind.OpenSeatAgent, SeatKind.Random, SeatKind.Random, SeatKind.Random], Hexfarer);
+            using Match match = NewMatch([SeatKind.OpenSeatAgent, SeatKind.Random, SeatKind.Random, SeatKind.Random], Lanzenbrecher);
             using LocalSimulation admin = new(match);
-            admin.Send(new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = [Hexfarer.Name, null, null, null] }));
+            admin.Send(new ConfigureAgents(AgentSettings.Default with { OpenSeatAgents = [Lanzenbrecher.Name, null, null, null] }));
             admin.Send(new SetPlayback(PlaybackState.Default with { PaceSeconds = 0 }));
             Assert.True(WaitFor(() => match.AgentOf(0) is OpenSeatAgentProxy, 30000));
             match.Start();

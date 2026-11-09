@@ -1,12 +1,12 @@
 # Bridges
 
-Adapters between Hexfarer and other CATAN engines, so that bots of either side can play under the other side's referee:
+Adapters between Lanzenbrecher and other CATAN engines, so that bots of either side can play under the other side's referee:
 [Catanatron](https://github.com/bcollazo/catanatron), [JSettlers](https://github.com/jdmonin/JSettlers2) and
 [StacSettlers](https://github.com/sorinMD/StacSettlers).
 
 This folder is licensed under the GNU General Public License, version 3 or later (see `LICENSE`), since the adapters
 build on those GPL-licensed engines; the rest of the repository is not (see `../LICENSE`). To keep the two apart:
-- the adapters contain no Hexfarer code and Hexfarer contains no adapter code;
+- the adapters contain no Lanzenbrecher code and Lanzenbrecher contains no adapter code;
 - they talk only across a process boundary, over the Open Seat Protocol (OSP, see `PROTOCOL.md`): JSON lines on
   standard input and output, the same for every engine, with the rules as an option of each game. Programs that play
   seats over it are Open Seat Agents;
@@ -25,17 +25,17 @@ Contents:
 - `PROTOCOL.md`: the Open Seat Protocol.
 - `RULESET.md`: its ruleset options, their values and which engine plays what.
 - `osp/classic-board.json`: the protocol's reference shape of the classic board (hexes, intersections, paths, harbors
-  in protocol keys). Hexfarer's test `TheClassicBoardHasTheOpenSeatProtocolsReferenceShape` writes it
-  (`HEXFARER_UPDATE_FIXTURES=1`) and checks against it; every adapter is tested against it too.
+  in protocol keys). Lanzenbrecher's test `TheClassicBoardHasTheOpenSeatProtocolsReferenceShape` writes it
+  (`LANZENBRECHER_UPDATE_FIXTURES=1`) and checks against it; every adapter is tested against it too.
 - `catanatron/`: Catanatron in protocol terms: its board (`osp_board.py`), its moves, results, legal moves and states
   (`osp_game.py`), and a recorder that plays Catanatron games and writes them as the referee's protocol messages
-  (`record.py --bots AB:2,R,W,R --games 100 --out games.jsonl.gz`), the input of Hexfarer's replay harness. Setup and
+  (`record.py --bots AB:2,R,W,R --games 100 --out games.jsonl.gz`), the input of Lanzenbrecher's replay harness. Setup and
   tests: `python -m venv .venv`, `.venv/Scripts/python -m pip install -r requirements.txt`,
   `.venv/Scripts/python -m unittest test_osp_board test_osp_game test_open_seat_agent test_drive test_challenger_player`.
   - `open_seat_agent.py --bot AB:2 [--needs world|truth]`: Catanatron's bots as an Open Seat Agent under another
-    referee (e.g. Hexfarer's Arena: `--baseline "AB2=command:python open_seat_agent.py --bot AB:2"`); each decision
+    referee (e.g. Lanzenbrecher's Arena: `--baseline "AB2=command:python open_seat_agent.py --bot AB:2"`); each decision
     rebuilds a Catanatron game from the referee's state, the bot picks among the referee's legal moves.
-  - `drive.py`: Hexfarer (or any Open Seat Agent) under Catanatron's referee. It serves its seat's view or every hand
+  - `drive.py`: Lanzenbrecher (or any Open Seat Agent) under Catanatron's referee. It serves its seat's view or every hand
     (no worlds), steps and lean decisions, gives each decision `--decide-ms` (default 300 000), ends a game at a failure
     and records it in the game's result, which every result line carries; past `--max-failed` failed games (default 3,
     or one in a hundred of the run's) the run stops. `analyze.py` leaves a map with a failed game out of the win rate
@@ -52,7 +52,7 @@ Contents:
   - `OSPBoard`: its classic board in protocol keys, from its own adjacency; `OSPGame`: states, legal moves by its own
     rules and moves played through its game logic.
   - `Recorder --games N --out games.jsonl.gz [--ruleset jsettlers]`: random games by JSettlers' rules as referee
-    messages, for Hexfarer's replay harness (the differences found are in PROTOCOL.md's ruleset table).
+    messages, for Lanzenbrecher's replay harness (the differences found are in PROTOCOL.md's ruleset table).
   - `OSPServer` with `OSPRobotClient`: JSettlers' server whose robot seats include Open Seat Agents (-Dosp.agent=COMMAND,
     started through jsettlers.bots.start3p). The robot runs inside the server and reads the game under the server's
     locks; an agent gets the true state or its seat's view, as it asks, and if it observes, every move of the game as
@@ -84,7 +84,7 @@ Contents:
   - `OSPBoard` and `OSPGame` as for JSettlers, for the JSettlers 1.1.13 engine StacSettlers keeps (other hex type and
     development card numbers, no bank, its own checks for the legal moves).
   - `OSPSimulation CONFIG`: StacSettlers' own `Simulation` (its config format and results, unchanged; the config parsed
-    by its own code) with one more agent kind, `osp`: `Agent=1,Hexfarer,osp` seats a robot whose decisions the Open Seat
+    by its own code) with one more agent kind, `osp`: `Agent=1,Lanzenbrecher,osp` seats a robot whose decisions the Open Seat
     Agent of `-Dosp.agent=COMMAND` makes (`OSPRobotBrain`). The games run on `OSPServer`, StacSettlers' server through
     which the robot reads the true game under the lock the server handles requests with; the robot serves its agent
     the true state or its seat's view, as it asks, and if it observes, every move of the game as a step from the
@@ -123,13 +123,13 @@ Contents:
     test_stacsettlers_record test_stacsettlers_steps test_stacsettlers_play` (with STACSETTLERS_JAR set; the robot tests play against three Stac agents with the test
     agent of `jsettlers/`, one of them against three cheap POMCP agents for about 3 minutes; about 5 minutes in all).
 
-On Hexfarer's side, outside this folder: `OpenSeat replay LOG` plays a referee's log through Hexfarer's rules and lists
+On Lanzenbrecher's side, outside this folder: `OpenSeat replay LOG` plays a referee's log through Lanzenbrecher's rules and lists
 the differences, `OpenSeat relay LOG --save DIR` writes its games as save files for the client (a new part where the
 rules part), `OpenSeat relay LOG|DIR --live` hosts them for the client's watchers while the referee writes them (the
 client joins with the Watch role; a known rule difference such as JSettlers' unlimited bank comes in as an edit, so the
-game stays one), and `OpenSeat agent` is Hexfarer's own Open Seat Agent (`--fair` for the agent that
+game stays one), and `OpenSeat agent` is Lanzenbrecher's own Open Seat Agent (`--fair` for the agent that
 plays from its seat's view, `--lean` for decisions with only the state's hash, checked against its own copy of the game, which saves only under
-Hexfarer's own referee; it offers and counters where a decision names `trades`). The Arena seats any agent as
+Lanzenbrecher's own referee; it offers and counters where a decision names `trades`). The Arena seats any agent as
 `NAME=command:COMMAND`,
-and the client's local games seat those listed in `%AppData%\Hexfarer\settings.json` under `OpenSeatAgents`
+and the client's local games seat those listed in `%AppData%\Lanzenbrecher\settings.json` under `OpenSeatAgents`
 (`[{"Name": "...", "Command": "..."}]`).

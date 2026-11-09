@@ -134,7 +134,7 @@ def main():
     parser.add_argument("--opponents", required=True, help="a preset (" + ", ".join(PRESETS) + ") or COUNT,NAME,KIND[,FLAGS]")
     parser.add_argument("--games", type=int, required=True)
     parser.add_argument("--out", required=True)
-    parser.add_argument("--name", default="Hexfarer_vs")
+    parser.add_argument("--name", default="Lanzenbrecher_vs")
     parser.add_argument("--fully-observable", action="store_true")
     parser.add_argument("--no-chat", action="store_true", help="ChatNegotiation=false (the Stac agents then hang)")
     parser.add_argument("--no-trades", action="store_true", help="Trades=false: no trades between players at all")
@@ -159,7 +159,7 @@ def main():
     def simulation(round_number, games, allowance):
         # A further simulation gets a directory, a log and game names of its own (the agents' logs are named by game)
         suffix = "" if round_number == 1 else f"-{round_number}"
-        config = stacsettlers.config(args.name + suffix.replace("-", "_r"), games, [(1, "Hexfarer", "osp"), opponents], chat=not args.no_chat,
+        config = stacsettlers.config(args.name + suffix.replace("-", "_r"), games, [(1, "Lanzenbrecher", "osp"), opponents], chat=not args.no_chat,
                                      fully_observable=args.fully_observable, trades=not args.no_trades)
         configs.append(config)
         output = stacsettlers.simulate(os.path.join(out, "simulation" + suffix), config, args.agent,

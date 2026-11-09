@@ -153,7 +153,7 @@ namespace Tests
 
         /// <summary>
         /// Regenerates the parity fixtures shared with Tests/Python after an intended change of the encoding.
-        /// Runs only when HEXFARER_UPDATE_FIXTURES=1 is set.
+        /// Runs only when LANZENBRECHER_UPDATE_FIXTURES=1 is set.
         /// </summary>
         [SkippableFact]
         public void RegenerateParityFixtures()

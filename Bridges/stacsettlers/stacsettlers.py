@@ -49,7 +49,7 @@ def run(main_class, *args, stdin=None, timeout=600):
 
 def config(name, games, agents, chat=True, fully_observable=False, force_end_turns=False, log=False, trades=True):
     """A Simulation config: the suite's settings, then the agents as (count, name, kind[, flags]), e.g.
-    (1, "Hexfarer", "osp") and (3, "Stac", "stac", "TRY_N_BEST_BUILD_PLANS:0|FAVOUR_DEV_CARDS:-5")"""
+    (1, "Lanzenbrecher", "osp") and (3, "Stac", "stac", "TRY_N_BEST_BUILD_PLANS:0|FAVOUR_DEV_CARDS:-5")"""
     lines = [f"Games={games}", f"Log={'true' if log else 'false'}", f"ChatNegotiation={'true' if chat else 'false'}"]
     if fully_observable:
         lines.append("FullyObservable=true")

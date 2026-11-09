@@ -25,7 +25,7 @@ def play(games, flags, trades, properties=None):
     """Games of one observing test agent against three Stac agents, recorded (with further system properties); the
     agent's messages and the records by game"""
     directory, logs, records = tempfile.mkdtemp(), tempfile.mkdtemp(), tempfile.mkdtemp()
-    config = stacsettlers.config("OSPSteps", games, [(1, "Hexfarer", "osp"), STAC], trades=trades)
+    config = stacsettlers.config("OSPSteps", games, [(1, "Lanzenbrecher", "osp"), STAC], trades=trades)
     agent = f'"{sys.executable}" "{os.path.abspath(TEST_AGENT)}" --observe --full --weighted ' + " ".join(flags)
     output = stacsettlers.simulate(directory, config, agent, {"osp.log": logs, "osp.record": records, "osp.stall_ms": "3000", **(properties or {})},
                                    timeout=int(os.environ.get("STACSETTLERS_STEPS_TIMEOUT", "900")))

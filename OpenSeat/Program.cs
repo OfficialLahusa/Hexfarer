@@ -10,8 +10,8 @@ using System.Text.Json.Nodes;
 namespace OpenSeat
 {
     /// <summary>
-    /// Hexfarer's side of the Open Seat Protocol (see Bridges/PROTOCOL.md): the replay harness, the relay of an outside
-    /// referee's games into save files, Hexfarer's agents as an Open Seat Agent, the boards of the Arena's map seeds, and a
+    /// Lanzenbrecher's side of the Open Seat Protocol (see Bridges/PROTOCOL.md): the replay harness, the relay of an outside
+    /// referee's games into save files, Lanzenbrecher's agents as an Open Seat Agent, the boards of the Arena's map seeds, and a
     /// speed benchmark of the simulator.
     /// </summary>
     internal static class Program
@@ -26,12 +26,12 @@ namespace OpenSeat
                    OpenSeat bench [--games N] [--seed S]
 
             replay: plays the games of Open Seat Protocol referee logs (one JSON object per line, .gz allowed; e.g. from
-            Bridges/catanatron/record.py) through Hexfarer's rules with the recorded results, and compares the state and the
+            Bridges/catanatron/record.py) through Lanzenbrecher's rules with the recorded results, and compares the state and the
             legal moves at every move. Prints the differences by kind with up to K examples each (default 3). Exit code 0 if
             no game diverged, 1 otherwise.
 
             relay: writes the games of referee logs as save files into DIR, for the client (Load game): each game played
-            through Hexfarer's rules with the recorded results. Where the rules part (a state Hexfarer holds differently, a
+            through Lanzenbrecher's rules with the recorded results. Where the rules part (a state Lanzenbrecher holds differently, a
             move it doesn't allow), the file ends and GAME-part2.yaml etc. go on from the referee's state; each file holds
             where its part ended and the moves since it began. Prints where and why a part started from the referee's state.
             With --live it shows the games while they are played instead: it follows the log as the referee writes it (or,
@@ -49,7 +49,7 @@ namespace OpenSeat
             cores, e.g. at equal thinking time on one core against another engine's bot. With --serial and an iteration
             budget the agent plays a game again exactly from its seed (before), on the same build, net and provider; an
             iteration budget doesn't keep to the referee's decide_ms, so the referee has to allow the time.
-            --fair plays like Hexfarer's fair agents (Information Set MCTS over what the seat knows) instead of open-hand.
+            --fair plays like Lanzenbrecher's fair agents (Information Set MCTS over what the seat knows) instead of open-hand.
             --decline-trades declines every offer between players and makes none (a seat without trades at a table with them).
 
             boards: writes the boards of the map seeds S to S+N-1 as the Arena generates them, one protocol board per line.
@@ -223,7 +223,7 @@ namespace OpenSeat
             }
             Console.WriteLine(new JsonObject
             {
-                ["engine"] = "hexfarer", ["games"] = games, ["ended"] = ended, ["moves"] = moves,
+                ["engine"] = "lanzenbrecher", ["games"] = games, ["ended"] = ended, ["moves"] = moves,
                 ["games_per_s"] = Math.Round(games / playSeconds, 2), ["moves_per_s"] = Math.Round(moves / playSeconds),
                 ["legal_lists_per_s"] = Math.Round(lists / listSeconds), ["copies_per_s"] = Math.Round(copies / copySeconds),
             }.ToJsonString());

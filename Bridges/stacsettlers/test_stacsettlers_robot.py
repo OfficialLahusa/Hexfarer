@@ -31,7 +31,7 @@ def play(games, agent, logs, name="OSPTest", opponents=STAC, fully_observable=Fa
     """Headless games with one Open Seat Agent robot and three of StacSettlers' agents (and further system properties);
     the simulation's output"""
     directory = tempfile.mkdtemp()
-    config = stacsettlers.config(name, games, [(1, "Hexfarer", "osp"), opponents], fully_observable=fully_observable)
+    config = stacsettlers.config(name, games, [(1, "Lanzenbrecher", "osp"), opponents], fully_observable=fully_observable)
     output = stacsettlers.simulate(directory, config, agent, {"osp.log": logs, "osp.debug": "true", "osp.stall_ms": STALL_MS, **(properties or {})},
                                    timeout=int(os.environ.get("STACSETTLERS_ROBOT_TIMEOUT", "600")))
     return output, directory
@@ -70,7 +70,7 @@ class RobotTests(unittest.TestCase):
             self.assertGreaterEqual(line["vp"][line["winner"]], 10, line)
             self.assertIsInstance(line["result"]["seed"], int)
             self.assertEqual(4, len(line["players"]))
-            self.assertIn("Hexfarer", line["players"])
+            self.assertIn("Lanzenbrecher", line["players"])
 
     def test_stacsettlers_counts_the_same_winner(self):
         # StacSettlers' own results table (results/<run>/results.txt): one row per game, the winner flagged
@@ -98,7 +98,7 @@ class RobotTests(unittest.TestCase):
         # Stac agents offer to every player (they wait only for those that announced they participate, which the robot
         # never does); the robot takes no part in trades between players and answers each offer with a reject
         self.assertGreater(sum(seat["declined"] for seat in self.stats), 0, self.stats)
-        self.assertTrue(any(line.startswith("[osp Hexfarer") and "] declined " in line for line in self.output.splitlines()))
+        self.assertTrue(any(line.startswith("[osp Lanzenbrecher") and "] declined " in line for line in self.output.splitlines()))
 
     def test_the_server_never_ends_a_turn_on_its_own(self):
         self.assertNotIn("force end turn", self.output)
@@ -188,21 +188,21 @@ class MCTSOpponentTests(unittest.TestCase):
 
 
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
-# Hexfarer's own agent, as the repository builds it (dotnet build OpenSeat -c Release), and a tiny net of the tests
+# Lanzenbrecher's own agent, as the repository builds it (dotnet build OpenSeat -c Release), and a tiny net of the tests
 OPEN_SEAT = os.environ.get("OPEN_SEAT_DLL", os.path.join(REPO, "OpenSeat", "bin", "Release", "net10.0", "OpenSeat.dll"))
 TINY_NET = os.path.join(REPO, "Tests", "Fixtures", "ValueNet", "policy_tiny.onnx")
 
 
 @unittest.skipUnless(stacsettlers.available() and os.path.exists(OPEN_SEAT), "needs a JDK, StacSettlers' jar in STACSETTLERS_JAR and a built OpenSeat")
-class HexfarerTradingTests(unittest.TestCase):
-    """Hexfarer's own agent (OpenSeat agent, which keeps a copy of the game and checks it against each decision's state)
+class LanzenbrecherTradingTests(unittest.TestCase):
+    """Lanzenbrecher's own agent (OpenSeat agent, which keeps a copy of the game and checks it against each decision's state)
     trading in chat (osp.trade_in_chat), open-hand and fair, at a few iterations: its copy follows every decision about an
     offer, so it never gets lost, and it trades"""
 
     def check(self, flags):
         stacsettlers.build()
         agent = f'dotnet "{OPEN_SEAT}" agent --net "{TINY_NET}" --iterations 16 --leaves-per-batch 16 --provider cpu --threads 1 {flags}'.strip()
-        output, _ = play(2, agent, tempfile.mkdtemp(), name="OSPHexfarerTrade", properties={"osp.trade_in_chat": "true"})
+        output, _ = play(2, agent, tempfile.mkdtemp(), name="OSPLanzenbrecherTrade", properties={"osp.trade_in_chat": "true"})
         lines, seats = results(output)
         self.assertEqual(2, len(lines), output[-3000:])
         for line, seat in zip(lines, seats):

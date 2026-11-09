@@ -8,7 +8,7 @@ using Action = Common.Actions.Action;
 namespace Agents.OpenSeat
 {
     /// <summary>
-    /// Plays a seat of a Hexfarer game by asking an Open Seat Agent (see Bridges/PROTOCOL.md, version 2): Hexfarer is the
+    /// Plays a seat of a Lanzenbrecher game by asking an Open Seat Agent (see Bridges/PROTOCOL.md, version 2): Lanzenbrecher is the
     /// referee. The proxy shakes hands with the agent (it has to play the standard rules) and starts the game with before,
     /// which the agent takes (ready) or turns down; every decision of the seat goes out as decide with the seat's state (or
     /// only its hash, for a lean agent) and the legal moves, and the answer has to be one of them within the budget's time;
@@ -105,7 +105,7 @@ namespace Agents.OpenSeat
                 throw;
             }
             Record = new OpenSeatSeatRecord(seat, Handshake);
-            // Hexfarer's referee plays the rulebook; its options (no trades between players, other limits) go with the game
+            // Lanzenbrecher's referee plays the rulebook; its options (no trades between players, other limits) go with the game
             // No game has started yet, so the failure names none
             if (!Handshake.Rulesets.Contains("standard"))
                 Fail(OpenSeatFailure.Unsupported, $"The Open Seat Agent {Handshake.Name} doesn't play the standard rules (it plays {string.Join(", ", Handshake.Rulesets)}).",

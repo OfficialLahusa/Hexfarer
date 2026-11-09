@@ -5,7 +5,7 @@ using Simulation;
 namespace Client
 {
     /// <summary>
-    /// The user's settings from the main menu, kept in %AppData%\Hexfarer\settings.json. A missing or unreadable file gives the
+    /// The user's settings from the main menu, kept in %AppData%\Lanzenbrecher\settings.json. A missing or unreadable file gives the
     /// defaults, so the client always starts. Open Seat Agents are set up only in the file (no menu page): each a name for
     /// the seat pickers and the command that starts it (see Bridges/PROTOCOL.md).
     /// </summary>

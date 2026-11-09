@@ -87,7 +87,7 @@ class AnalyzeTests(unittest.TestCase):
     def test_a_failed_game_leaves_its_map_out_of_the_win_rate_and_is_counted(self):
         with tempfile.TemporaryDirectory() as directory:
             def game(seed, rotation, winner, failures=()):
-                seats = ["hexfarer-mcts", "AB:2", "AB:2", "AB:2"]
+                seats = ["lanzenbrecher-mcts", "AB:2", "AB:2", "AB:2"]
                 return {"game_id": f"map{seed}-r{rotation}", "map_seed": seed, "rotation": rotation, "lineup": ["open-seat-agent", "AB:2", "AB:2", "AB:2"],
                         "seats": seats, "winner": winner, "vp": [10 if s == winner else 5 for s in range(4)], "truncated": winner is None,
                         "turns": 50, "seconds": [1.0] * 4, "decisions": [10] * 4,

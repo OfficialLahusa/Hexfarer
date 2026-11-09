@@ -79,7 +79,7 @@ namespace Tests
 
         private static string TempPath(string name)
         {
-            string directory = Path.Combine(Path.GetTempPath(), "hexfarer-live-" + Guid.NewGuid().ToString("N"));
+            string directory = Path.Combine(Path.GetTempPath(), "lanzenbrecher-live-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
             return Path.Combine(directory, name);
         }
@@ -115,7 +115,7 @@ namespace Tests
         public async Task ARuleDifferenceStartsTheWatchersGameAgainFromTheRefereesState()
         {
             List<JsonNode> game = Games()[0];
-            // A roll of the middle game comes out as a seven: Hexfarer's game moves the robber, the referee's goes on as it was
+            // A roll of the middle game comes out as a seven: Lanzenbrecher's game moves the robber, the referee's goes on as it was
             JsonNode roll = game.First(m => m["type"]!.GetValue<string>() == "step" && Int(m["n"]) >= 40
                 && m["action"]![0]!.GetValue<string>() == "roll" && m["result"]!["dice"]!.AsArray().Sum(d => Int(d)) != 7);
             roll["result"]!["dice"] = new JsonArray(3, 4);
@@ -211,7 +211,7 @@ namespace Tests
                 List<Action> legal = LegalActionProvider.GetActionsForState(state, (sbyte)acting);
                 if (legal.OfType<RollAction>().FirstOrDefault() is RollAction roll)
                 {
-                    // The referee rolled a twelve, which Hexfarer's dice give one time in 36
+                    // The referee rolled a twelve, which Lanzenbrecher's dice give one time in 36
                     Action twelve = ((IOutputRandomnessAction)roll).GetOutcomeVariants(state, (sbyte)acting).Select(v => v.Action).Cast<RollAction>()
                         .First(v => v.History!.RollResult.Total == 12);
                     // Spectators can't relay; the match stays

@@ -1,6 +1,6 @@
 """
-Records StacSettlers' own games as referee logs (OSPSimulation with -Dosp.record, MoveLog.java), the input of Hexfarer's
-replay harness: OpenSeat replay DIR/records/*.jsonl plays them through Hexfarer's rules and lists where the rules differ.
+Records StacSettlers' own games as referee logs (OSPSimulation with -Dosp.record, MoveLog.java), the input of Lanzenbrecher's
+replay harness: OpenSeat replay DIR/records/*.jsonl plays them through Lanzenbrecher's rules and lists where the rules differ.
 
 Usage: python record.py --games N --out DIR [--agents LINE] [--trades]
 The seats are four Stac agents (the parameters its README calls best), or the agent line's value as Simulation reads it

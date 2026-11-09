@@ -260,7 +260,7 @@ namespace Tests
         [Theory]
         [InlineData(false)]
         [InlineData(true)]
-        public void HexfarersAgentsAnswerWhenAskedOutOfSeatOrder(bool fair)
+        public void LanzenbrechersAgentsAnswerWhenAskedOutOfSeatOrder(bool fair)
         {
             (GameState state, sbyte active) = FirstAcceptGame();
             Play(state, LumberForOre(state, active));
@@ -274,7 +274,7 @@ namespace Tests
         }
 
         [Fact]
-        public void HexfarersAgentPicksAStandingCounterofferOrWithdrawsWhenAsked()
+        public void LanzenbrechersAgentPicksAStandingCounterofferOrWithdrawsWhenAsked()
         {
             (GameState state, sbyte active) = FirstAcceptGame();
             Play(state, LumberForOre(state, active));
@@ -285,7 +285,7 @@ namespace Tests
             Assert.True(pick.IsValidFor(state));
         }
 
-        // Hexfarer's Open Seat Agent at a referee with JSettlers' flow, seated at the seat, after its handshake and before
+        // Lanzenbrecher's Open Seat Agent at a referee with JSettlers' flow, seated at the seat, after its handshake and before
         private static (SeatAgent agent, OSPCodec codec) SeatedAgent(GameState state, sbyte seat, bool declineTrades = false, string net = "sensitive_tiny.onnx")
         {
             SeatAgent agent = new(Net(net), iterations: 16, seconds: 0, new StringWriter(), leavesPerBatch: 8, declineTrades: declineTrades);
@@ -309,7 +309,7 @@ namespace Tests
         };
 
         [Fact]
-        public void HexfarersOpenSeatAgentDecidesAnAnswerOutOfSeatOrder()
+        public void LanzenbrechersOpenSeatAgentDecidesAnAnswerOutOfSeatOrder()
         {
             (GameState state, sbyte active) = FirstAcceptGame();
             Play(state, LumberForOre(state, active));
@@ -323,7 +323,7 @@ namespace Tests
         }
 
         [Fact]
-        public void HexfarersOpenSeatAgentAcceptsOutOfSeatOrderWhenTheSeatBeforeItCannot()
+        public void LanzenbrechersOpenSeatAgentAcceptsOutOfSeatOrderWhenTheSeatBeforeItCannot()
         {
             (GameState state, sbyte active) = FirstAcceptGame();
             // The first addressee in seat order has no ore (back in the bank), so its legal moves hold no accept
@@ -350,7 +350,7 @@ namespace Tests
         }
 
         [Fact]
-        public void HexfarersOpenSeatAgentPicksOnItsOfferBeforeEveryoneAnswered()
+        public void LanzenbrechersOpenSeatAgentPicksOnItsOfferBeforeEveryoneAnswered()
         {
             List<Action> decided = [];
             // Counteroffers in the offerer's terms (it gives, it gets): the plain test net puts some above the agent's margin and the
@@ -385,7 +385,7 @@ namespace Tests
         }
 
         [Fact]
-        public void HexfarersOpenSeatAgentDeclinesEveryTradeWhenToldTo()
+        public void LanzenbrechersOpenSeatAgentDeclinesEveryTradeWhenToldTo()
         {
             (GameState state, sbyte active) = FirstAcceptGame();
             // On its turn with trades named: a legal move, no offer

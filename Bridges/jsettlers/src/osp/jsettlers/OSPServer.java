@@ -23,7 +23,7 @@ import soc.server.genericServer.Connection;
  * one (by name: "droid" and "robot"); -Dosp.bots=smart or fast gives all of them the one strategy.
  *
  * Usage: java -cp build:JSETTLERS_JAR -Dosp.agent="COMMAND" osp.jsettlers.OSPServer [-Dname=value ...] [port]
- * e.g. robot-only games with one robot of Hexfarer's: -Djsettlers.startrobots=7
+ * e.g. robot-only games with one robot of Lanzenbrecher's: -Djsettlers.startrobots=7
  * -Djsettlers.bots.start3p=2,osp.jsettlers.OSPRobotClient -Djsettlers.bots.percent3p=25 -Djsettlers.bots.botgames.total=100
  * -Djsettlers.bots.botgames.shutdown=Y -Djsettlers.bots.fast_pause_percent=10 -Djsettlers.gameopt.NT=t
  */

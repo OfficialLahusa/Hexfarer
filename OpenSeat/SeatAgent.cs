@@ -11,18 +11,18 @@ using Action = Common.Actions.Action;
 namespace OpenSeat
 {
     /// <summary>
-    /// Hexfarer's agents as an Open Seat Agent: answers a referee's Open Seat Protocol messages (one JSON object per line
-    /// on standard input and output) for one seat, with Hexfarer's open-hand MCTS and the value net. It keeps a copy of
+    /// Lanzenbrecher's agents as an Open Seat Agent: answers a referee's Open Seat Protocol messages (one JSON object per line
+    /// on standard input and output) for one seat, with Lanzenbrecher's open-hand MCTS and the value net. It keeps a copy of
     /// the game (Replica) that follows every step; before each decision it compares the copy with the referee's state and
     /// takes over what the referee's known rule differences change (Replica.Patch), since the referee decides the game.
-    /// The search plans by Hexfarer's rules; a move the referee doesn't allow is replaced by the most visited root move it
+    /// The search plans by Lanzenbrecher's rules; a move the referee doesn't allow is replaced by the most visited root move it
     /// allows. Where the copy can't follow (no steps came, as from JSettlers' robot, a step went missing, or a rule
     /// difference changed the board), it waits for the next decision and is rebuilt from its state (Replica.Rebuild); the
     /// fair agent's beliefs take the change since the state the seat last saw in as an edit everyone sees, so they keep what
     /// the seat doesn't know. Only a copy that can't become the referee's state even so is lost: the agent then answers its
     /// next decision with a failure (internal), so the referee records it, instead of playing on blind. A board it can't
     /// hold it turns down. It needs the full state ("truth"): every hand is the true one, as for the open-hand MCTS in
-    /// Hexfarer. The fair agent (fair: true) gets the same messages but plays like Hexfarer's fair agents in the Arena:
+    /// Lanzenbrecher. The fair agent (fair: true) gets the same messages but plays like Lanzenbrecher's fair agents in the Arena:
     /// Information Set MCTS over worlds drawn from what its seat knows (BeliefTracker), which takes in every move as the seat
     /// sees it.
     /// </summary>
@@ -66,7 +66,7 @@ namespace OpenSeat
         // other engines at equal compute
         private TimeSpan _cpuAtStart;
 
-        public string Name => $"hexfarer-{(fair ? "ismcts-fair" : "mcts-open")}-{(iterations > 0 ? $"{iterations}it" : $"{seconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}s")}"
+        public string Name => $"lanzenbrecher-{(fair ? "ismcts-fair" : "mcts-open")}-{(iterations > 0 ? $"{iterations}it" : $"{seconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}s")}"
             + (LeavesPerBatch != MCTSAgent.DefaultLeavesPerBatch ? $"-b{LeavesPerBatch}" : "") + (parallelSelection ? "" : "-serial");
 
         /// <summary>
@@ -222,8 +222,8 @@ namespace OpenSeat
         {
             if (_replica == null || _lost || _stale) return;
             // With the full state the step carries the referee's state before the move: the copy takes over where the
-            // rules differ, so it can follow moves that depend on it (a discard of cards Hexfarer's bank wouldn't have
-            // given, any move after Hexfarer's rules ended the game)
+            // rules differ, so it can follow moves that depend on it (a discard of cards Lanzenbrecher's bank wouldn't have
+            // given, any move after Lanzenbrecher's rules ended the game)
             if (step["state"] is JsonNode before && _replica.FirstDifference(before, $"move {step["n"]}") is (string differs, string why))
             {
                 _patches++;
@@ -271,7 +271,7 @@ namespace OpenSeat
 
         // The answer to a decision once the game is lost: a failure the referee records, with what went wrong
         private JsonObject LostFailure(JsonNode decide) =>
-            Failure(decide, OpenSeatFailure.Internal, $"Hexfarer's copy of the game is lost: {_lostWhy}");
+            Failure(decide, OpenSeatFailure.Internal, $"Lanzenbrecher's copy of the game is lost: {_lostWhy}");
 
         /// <summary>
         /// The fair agent (for tests), null for the open-hand agent
@@ -444,7 +444,7 @@ namespace OpenSeat
             // A copy without a legal move (it would have to be lost) can't search
             if (!_replica.Legal().Any())
             {
-                Lose($"no legal move in Hexfarer's copy at move {decide["n"]}");
+                Lose($"no legal move in Lanzenbrecher's copy at move {decide["n"]}");
                 return LostFailure(decide);
             }
 
@@ -470,7 +470,7 @@ namespace OpenSeat
                 if (Allowed(root.Move) is JsonNode fallback) return Answer(fallback);
             return Answer(legal[0]!);
 
-            // The protocol's move of one of Hexfarer's actions, as the referee's legal moves write it (or a trade the decision
+            // The protocol's move of one of Lanzenbrecher's actions, as the referee's legal moves write it (or a trade the decision
             // named, with its terms), or null if it isn't one
             JsonNode? Allowed(Action action)
             {

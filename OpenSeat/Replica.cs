@@ -8,7 +8,7 @@ using Action = Common.Actions.Action;
 namespace OpenSeat
 {
     /// <summary>
-    /// Hexfarer's copy of a game another engine's referee runs over the Open Seat Protocol: built from the referee's board,
+    /// Lanzenbrecher's copy of a game another engine's referee runs over the Open Seat Protocol: built from the referee's board,
     /// it follows the referee's moves with their recorded results (dice, drawn cards, steals) and is compared with the
     /// referee's state. The referee's rules that narrow the legal moves (its ruleset: Catanatron's preset, or single options)
     /// are folded into the legal moves;
@@ -30,7 +30,7 @@ namespace OpenSeat
         /// </summary>
         public string LastMove { get; private set; } = "";
 
-        // The referee's rules that narrow Hexfarer's legal moves: robbing only victims with cards, only the best bank rate
+        // The referee's rules that narrow Lanzenbrecher's legal moves: robbing only victims with cards, only the best bank rate
         // per resource, Road Building's roads placed at once (and the card only with a road left and a place for it)
         private readonly bool _robbedNeedCards, _bestBankRateOnly, _forcedRoadBuilding;
 
@@ -46,7 +46,7 @@ namespace OpenSeat
             _robbedNeedCards = Option("robber_victims", "adjacent", "with_cards") == "with_cards";
             _bestBankRateOnly = Option("bank_rates", "all", "best_only") == "best_only";
             _forcedRoadBuilding = Option("road_building", "optional", "forced") == "forced";
-            // The options Hexfarer's engine plays itself: points to win, the discard limit, trades between players and offers
+            // The options Lanzenbrecher's engine plays itself: points to win, the discard limit, trades between players and offers
             State.Settings.VictoryPoints = ruleset?["victory_points"]?.GetValue<int>() ?? 10;
             State.Settings.RobberCardLimit = ruleset?["discard_limit"]?.GetValue<int>() ?? 7;
             string trading = Option("player_trading", "rulebook", "none");
@@ -68,7 +68,7 @@ namespace OpenSeat
 
         /// <summary>
         /// What of a ruleset the copy can't play, as a failure's detail ({"preset": ...} or {"option": ..., "value": ...}),
-        /// or null: the presets standard and catanatron and every option of RULESET.md with its values; a value Hexfarer's
+        /// or null: the presets standard and catanatron and every option of RULESET.md with its values; a value Lanzenbrecher's
         /// rules play differently is taken over from the referee's states (Patch)
         /// </summary>
         public static JsonObject? Unsupported(JsonNode? ruleset)
@@ -112,7 +112,7 @@ namespace OpenSeat
         }
 
         /// <summary>
-        /// Whether the board as Hexfarer holds it writes back as the referee sent it
+        /// Whether the board as Lanzenbrecher holds it writes back as the referee sent it
         /// </summary>
         public bool BoardMatches(JsonNode before) => OSPCodec.Canonical(Codec.BoardJson()) == OSPCodec.Canonical(before["board"]);
 
@@ -148,7 +148,7 @@ namespace OpenSeat
         }
 
         /// <summary>
-        /// Hexfarer's legal moves with the referee's narrower rules folded in (Catanatron's, if its ruleset says so): a
+        /// Lanzenbrecher's legal moves with the referee's narrower rules folded in (Catanatron's, if its ruleset says so): a
         /// robber move against a victim without cards steals from nobody, only the best bank rate per resource is offered,
         /// the roads of a Road Building card have to be placed before anything else, and the card needs a road left and a
         /// place for it
@@ -184,7 +184,7 @@ namespace OpenSeat
 
         /// <summary>
         /// The legal move of the protocol's move (after Legal's folding), also an offer or counteroffer the rules allow, or
-        /// null if Hexfarer doesn't allow it
+        /// null if Lanzenbrecher doesn't allow it
         /// </summary>
         public Action? Find(JsonNode move, sbyte? seat = null)
         {
@@ -210,11 +210,11 @@ namespace OpenSeat
             string at = $"move {step["n"]}";
             string move = OSPCodec.Canonical(step["action"]);
             Action? action = Find(step["action"]!, step["seat"] is JsonValue seat && seat.TryGetValue(out int by) ? (sbyte)by : null);
-            if (action == null) return ($"step: Hexfarer doesn't allow {MoveType(move)}", $"{at}: {move}");
+            if (action == null) return ($"step: Lanzenbrecher doesn't allow {MoveType(move)}", $"{at}: {move}");
 
             // The referee's result decides the move's randomness
             Action? forced = Forced(action, Acting(), step["result"]);
-            if (forced == null) return ($"result: Hexfarer can't reach the referee's result of {action.GetType().Name}", $"{at}: {step["result"]?.ToJsonString()}");
+            if (forced == null) return ($"result: Lanzenbrecher can't reach the referee's result of {action.GetType().Name}", $"{at}: {step["result"]?.ToJsonString()}");
             forced.Apply(State);
             LastMove = MoveType(move);
             Applied = forced;
@@ -243,30 +243,30 @@ namespace OpenSeat
         }
 
         /// <summary>
-        /// The first difference between the referee's state and Hexfarer's, its kind (a known rule difference named as
+        /// The first difference between the referee's state and Lanzenbrecher's, its kind (a known rule difference named as
         /// such) and detail, or null if they agree
         /// </summary>
-        /// <param name="goesOn">Whether the referee's game goes on (it asks for a move), so Hexfarer's mustn't have ended</param>
+        /// <param name="goesOn">Whether the referee's game goes on (it asks for a move), so Lanzenbrecher's mustn't have ended</param>
         public (string kind, string detail)? FirstDifference(JsonNode theirs, string at, bool goesOn = true)
         {
             JsonObject ours = Codec.State(State);
             // Engines name a finished game's prompt differently: only while the game goes on does it count
             foreach (string field in (goesOn ? ["prompt"] : Array.Empty<string>()).Concat(["current", "free_roads", "robber"]))
-                if (!Same(theirs[field], ours[field])) return ($"state: {field}", $"{at}: referee {theirs[field]?.ToJsonString()}, Hexfarer {ours[field]?.ToJsonString()}");
+                if (!Same(theirs[field], ours[field])) return ($"state: {field}", $"{at}: referee {theirs[field]?.ToJsonString()}, Lanzenbrecher {ours[field]?.ToJsonString()}");
             foreach (string kind in new[] { "settlements", "cities", "roads" })
             {
                 HashSet<string> a = theirs["buildings"]![kind]!.AsArray().Select(OSPCodec.Canonical).ToHashSet(), b = ours["buildings"]![kind]!.AsArray().Select(OSPCodec.Canonical).ToHashSet();
-                if (!a.SetEquals(b)) return ($"state: {kind}", $"{at}: only the referee {string.Join(" ", a.Except(b))}; only Hexfarer {string.Join(" ", b.Except(a))}");
+                if (!a.SetEquals(b)) return ($"state: {kind}", $"{at}: only the referee {string.Join(" ", a.Except(b))}; only Lanzenbrecher {string.Join(" ", b.Except(a))}");
             }
             JsonNode bank = Bank(theirs);
             if (!Same(bank, ours["bank"]))
             {
-                // Explained after a roll if Hexfarer emptied what the referee kept: the rulebook gives a single player owed a
+                // Explained after a roll if Lanzenbrecher emptied what the referee kept: the rulebook gives a single player owed a
                 // short resource the rest, Catanatron gives nobody anything
                 string[] differing = OSPCodec.ResourceNames.Values.Where(n => !Same(bank[n], ours["bank"]![n])).ToArray();
                 bool shortage = Catanatron && LastMove == "roll" && differing.Length > 0 && differing.All(n => int.Parse(ours["bank"]![n]!.ToJsonString()) == 0);
                 return (shortage ? "state: bank (known: Catanatron gives nobody a short resource, even a single player owed it)" : "state: bank",
-                    $"{at}: referee {theirs["bank"]!.ToJsonString()}, Hexfarer {ours["bank"]!.ToJsonString()}");
+                    $"{at}: referee {theirs["bank"]!.ToJsonString()}, Lanzenbrecher {ours["bank"]!.ToJsonString()}");
             }
             for (int seat = 0; seat < ours["players"]!.AsArray().Count; seat++)
             {
@@ -281,15 +281,15 @@ namespace OpenSeat
                     string kind = countsDiffer ? "state: Longest Road (known: Catanatron doesn't count a road's segment ending at an opponent's building)"
                         : Catanatron && LastMove == "build_settlement" ? "state: Longest Road (known: Catanatron's recount after a settlement cuts a road)"
                         : "state: Longest Road";
-                    return (kind, $"{at}, seat {seat}: referee {a["has_longest_road"]}, Hexfarer {b["has_longest_road"]}");
+                    return (kind, $"{at}, seat {seat}: referee {a["has_longest_road"]}, Lanzenbrecher {b["has_longest_road"]}");
                 }
                 foreach (string field in new[] { "public_vp", "vp", "hand", "development", "has_largest_army", "pieces_left" })
-                    if (!Same(a[field], b[field])) return ($"state: {field}", $"{at}, seat {seat}: referee {a[field]?.ToJsonString()}, Hexfarer {b[field]?.ToJsonString()}");
-                // Hexfarer counts only the knights played
-                if (!Same(a["played"]!["knight"], b["played"]!["knight"])) return ("state: knights played", $"{at}, seat {seat}: referee {a["played"]!["knight"]}, Hexfarer {b["played"]!["knight"]}");
+                    if (!Same(a[field], b[field])) return ($"state: {field}", $"{at}, seat {seat}: referee {a[field]?.ToJsonString()}, Lanzenbrecher {b[field]?.ToJsonString()}");
+                // Lanzenbrecher counts only the knights played
+                if (!Same(a["played"]!["knight"], b["played"]!["knight"])) return ("state: knights played", $"{at}, seat {seat}: referee {a["played"]!["knight"]}, Lanzenbrecher {b["played"]!["knight"]}");
             }
-            // The referee asks for a move, so its game goes on (Hexfarer's may have ended by points the referee doesn't give)
-            if (goesOn && State.HasEnded) return ("state: game over (Hexfarer's rules ended the game, the referee's go on)", $"{at}: seat {State.Turn.PlayerIndex} won by Hexfarer's rules");
+            // The referee asks for a move, so its game goes on (Lanzenbrecher's may have ended by points the referee doesn't give)
+            if (goesOn && State.HasEnded) return ("state: game over (Lanzenbrecher's rules ended the game, the referee's go on)", $"{at}: seat {State.Turn.PlayerIndex} won by Lanzenbrecher's rules");
             return null;
         }
 
@@ -317,7 +317,7 @@ namespace OpenSeat
                 }
                 ours.VictoryPoints.LongestRoadPoints = (byte)(player["has_longest_road"]!.GetValue<bool>() ? 2 : 0);
             }
-            // A game Hexfarer's rules ended goes on as the referee's does (ending only marks the round as ended)
+            // A game Lanzenbrecher's rules ended goes on as the referee's does (ending only marks the round as ended)
             if (State.HasEnded) State.Turn.TypeOfRound = TurnState.RoundType.Normal;
             // An offer between players is public: the referee's stands, or none (a late answer or a player moving on closed it
             // there without a step); it counts as an offer of the turn
@@ -365,7 +365,7 @@ namespace OpenSeat
 
         public static bool Same(JsonNode? a, JsonNode? b) => OSPCodec.Canonical(a) == OSPCodec.Canonical(b);
 
-        // The referee's bank as Hexfarer holds one: an unlimited bank's count below 0 (the hands hold more than 19, as in
+        // The referee's bank as Lanzenbrecher holds one: an unlimited bank's count below 0 (the hands hold more than 19, as in
         // JSettlers) is an empty bank
         private static JsonNode Bank(JsonNode theirs)
         {

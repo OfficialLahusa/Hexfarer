@@ -21,14 +21,14 @@ version, its adapter disappears.
 
 ## Roles and transport
 
-- **Referee:** holds the true game and runs it (a Hexfarer match or Arena duel, a Catanatron game, a JSettlers server
+- **Referee:** holds the true game and runs it (a Lanzenbrecher match or Arena duel, a Catanatron game, a JSettlers server
   or a StacSettlers simulation through its adapter).
 - **Agent:** a bot process that plays one or more seats. A program that plays seats over OSP is an **Open Seat Agent**:
-  the adapters in this folder make Catanatron's and JSettlers' bots Open Seat Agents, and Hexfarer's agents play as one
+  the adapters in this folder make Catanatron's and JSettlers' bots Open Seat Agents, and Lanzenbrecher's agents play as one
   under other engines' referees.
 - **Transport:** UTF-8 JSON objects, one per line, over the agent's standard input and output (or any line-based stream).
   The referee speaks first. Nothing but protocol lines on standard output; logs go to standard error. A referee may start
-  an agent as a process per game and seat (Hexfarer's Arena does) or keep one for many games (Catanatron's driver does);
+  an agent as a process per game and seat (Lanzenbrecher's Arena does) or keep one for many games (Catanatron's driver does);
   then the handshake comes once and `before` to `after` repeats.
 - **Seats:** numbered in turn order, seat 0 is the player who starts. An engine that draws who starts (JSettlers) numbers
   its players from that one.
@@ -48,7 +48,7 @@ Every message that is answered may also be answered with `failure`.
 
 ```
 → {"type":"handshake","protocol":"osp","version":2}
-← {"type":"handshake","protocol":"osp","version":2,"name":"hexfarer-ismcts","rulesets":["standard","catanatron"],
+← {"type":"handshake","protocol":"osp","version":2,"name":"lanzenbrecher-ismcts","rulesets":["standard","catanatron"],
    "observe":true,"needs":"view","lean":true}
 → {"type":"before","game_id":"g17","seat":2,"players":4,"ruleset":{"preset":"standard","player_trading":"none"},
    "budget":{"decide_ms":5000,"game_ms":null,"threads":1,"gpu":false},"seed":1817,"board":{...},"state":{...}}
@@ -96,7 +96,7 @@ Every message that is answered may also be answered with `failure`.
 - `seed`: a number from 0 to 2^31 - 1 for the agent's own randomness (drawn worlds, tie breaks). An agent that seeds
   from it plays the same game the same way, and the referee logs it, so every game replays exactly, as far as the
   agent's search depends on nothing else: a search with a time budget, or on several threads at once, also depends on
-  timing (Hexfarer's agent replays exactly with an iteration budget and `--serial`).
+  timing (Lanzenbrecher's agent replays exactly with an iteration budget and `--serial`).
 - The agent takes the game with `{"type":"ready","game_id":"g17"}`, or turns it down with a `failure` (`unsupported`)
   whose `detail` names what it can't play: `{"preset":"catanatron"}` or `{"option":"road_building","value":"optional"}`.
   A referee sends only games of a preset the agent named, but an option can still be one it doesn't play.
@@ -113,7 +113,7 @@ Every message that is answered may also be answered with `failure`.
 - An agent that can't keep the budget (fewer threads than it uses, no GPU while its net runs on one) turns the game
   down instead of answering ready.
 - The answers to `handshake` and `before` have 60 s, for starting a process and loading a net.
-- Defaults, where whoever starts the game sets none: Hexfarer's referee 300 000 ms, Catanatron's driver 300 000 ms,
+- Defaults, where whoever starts the game sets none: Lanzenbrecher's referee 300 000 ms, Catanatron's driver 300 000 ms,
   JSettlers' robot 120 000 ms (its server also ends a robot's turn after its own limit), StacSettlers' robot 120 000 ms
   (its simulation should run with ForceEndTurns=false, else the server ends a turn after 30 s); any threads, a GPU
   allowed.
@@ -130,11 +130,11 @@ Every message that is answered may also be answered with `failure`.
   answers `{"type":"resync","game_id":"g17","n":144}` and the referee sends the same decision again, with `state`.
 - An agent that keeps its own game and can't make it the referee's again (from `state`) answers the decision with a
   `failure` (`internal`) rather than a move: a game played blind says nothing about the agent, and the failure goes
-  into the result record. Hexfarer's agent first takes over what the referee's known rule differences change, else
+  into the result record. Lanzenbrecher's agent first takes over what the referee's known rule differences change, else
   rebuilds its game from `state` (its fair agent's beliefs take the change in as a public edit); only a game that
   still differs then is lost. A board it doesn't write back as sent it turns down at `before` (`unsupported`).
 - Lean saves something only where the agent's copy writes the referee's state exactly, in practice an agent of the
-  referee's own engine (Hexfarer's agent under Hexfarer's referee). Engines fill the state's open fields differently
+  referee's own engine (Lanzenbrecher's agent under Lanzenbrecher's referee). Engines fill the state's open fields differently
   (`turn`, `played`, an `offer` left out or null), so under another engine's referee every lean decision costs a
   resync.
 - The referee may send `state` in any decision on its own (a forced resync), for example after a change no step
@@ -152,7 +152,7 @@ record into its log, the one result line of every referee:
 
 ```
 "result":{"seed":1817,"moves":512,"turns":63,
-          "seats":[{"seat":0,"agent":"hexfarer-ismcts","needs":"view","observe":true,"lean":true,
+          "seats":[{"seat":0,"agent":"lanzenbrecher-ismcts","needs":"view","observe":true,"lean":true,
                     "decisions":118,"time_ms":5230,"max_ms":410,"resyncs":0,"fallbacks":0,"failures":[]},
                    {"seat":1,"agent":null,...},...]}
 ```
@@ -179,7 +179,7 @@ without a game ends the connection. The referee records every failure in the gam
 | `ended` | referee (recorded only) | the agent's process ended or closed its output, so it can't be told |
 | `internal` | either | the side's own error, say an exception in the agent's search |
 
-What happens to the seat is the referee's choice, recorded with the result: a Hexfarer match pauses (resuming starts
+What happens to the seat is the referee's choice, recorded with the result: a Lanzenbrecher match pauses (resuming starts
 the agent again), the Arena drops the game, Catanatron's driver ends the game, and JSettlers' and StacSettlers' robots
 play on with the first legal move (as `fallbacks`).
 
@@ -235,8 +235,8 @@ and the agent learns from the steps what happened instead.
   `(q, r)`, compared as a set. SGN logs list them clockwise; converting is a sort.
 - **Path (edge):** its two intersections, sorted.
 - **Engine conversions:**
-  - Hexfarer: cube `(q, r, s)` without `s`.
-  - Catanatron: cube `(x, y, z)` is Hexfarer's `(q, s, r)`, so `[x, z]`.
+  - Lanzenbrecher: cube `(q, r, s)` without `s`.
+  - Catanatron: cube `(x, y, z)` is Lanzenbrecher's `(q, s, r)`, so `[x, z]`.
   - JSettlers: hex, node and edge numbers of its classic layout, each converted through its adjacency, never through
     hand-written tables.
 
@@ -300,7 +300,7 @@ the ruleset allows trading between players.
 ```
 
 - `hand`, `development` and `vp` (the points with victory point cards) are null for other seats under `view`; every
-  card type is listed, 0 included. `played` may count only knights (Hexfarer's engine keeps no other).
+  card type is listed, 0 included. `played` may count only knights (Lanzenbrecher's engine keeps no other).
 - A `world` fills them with a game the referee drew from the seat's view and says so (`"drawn":true`).
 - Under `truth` they are the real ones.
 - `bank` counts each resource as 19 less what the hands hold, never below 0. A game without a resource bank says so in

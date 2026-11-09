@@ -1,5 +1,5 @@
 """
-How much Catanatron's AlphaBeta searches per decision, to compare it with Hexfarer's MCTS at equal work. Plays games of
+How much Catanatron's AlphaBeta searches per decision, to compare it with Lanzenbrecher's MCTS at equal work. Plays games of
 four Catanatron bots (e.g. AB:2) on protocol boards and counts, for every decision an AlphaBeta bot searches (more than
 one legal move), the positions its value function scores (leaves), the positions it generates (each outcome of each
 move it expands is a game copy with the move applied: Catanatron expands all moves of a node before its alpha-beta

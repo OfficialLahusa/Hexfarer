@@ -19,7 +19,7 @@ namespace Client
         /// Options: --scene NAME [--seed N] starts in a preset situation (see GameScreen.Scenes), --size WIDTHxHEIGHT sets
         /// the window size instead of maximizing it, --screenshot FILE [--after SECONDS] saves a screenshot after a while and quits,
         /// --host PORT (or localhost:PORT) hosts the game for others, --join ADDRESS [--name N] [--role player|spectator|admin|agent] [--seat 1-4]
-        /// [--token T, or HEXFARER_TOKEN] [--fingerprint F] joins a game on a server (F: the certificate fingerprint for wss), --network opens the network window, --admin [TAB] the admin panel, --menu [PAGE] a page of the main menu (local, host, join, settings), --view all|hidden|1-4 the hands shown in Spectate mode
+        /// [--token T, or LANZENBRECHER_TOKEN] [--fingerprint F] joins a game on a server (F: the certificate fingerprint for wss), --network opens the network window, --admin [TAB] the admin panel, --menu [PAGE] a page of the main menu (local, host, join, settings), --view all|hidden|1-4 the hands shown in Spectate mode
         /// </summary>
         public static void Main(String[] args)
         {
@@ -44,7 +44,7 @@ namespace Client
                 mode = new VideoMode(uint.Parse(parts[0]), uint.Parse(parts[1]));
             }
 
-            window = new RenderWindow(mode, "Hexfarer", Styles.Default, new ContextSettings() { AntialiasingLevel = 8 });
+            window = new RenderWindow(mode, "Lanzenbrecher", Styles.Default, new ContextSettings() { AntialiasingLevel = 8 });
 
             // Maximize window
             if (size == null) ShowWindow(window.SystemHandle, 3);

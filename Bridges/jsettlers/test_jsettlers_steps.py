@@ -1,8 +1,8 @@
 """
 Every move of a JSettlers game as a protocol step (OSPServer.java, MoveLog.java): JSettlers' server hands a robot's agent
 that observes every move by every seat, with its result and the state before it, numbered by the game's moves, so an
-agent can follow the game (Hexfarer's fair agent does) instead of taking it from each decision's state. The server also
-writes each game as a referee log (-Dosp.record=DIR), which Hexfarer's replay harness and relay read, while it is played.
+agent can follow the game (Lanzenbrecher's fair agent does) instead of taking it from each decision's state. The server also
+writes each game as a referee log (-Dosp.record=DIR), which Lanzenbrecher's replay harness and relay read, while it is played.
 Here each step must explain the change to the next state by the rules (payouts, costs, cards, the robber), the steps
 must be numbered without a gap, and each decision's state must be the state its move then starts from.
 Needs a JDK and JSettlers' full jar in JSETTLERS_JAR. Run: python -m unittest test_jsettlers_steps

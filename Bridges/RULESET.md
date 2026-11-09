@@ -34,7 +34,7 @@ The rules of an Open Seat Protocol game (see `PROTOCOL.md`) are a set of options
 | `turn_limit` | none | 1000 | none | none (its config's NoTurns unset) |
 | `offer_limit` | none | none (no trading) | none | 10 with -Dosp.trade_in_chat, else no trades for our seat (its Stac agents keep their own limit) |
 
-The JSettlers column comes from replaying 100 random JSettlers games through Hexfarer's rules (`Recorder` and
+The JSettlers column comes from replaying 100 random JSettlers games through Lanzenbrecher's rules (`Recorder` and
 `OpenSeat replay`). Its `unlimited` bank and its Largest Army timing are what its engine does, not values an agent
 can ask for; its robot names the bank in the ruleset, so an agent that can't play it turns the game down.
 
@@ -45,7 +45,7 @@ resource card; it trades 4:1 with the bank always and 3:1 or 2:1 at the player's
 each, so not only the best rate, unlike JSettlers 2); a Road Building card gives two roads only with two roads left and
 two places for them and its roads can't be given up; a player wins only on their own turn (`checkForWinner` looks at
 the player on turn), and a knight that brings Largest Army and the points ends the game once the robber has moved.
-Replaying Stac agents' games through Hexfarer's rules (`record.py`, games without trades between players, and
+Replaying Stac agents' games through Lanzenbrecher's rules (`record.py`, games without trades between players, and
 `OpenSeat replay`) shows the same two differences and no other: 20 games, 6311 moves, 4 games diverged, 3 by the
 Largest Army's timing and 1 by the bank, whose missing limit also lets Year of Plenty and bank trades take a resource
 of which the hands hold all 19. Later moves of a diverged game aren't compared, so a rarer difference may still hide
@@ -99,8 +99,8 @@ How long an agent may think is no rule of the game: it is the game's budget in `
 
 | | Presets | Options it sets or follows |
 |---|---|---|
-| Hexfarer as referee (client, server, Arena) | `standard` | sets `player_trading` (`rulebook`, `none`), `victory_points`, `discard_limit` and `offer_limit` (10 unless set otherwise); the rest at the default |
-| Hexfarer's agent (`OpenSeat agent`) | `standard`, `catanatron` | follows `robber_victims`, `bank_rates` and `road_building` by narrowing its legal moves; takes the referee's bank, hands and Longest Road where its own rules would differ |
+| Lanzenbrecher as referee (client, server, Arena) | `standard` | sets `player_trading` (`rulebook`, `none`), `victory_points`, `discard_limit` and `offer_limit` (10 unless set otherwise); the rest at the default |
+| Lanzenbrecher's agent (`OpenSeat agent`) | `standard`, `catanatron` | follows `robber_victims`, `bank_rates` and `road_building` by narrowing its legal moves; takes the referee's bank, hands and Longest Road where its own rules would differ |
 | Catanatron's referee (`drive.py`) | `catanatron` | |
 | Catanatron's agent (`open_seat_agent.py`) | `standard`, `catanatron` | rebuilds its game from the referee's state at each decision |
 | JSettlers' server with our robot | `standard` | sends `player_trading` `first_accept` with `offer_limit` null (`none` with game option NT), `bank_shortage` `unlimited`, `bank_rates` `best_only`, `robber_victims` `with_cards`, `road_building` `forced` |

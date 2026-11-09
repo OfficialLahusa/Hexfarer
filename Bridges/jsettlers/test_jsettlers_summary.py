@@ -13,7 +13,7 @@ import unittest
 import summary
 
 
-def result_line(game, seat, winner, failures=(), fallbacks=0, gaps=0, rounds=12, agent="hexfarer-test"):
+def result_line(game, seat, winner, failures=(), fallbacks=0, gaps=0, rounds=12, agent="lanzenbrecher-test"):
     """An osp-result line as MoveLog writes it, with the agent in the seat (None: a robot-only game)"""
     seats = []
     for s in range(4):

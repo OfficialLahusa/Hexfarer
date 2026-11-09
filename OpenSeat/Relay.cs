@@ -6,9 +6,9 @@ using Action = Common.Actions.Action;
 namespace OpenSeat
 {
     /// <summary>
-    /// An outside referee's games as Hexfarer save files, for the client to show (OpenSeat relay), or move by move into a
-    /// watched match (LiveRelay). Each game plays through Hexfarer's rules with the referee's results, as in the replay
-    /// harness (Replica). Where the rules part (a state Hexfarer holds differently, a move it doesn't allow, a result it
+    /// An outside referee's games as Lanzenbrecher save files, for the client to show (OpenSeat relay), or move by move into a
+    /// watched match (LiveRelay). Each game plays through Lanzenbrecher's rules with the referee's results, as in the replay
+    /// harness (Replica). Where the rules part (a state Lanzenbrecher holds differently, a move it doesn't allow, a result it
     /// can't reach), the part ends, and a new one starts from the referee's state at its next decision (Replica.Rebuild).
     /// A save file holds where its part ended and the moves since it began, so the client steps back through them to the
     /// part's start. With patch (for a match, which keeps edits in its history), what the known rule differences change
@@ -17,7 +17,7 @@ namespace OpenSeat
     internal sealed class Relay(bool patch = false)
     {
         /// <summary>
-        /// A stretch of a game that Hexfarer's rules followed: its number in the game (from 1), the move it starts at, the
+        /// A stretch of a game that Lanzenbrecher's rules followed: its number in the game (from 1), the move it starts at, the
         /// states at its start and end, its moves, and why it ended before the game did (a difference's kind), or null
         /// </summary>
         public sealed record Part(string GameId, int Number, int FirstMove, GameState Start, GameState End, List<Action> Actions, string? Cut);

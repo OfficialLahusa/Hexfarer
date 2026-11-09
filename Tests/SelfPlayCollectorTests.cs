@@ -41,7 +41,7 @@ namespace Tests
         public void RunRecordsPositionsThatReplayFromTheSavedGames(string model)
         {
             string modelPath = TestUtil.FixturePath("ValueNet", model);
-            string root = Path.Combine(Path.GetTempPath(), "hexfarer-selfplay-" + Guid.NewGuid().ToString("N"));
+            string root = Path.Combine(Path.GetTempPath(), "lanzenbrecher-selfplay-" + Guid.NewGuid().ToString("N"));
             try
             {
                 SelfPlaySettings settings = new()
@@ -121,7 +121,7 @@ namespace Tests
         {
             // Each seat searches a world drawn from its own view; the run records what the seat saw, whatever the net's layout
             string modelPath = TestUtil.FixturePath("ValueNet", model);
-            string root = Path.Combine(Path.GetTempPath(), "hexfarer-selfplay-" + Guid.NewGuid().ToString("N"));
+            string root = Path.Combine(Path.GetTempPath(), "lanzenbrecher-selfplay-" + Guid.NewGuid().ToString("N"));
             try
             {
                 SelfPlaySettings settings = new()
@@ -186,7 +186,7 @@ namespace Tests
         public void ViewFeaturesAreTheActorsViewOfEveryPosition()
         {
             string modelPath = TestUtil.FixturePath("ValueNet", "placements_tiny.onnx");
-            string root = Path.Combine(Path.GetTempPath(), "hexfarer-selfplay-" + Guid.NewGuid().ToString("N"));
+            string root = Path.Combine(Path.GetTempPath(), "lanzenbrecher-selfplay-" + Guid.NewGuid().ToString("N"));
             try
             {
                 SelfPlaySettings settings = new()

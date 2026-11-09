@@ -357,7 +357,7 @@ namespace Tests
 
             MatchEvent[] simple = [new UndoneEvent(), new SeatsEvent(AllHuman), new PlaybackEvent(new PlaybackState(true, true, 1.5f)),
                 new ThinkingEvent(2, true), new ErrorEvent("no"), new ClosedEvent("bye"), new AgentsEvent(new AgentSettings(2, 0, Agents.MCTS.OpponentModel.Paranoid)),
-                new AgentsEvent(AgentSettings.Default with { OpenSeatAgents = ["Catanatron AB:2", null, null, "Hexfarer"] }), new SeatsEvent([SeatKind.OpenSeatAgent, SeatKind.Human, SeatKind.Human, SeatKind.OpenSeatAgent]),
+                new AgentsEvent(AgentSettings.Default with { OpenSeatAgents = ["Catanatron AB:2", null, null, "Lanzenbrecher"] }), new SeatsEvent([SeatKind.OpenSeatAgent, SeatKind.Human, SeatKind.Human, SeatKind.OpenSeatAgent]),
                 new WelcomeEvent(new SessionInfo("s1", "Ann", Role.Player, 2, "1.2.3.4")), new SessionsEvent([new SessionInfo("s1", "Ann", Role.Player, 2)])];
             foreach (MatchEvent e in simple)
             {

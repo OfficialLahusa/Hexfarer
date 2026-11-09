@@ -162,7 +162,7 @@ namespace Client
 
         private void DrawMenuMain(ImDrawListPtr dl, Vector2 min)
         {
-            Theme.TextCentered(dl, Theme.ExtraBold36, min + new Vector2(MenuWidth / 2, 54), Theme.Text, "Hexfarer");
+            Theme.TextCentered(dl, Theme.ExtraBold36, min + new Vector2(MenuWidth / 2, 54), Theme.Text, "Lanzenbrecher");
             Theme.TextCentered(dl, Theme.Regular15, min + new Vector2(MenuWidth / 2, 94), Theme.TextMuted, "Simulator and AI agent sandbox");
 
             float y = 126;
@@ -226,7 +226,7 @@ namespace Client
 
         private void DrawMenuJoin(ImDrawListPtr dl, Vector2 min)
         {
-            MenuHeader(dl, min, "Join a game", "Connect to a game someone hosts, or to a Hexfarer server.");
+            MenuHeader(dl, min, "Join a game", "Connect to a game someone hosts, or to a Lanzenbrecher server.");
 
             void Field(string label, float y, string id, ref string value, uint length, ImGuiInputTextFlags flags = ImGuiInputTextFlags.None)
             {

@@ -34,7 +34,7 @@ public final class OSPGame
 {
     /**
      * The rules StacSettlers plays, as the protocol names them (see ../../RULESET.md): the rulebook without trades for
-     * the seat (Hexfarer's robots trade with the bank and the harbors only; StacSettlers' own agents still trade among
+     * the seat (Lanzenbrecher's robots trade with the bank and the harbors only; StacSettlers' own agents still trade among
      * themselves in chat), narrower where StacSettlers' engine is: no resource bank (every production is paid), only
      * players with cards robbed, a Road Building card's roads placed at once (the card only with a road left and a place
      * for it). Its bank trades take every rate the player has, and a player wins on their own turn, as in the rulebook.

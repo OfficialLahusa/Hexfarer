@@ -106,7 +106,7 @@ public final class OSPGame
 
     /**
      * The seat that acts now: the lowest one that has to discard; with an open offer the next addressed seat in seat order
-     * that hasn't answered, then the offerer (as Hexfarer orders them; under first_accept the others may answer first);
+     * that hasn't answered, then the offerer (as Lanzenbrecher orders them; under first_accept the others may answer first);
      * else the current player; -1 once the game is over
      */
     public int acting()

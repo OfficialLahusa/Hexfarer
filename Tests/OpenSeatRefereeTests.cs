@@ -12,7 +12,7 @@ using Action = Common.Actions.Action;
 namespace Tests
 {
     /// <summary>
-    /// Hexfarer as the referee of the Open Seat Protocol (see Bridges/PROTOCOL.md): what each seat may see of the states
+    /// Lanzenbrecher as the referee of the Open Seat Protocol (see Bridges/PROTOCOL.md): what each seat may see of the states
     /// and the moves' results, the rules it announces, OpenSeatAgentProxy, which plays a seat by asking an Open Seat Agent,
     /// and OpenSeatAgentProcess, which runs one as a process
     /// </summary>
@@ -22,7 +22,7 @@ namespace Tests
 
         private static string TinyNet => TestUtil.FixturePath("ValueNet", "placements_tiny.onnx");
 
-        // Hexfarer's own Open Seat Agent, built next to the tests, run as a process
+        // Lanzenbrecher's own Open Seat Agent, built next to the tests, run as a process
         private static string AgentCommand(string options = "") =>
             $"dotnet \"{Path.Combine(AppContext.BaseDirectory, "OpenSeat.dll")}\" agent --net \"{TinyNet}\" --iterations 16 --leaves-per-batch 16 --provider cpu {options}".Trim();
 
@@ -719,9 +719,9 @@ namespace Tests
         }
         #endregion
 
-        #region Hexfarer's own Open Seat Agent under Hexfarer's referee
+        #region Lanzenbrecher's own Open Seat Agent under Lanzenbrecher's referee
         /// <summary>
-        /// Hexfarer's Open Seat Agent (SeatAgent) in the same process, answering through the channel
+        /// Lanzenbrecher's Open Seat Agent (SeatAgent) in the same process, answering through the channel
         /// </summary>
         private sealed class InProcessAgent(SeatAgent agent, bool dropSteps = false, Func<JsonNode, bool>? drop = null) : IOpenSeatChannel
         {
@@ -739,7 +739,7 @@ namespace Tests
 
         /// <summary>
         /// A random agent that also offers trades on its turn (one card for another, now and then) and counters some offers,
-        /// as Hexfarer's own agents do: moves no legal list holds
+        /// as Lanzenbrecher's own agents do: moves no legal list holds
         /// </summary>
         private sealed class OfferingAgent(sbyte seat) : Agent(seat)
         {
@@ -810,7 +810,7 @@ namespace Tests
                 Assert.Null(OSPCodec.TradeAction(JsonNode.Parse(move), 0));
         }
 
-        // Passes everything to Hexfarer's agent; after each decision it searched (more than one move to choose from, a trade
+        // Passes everything to Lanzenbrecher's agent; after each decision it searched (more than one move to choose from, a trade
         // named among them), what its search could propose. With a margin its search proposes any trade that gains more
         // (set once its game began)
         private sealed class WatchingAgent(SeatAgent seatAgent, IOpenSeatChannel inner, float? margin = null) : IOpenSeatChannel
@@ -908,7 +908,7 @@ namespace Tests
         }
 
         [Fact]
-        public void HexfarersAgentProposesOnlyTheTradesADecisionNames()
+        public void LanzenbrechersAgentProposesOnlyTheTradesADecisionNames()
         {
             JsonNode? Trades(string trades) => JsonNode.Parse($$"""{"type":"decide","trades":{{trades}}}""")!["trades"];
             Assert.Equal((true, false), SeatAgent.TradesNamed(Trades("""{"offer":{"to":[0,2],"left":3}}""")));
@@ -935,7 +935,7 @@ namespace Tests
         }
 
         [Fact]
-        public void HexfarersLeanAgentFollowsOffersAndCountersWithoutAResync()
+        public void LanzenbrechersLeanAgentFollowsOffersAndCountersWithoutAResync()
         {
             // The other seats offer and counter, which the copy has to follow from the steps alone; the agent proposes any
             // trade it can (its tiny net would rarely find one worth it)
@@ -964,7 +964,7 @@ namespace Tests
         [Theory]
         [InlineData(false, 0)]
         [InlineData(true, 1)]
-        public void HexfarersLeanAgentAsksForTheStateOnlyWhenItsCopyDiffers(bool dropSteps, int minResyncs)
+        public void LanzenbrechersLeanAgentAsksForTheStateOnlyWhenItsCopyDiffers(bool dropSteps, int minResyncs)
         {
             StringWriter log = new();
             SeatAgent seatAgent = new(new StateValueNet(TinyNet, provider: InferenceProvider.CPU), iterations: 16, seconds: 0, log, leavesPerBatch: 16, lean: true);
@@ -987,7 +987,7 @@ namespace Tests
         [Theory]
         [InlineData(false)]
         [InlineData(true)]
-        public void HexfarersSerialAgentPlaysTheSameGameFromTheSameSeed(bool fair)
+        public void LanzenbrechersSerialAgentPlaysTheSameGameFromTheSameSeed(bool fair)
         {
             // The game's seed (before) seeds the agent's search: selecting on one thread, it plays the game again move by move
             List<string> Play(int agentSeed)
@@ -1004,7 +1004,7 @@ namespace Tests
         }
 
         [Fact]
-        public void HexfarersAgentTurnsDownWhatItCantPlayAndTakesTheGamesOptions()
+        public void LanzenbrechersAgentTurnsDownWhatItCantPlayAndTakesTheGamesOptions()
         {
             SeatAgent seatAgent = new(new StateValueNet(TinyNet, provider: InferenceProvider.CPU), iterations: 16, seconds: 0, new StringWriter(), leavesPerBatch: 16);
             TestUtil.Seed(20);
@@ -1060,7 +1060,7 @@ namespace Tests
         }
 
         [Fact]
-        public void HexfarersAgentEndsTheConnectionAtALineItCantRead()
+        public void LanzenbrechersAgentEndsTheConnectionAtALineItCantRead()
         {
             SeatAgent seatAgent = new(new StateValueNet(TinyNet, provider: InferenceProvider.CPU), iterations: 16, seconds: 0, new StringWriter(), leavesPerBatch: 16);
             StringWriter output = new();
@@ -1090,7 +1090,7 @@ namespace Tests
         [Theory]
         [InlineData(false)]
         [InlineData(true)]
-        public void HexfarersOwnAgentPlaysASeatUnderHexfarersRefereeWithoutTakingAnythingOver(bool fair)
+        public void LanzenbrechersOwnAgentPlaysASeatUnderLanzenbrechersRefereeWithoutTakingAnythingOver(bool fair)
         {
             StringWriter log = new();
             SeatAgent seatAgent = new(new StateValueNet(TinyNet, provider: InferenceProvider.CPU), iterations: 16, seconds: 0, log, leavesPerBatch: 16, fair: fair);
@@ -1239,7 +1239,7 @@ namespace Tests
         }
 
         [Fact]
-        public void ARebuiltGameCountsItsRoadsByHexfarersRules()
+        public void ARebuiltGameCountsItsRoadsByLanzenbrechersRules()
         {
             // A referee that counts a road's length differently (Catanatron, at an opponent's building): the rebuilt game
             // counts by its own rules, as every move after it will, and takes the award from the referee
@@ -1284,7 +1284,7 @@ namespace Tests
         }
 
         [Fact]
-        public void HexfarersOpenHandAgentRebuildsItsGameWhenTheRefereeSendsNoSteps()
+        public void LanzenbrechersOpenHandAgentRebuildsItsGameWhenTheRefereeSendsNoSteps()
         {
             // As under JSettlers' robot: no steps, only each decision's true state
             StringWriter log = new();
@@ -1298,7 +1298,7 @@ namespace Tests
         }
 
         [Fact]
-        public void HexfarersFairAgentRebuildsItsGameWhereAStepIsMissing()
+        public void LanzenbrechersFairAgentRebuildsItsGameWhereAStepIsMissing()
         {
             // A gap in the steps the fair agent gets: another seat's first road after the setup never reaches it, so the next
             // step's state shows a road its copy doesn't have, which no takeover explains. The copy waits for the next decision
@@ -1337,7 +1337,7 @@ namespace Tests
         [Fact]
         public void AnAgentProcessPlaysAGameOverItsStandardStreams()
         {
-            string errors = Path.Combine(Path.GetTempPath(), $"hexfarer-agent-{Guid.NewGuid():N}.log");
+            string errors = Path.Combine(Path.GetTempPath(), $"lanzenbrecher-agent-{Guid.NewGuid():N}.log");
             try
             {
                 OpenSeatAgentProcess process = OpenSeatAgentProcess.Start(AgentCommand(), TimeSpan.FromSeconds(60), errors);
@@ -1399,7 +1399,7 @@ namespace Tests
         [Fact]
         public void AnAgentClosedWhileItIsAwaitedFailsAsTheProtocolSays()
         {
-            // Hexfarer's agent waits for the handshake on its input: closing it ends the agent while an answer is awaited
+            // Lanzenbrecher's agent waits for the handshake on its input: closing it ends the agent while an answer is awaited
             OpenSeatAgentProcess process = OpenSeatAgentProcess.Start(AgentCommand(), TimeSpan.FromSeconds(60));
             Exception? awaited = null;
             Thread receiver = new(() => { try { process.Receive(); } catch (Exception e) { awaited = e; } });

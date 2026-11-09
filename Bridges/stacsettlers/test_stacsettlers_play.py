@@ -20,12 +20,12 @@ def result_line(game, seat, winner, needs="truth", observe=True, lean=False, fai
     seats = []
     for s in range(4):
         ours = s == seat
-        seats.append({"seat": s, "agent": "hexfarer-test" if ours else None, "needs": needs if ours else None, "observe": observe if ours else None,
+        seats.append({"seat": s, "agent": "lanzenbrecher-test" if ours else None, "needs": needs if ours else None, "observe": observe if ours else None,
                       "lean": lean if ours else None, "decisions": 10 if ours else 0, "time_ms": 100 if ours else 0, "max_ms": 20 if ours else 0,
                       "robot_decisions": 12 if ours else 0, "fallbacks": fallbacks if ours else 0,
                       "failures": [{"n": 40, "code": code, "by": "agent", "message": "lost"} for code in failures] if ours else [],
                       "stalls": 0, "declined": 0})
-    return json.dumps({"type": "osp-result", "game_id": game, "players": ["Hexfarer" if s == seat else f"Stac_{s}" for s in range(4)],
+    return json.dumps({"type": "osp-result", "game_id": game, "players": ["Lanzenbrecher" if s == seat else f"Stac_{s}" for s in range(4)],
                        "winner": winner, "vp": [10 if s == winner else 5 for s in range(4)], "result": {"turns": 60, "seats": seats}})
 
 

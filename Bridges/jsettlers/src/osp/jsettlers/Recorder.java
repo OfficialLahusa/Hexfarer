@@ -14,7 +14,7 @@ import java.util.zip.GZIPOutputStream;
 import soc.game.SOCGame;
 
 /**
- * Records JSettlers games as Open Seat Protocol referee messages, the input of Hexfarer's replay harness (OpenSeat
+ * Records JSettlers games as Open Seat Protocol referee messages, the input of Lanzenbrecher's replay harness (OpenSeat
  * replay): one JSON object per line, gzipped; per game a before (board, ruleset, full state), a decide before every move
  * (full state, the legal moves by JSettlers' rules) and a step after it (the move and its result), and an after. The
  * games are played by JSettlers' own rules (SOCGame) with weighted random choices, like Catanatron's weighted random bot:

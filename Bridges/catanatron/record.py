@@ -1,7 +1,7 @@
 """
 Plays Catanatron games and records them as the referee's Open Seat Protocol messages (see ../PROTOCOL.md), one JSON
 object per line, gzipped: per game a `before` (board, ruleset, bots, full state), a `decide` before every move (full
-state and legal moves), a `step` after it (the move and its full result) and an `after`. Hexfarer's replay harness
+state and legal moves), a `step` after it (the move and its full result) and an `after`. Lanzenbrecher's replay harness
 plays these logs through its own rules and compares every state and every list of legal moves.
 
 Usage: python record.py --bots R,R,R,R --games 100 --seed 1 --out games.jsonl.gz

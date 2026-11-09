@@ -2,8 +2,9 @@
 Central run registry: every training, export, evaluation, self-play generation, duel or collection gets an entry with its
 full command line, the commit it ran from and its result, in a folder outside the repository.
 
-Layout of the registry (HEXFARER_RUNS, by default ~/Hexfarer-data/runs, or ~/hexfarer-arena/runs on a machine that only
-has the arena folder):
+Layout of the registry (LANZENBRECHER_RUNS, by default ~/Lanzenbrecher-data/runs, or ~/lanzenbrecher-arena/runs on a
+machine that only has the arena folder; the former HEXFARER_RUNS and the folders under the former names count too). The
+command line is chronicle.cmd or chronicle.sh in the repository's root (hexrun, the former name, still works):
 - runs.jsonl: one JSON event per line, appended only. A run has a "start" event (kind, name, machine, command, working
   directory, commit and whether the code had uncommitted changes, inputs, outputs, parent run, note), any number of
   "result" events and an "end" event (exit code, duration). load() merges them per run id.
@@ -14,7 +15,7 @@ Two ways in:
   It also reads the commit a .NET binary was built from (the SDK puts it into the informational version).
 - begin() in the Python tools (train.py, export_onnx.py, evaluate_precision.py, selfplay_loop.py). Started directly by
   the wrapper, a tool adds its results to the wrapper's run instead of starting a second one; anything it starts itself
-  becomes a child run (HEXFARER_RUN_PARENT).
+  becomes a child run (LANZENBRECHER_RUN_PARENT).
 
 More commands: list, show ID, sync (pulls another machine's registry over ssh), import-wandb (backfill from W&B runs),
 add (enters a run by hand, e.g. reconstructed from logs).
@@ -38,7 +39,7 @@ REGISTRY_FILE = "runs.jsonl"
 KINDS = ("train", "export", "precision", "selfplay-loop", "selfplay-gen", "collect", "convert", "reanalysis", "duel", "bench", "other")
 
 # Set for the processes a run starts: the run they belong to, and whether they were started directly by the wrapper; and
-# the registry. Under the project's current name, and set and read under its former one too (Hexfarer), so tools of either
+# the registry. Under the project's current name, and set and read under its former one too (Lanzenbrecher), so tools of either
 # version find them
 ENV_ID, ENV_DIRECT, ENV_PARENT, ENV_RUNS = "LANZENBRECHER_RUN_ID", "LANZENBRECHER_RUN_DIRECT", "LANZENBRECHER_RUN_PARENT", "LANZENBRECHER_RUNS"
 CURRENT_PREFIX, FORMER_PREFIX = "LANZENBRECHER_", "HEXFARER_"

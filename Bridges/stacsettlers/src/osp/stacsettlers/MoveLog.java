@@ -34,7 +34,7 @@ import soc.message.SOCPutPiece;
  * Every move of a StacSettlers game on OSPServer as Open Seat Protocol steps (see ../../PROTOCOL.md), with its result as
  * the referee knows it and the true state before it: the steps the robots of Open Seat Agents that observe send them
  * (OSPRobotBrain), and with -Dosp.record=DIR a referee log written while the game runs (GAME.jsonl, or GAME-2.jsonl and
- * so on if an earlier run wrote that game's name), the input of Hexfarer's replay harness (OpenSeat replay): before, a
+ * so on if an earlier run wrote that game's name), the input of Lanzenbrecher's replay harness (OpenSeat replay): before, a
  * decide (the true state, the legal moves by StacSettlers' rules) and a step per move of every seat, after with the
  * winner. StacSettlers' server handles each player's request on its one request thread; OSPServer passes it through
  * dispatch here, which reads the game before and after StacSettlers handles it and turns the change into a step: one

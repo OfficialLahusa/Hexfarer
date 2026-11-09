@@ -1,6 +1,6 @@
 """
 StacSettlers' games recorded while they run (MoveLog.java, -Dosp.record=DIR on OSPServer): the requests of every seat
-(here four Stac agents) as a referee log of protocol steps, the input of Hexfarer's replay harness. Each game starts
+(here four Stac agents) as a referee log of protocol steps, the input of Lanzenbrecher's replay harness. Each game starts
 with before and ends with after (the winner at 10 points); decide and step alternate, numbered from 0, the deciding seat
 is the state's current one, and each move played is one of the legal moves listed (two-step moves joined, discards in
 the protocol's order). A trade between players, which the Stac agents make in chat, is the offer of the player on turn

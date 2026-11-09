@@ -1,6 +1,6 @@
 """
 Catanatron's bots as an Open Seat Agent (see ../PROTOCOL.md): they play seats for a referee of another engine, e.g.
-Hexfarer's Arena or simulator. For every decision the agent rebuilds a Catanatron game from the referee's state (rebuild)
+Lanzenbrecher's Arena or simulator. For every decision the agent rebuilds a Catanatron game from the referee's state (rebuild)
 and lets the bot choose among the moves the referee listed, so the referee's rules decide what is legal and its state
 is always the one played on; nothing is carried from move to move, and no step is needed.
 
@@ -190,7 +190,7 @@ def rebuild(board, state, legal, ruleset, players=None):
 
     # An unlimited bank (JSettlers') counts below 0 once the hands hold more than 19 of a resource: an empty supply here
     s.resource_freqdeck = [max(0, state["bank"][RESOURCE_NAMES[r]]) for r in RESOURCES]
-    # The deck: the cards nobody holds or played, as many as the referee's bank has (Hexfarer reports only knights played)
+    # The deck: the cards nobody holds or played, as many as the referee's bank has (Lanzenbrecher reports only knights played)
     remaining = []
     for card, total in DEVELOPMENT_DECK.items():
         used = sum((p["development"] or {}).get(CARD_NAMES[card], 0) + p["played"].get(CARD_NAMES[card], 0) for p in state["players"])

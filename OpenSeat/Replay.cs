@@ -6,9 +6,9 @@ namespace OpenSeat
 {
     /// <summary>
     /// The replay harness: plays the games another engine's referee recorded as Open Seat Protocol messages (e.g.
-    /// Catanatron's, by Bridges/catanatron/record.py) through Hexfarer's rules, with the recorded dice, cards and steals,
+    /// Catanatron's, by Bridges/catanatron/record.py) through Lanzenbrecher's rules, with the recorded dice, cards and steals,
     /// and compares at every move what both engines hold: the full state and the legal moves. A game's replay stops at the
-    /// first state that differs or the first recorded move Hexfarer doesn't allow (the games no longer agree after it);
+    /// first state that differs or the first recorded move Lanzenbrecher doesn't allow (the games no longer agree after it);
     /// differences in the legal moves alone are counted and the replay goes on. Known differences of the referee's
     /// ruleset are folded before comparing (see Normalize), so every remaining difference is a rule difference not
     /// described yet, a mapping bug or a bug in either engine.
@@ -102,7 +102,7 @@ namespace OpenSeat
         }
 
         /// <summary>
-        /// One game's replay: Hexfarer's copy follows the referee and stops at the first difference in a state
+        /// One game's replay: Lanzenbrecher's copy follows the referee and stops at the first difference in a state
         /// </summary>
         private sealed class Game
         {
@@ -117,7 +117,7 @@ namespace OpenSeat
                 _replay = replay;
                 _id = before["game_id"]!.GetValue<string>();
                 _replica = new Replica(before);
-                // The board as Hexfarer holds it is the board the referee sent
+                // The board as Lanzenbrecher holds it is the board the referee sent
                 if (!_replica.BoardMatches(before)) Diverge("board", "the board built from the message writes back differently");
                 else Compare(before["state"]!, "before");
             }
@@ -130,7 +130,7 @@ namespace OpenSeat
                 // The seat that acts, or under JSettlers' flow one that answers the open offer or picks on it before its turn
                 // in seat order
                 var legal = seat == acting ? _replica.Legal().ToList() : _replica.OutOfOrder(seat).ToList();
-                if (seat != acting && legal.Count == 0) { Diverge("seat", $"{at}: seat {decide["seat"]} acts, Hexfarer expects {acting}"); return; }
+                if (seat != acting && legal.Count == 0) { Diverge("seat", $"{at}: seat {decide["seat"]} acts, Lanzenbrecher expects {acting}"); return; }
                 // A referee may leave out the legal moves of a decision it can't list them for
                 if (decide["legal"] is not JsonArray listed) return;
 
@@ -141,7 +141,7 @@ namespace OpenSeat
                 foreach (string missing in theirs.Except(ours))
                     Note($"legal: only the referee allows {Replica.MoveType(missing)} ({prompt})", $"{at}: {missing}");
                 foreach (string extra in ours.Except(theirs))
-                    Note($"legal: only Hexfarer allows {Replica.MoveType(extra)} ({prompt})", $"{at}: {extra}");
+                    Note($"legal: only Lanzenbrecher allows {Replica.MoveType(extra)} ({prompt})", $"{at}: {extra}");
             }
 
             public void Step(JsonNode step)
@@ -158,10 +158,10 @@ namespace OpenSeat
                 // Explained if the referee's winner isn't the player on turn: Catanatron lets anyone win at any time
                 bool offTurn = _replica.Catanatron && winner != null && ours == null && winner != int.Parse(after["state"]!["current"]!.ToJsonString());
                 Diverge(offTurn ? "winner (known: Catanatron counts a win outside the winner's own turn)" : "winner",
-                    $"the referee's winner is seat {winner?.ToString() ?? "none"}, Hexfarer's {ours?.ToString() ?? "none"}");
+                    $"the referee's winner is seat {winner?.ToString() ?? "none"}, Lanzenbrecher's {ours?.ToString() ?? "none"}");
             }
 
-            // Compares the referee's state with Hexfarer's; at the first difference the game stops
+            // Compares the referee's state with Lanzenbrecher's; at the first difference the game stops
             private bool Compare(JsonNode theirs, string at) =>
                 _replica.FirstDifference(theirs, at) is not (string kind, string detail) || Diverge(kind, detail);
 

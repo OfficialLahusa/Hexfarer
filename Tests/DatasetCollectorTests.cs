@@ -250,7 +250,7 @@ namespace Tests
         [Fact]
         public void PartialRunsEqualASingleRunAndResume()
         {
-            string root = Path.Combine(Path.GetTempPath(), "hexfarer-parts-" + Guid.NewGuid().ToString("N"));
+            string root = Path.Combine(Path.GetTempPath(), "lanzenbrecher-parts-" + Guid.NewGuid().ToString("N"));
             var settings = new CollectorSettings { Threads = 2, Matches = 6, SamplesPerMatch = 2, PlayoutsPerSample = 3, Seed = 160, SiblingsPerGroup = 3, OutputDirectory = root };
 
             try
@@ -617,7 +617,7 @@ namespace Tests
         [Fact]
         public void ACancelledRunAbandonsItsMatches()
         {
-            string directory = Path.Combine(Path.GetTempPath(), "hexfarer-collector-" + Guid.NewGuid().ToString("N"));
+            string directory = Path.Combine(Path.GetTempPath(), "lanzenbrecher-collector-" + Guid.NewGuid().ToString("N"));
             try
             {
                 var settings = new CollectorSettings { Threads = 2, Matches = 1000, PlayoutsPerSample = 1000, Seed = 154, OutputDirectory = directory, Name = "cancelled" };
@@ -636,7 +636,7 @@ namespace Tests
         [Fact]
         public void AnExistingDatasetIsNeverOverwritten()
         {
-            string directory = Path.Combine(Path.GetTempPath(), "hexfarer-collector-" + Guid.NewGuid().ToString("N"));
+            string directory = Path.Combine(Path.GetTempPath(), "lanzenbrecher-collector-" + Guid.NewGuid().ToString("N"));
             try
             {
                 var settings = new CollectorSettings { Threads = 2, Matches = 1000, PlayoutsPerSample = 1000, Seed = 155, OutputDirectory = directory, Name = "existing" };
@@ -704,7 +704,7 @@ namespace Tests
         public void VectorChunksRollOverAfterTheirRowLimit()
         {
             TestUtil.Seed(151);
-            string directory = Path.Combine(Path.GetTempPath(), "hexfarer-vectors-" + Guid.NewGuid().ToString("N"));
+            string directory = Path.Combine(Path.GetTempPath(), "lanzenbrecher-vectors-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
 
             try
@@ -787,7 +787,7 @@ namespace Tests
 
         private static string CollectIntoTemporaryDirectory(CollectorSettings settings, out CollectionResult result)
         {
-            string directory = Path.Combine(Path.GetTempPath(), "hexfarer-collector-" + Guid.NewGuid().ToString("N"));
+            string directory = Path.Combine(Path.GetTempPath(), "lanzenbrecher-collector-" + Guid.NewGuid().ToString("N"));
             var collector = new DatasetCollector.DatasetCollector(settings with { OutputDirectory = directory, Name = "dataset" }, TextWriter.Null);
             result = collector.Collect();
             return collector.DatasetDirectory;

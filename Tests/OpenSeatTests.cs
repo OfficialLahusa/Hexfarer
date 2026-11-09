@@ -11,9 +11,9 @@ using Action = Common.Actions.Action;
 namespace Tests
 {
     /// <summary>
-    /// Hexfarer's side of the Open Seat Protocol: the codec (boards, moves, states) and the replay harness, which plays
+    /// Lanzenbrecher's side of the Open Seat Protocol: the codec (boards, moves, states) and the replay harness, which plays
     /// Catanatron's recorded games (Fixtures/OpenSeat, from Bridges/catanatron/record.py --bots R,W,R,W --games 6 --seed 100)
-    /// through Hexfarer's rules. Catanatron's log is the independent reference: a wrong board, move, result or state in
+    /// through Lanzenbrecher's rules. Catanatron's log is the independent reference: a wrong board, move, result or state in
     /// the codec shows up as a difference there.
     /// </summary>
     public class OpenSeatTests
@@ -39,7 +39,7 @@ namespace Tests
         }
 
         [Fact]
-        public void CatanatronsGamesReplayThroughHexfarersRules()
+        public void CatanatronsGamesReplayThroughLanzenbrechersRules()
         {
             Replay replay = new();
             Replay.Report report = replay.Run(Replay.Read(Fixture));
@@ -58,7 +58,7 @@ namespace Tests
         private static string TradingFixture => TestUtil.FixturePath("OpenSeat", "jsettlers-trading.jsonl.gz");
 
         [Fact]
-        public void JSettlersTradingGamesReplayThroughHexfarersRules()
+        public void JSettlersTradingGamesReplayThroughLanzenbrechersRules()
         {
             List<JsonNode> messages = Replay.Read(TradingFixture).ToList();
             // Answers out of seat order and an offerer's picks before everyone answered are in it
@@ -107,7 +107,7 @@ namespace Tests
         [InlineData("standard", false)]
         public void ABankShortageAfterARollIsNamedOnlyUnderCatanatronsRules(string preset, bool named)
         {
-            // Hexfarer's bank has no brick left when a roll comes; the referee's still holds one
+            // Lanzenbrecher's bank has no brick left when a roll comes; the referee's still holds one
             GameState game = RandomGames(games: 1).Skip(40).First(s => s.Turn.MustRoll && new OSPCodec(s.Board).State(s)["prompt"]!.GetValue<string>() == "roll");
             uint bricks = game.ResourceBank.Get(ResourceCardType.Brick);
             game.ResourceBank.Remove(ResourceCardType.Brick, bricks);
@@ -132,7 +132,7 @@ namespace Tests
         [InlineData("standard", false)]
         public void AWinOutsideTheWinnersTurnIsNamedOnlyUnderCatanatronsRules(string preset, bool named)
         {
-            // The referee ends the game in the setup, a seat that isn't on turn winning: Hexfarer's rules never would
+            // The referee ends the game in the setup, a seat that isn't on turn winning: Lanzenbrecher's rules never would
             List<JsonNode> game = Replay.Read(Fixture).TakeWhile(m => m["game_id"]!.GetValue<string>() == Replay.Read(Fixture).First()["game_id"]!.GetValue<string>()).ToList();
             List<JsonNode> messages = game.TakeWhile(m => !At(m, "decide", 10)).ToList();
             messages[0]["ruleset"] = new JsonObject { ["preset"] = preset };
@@ -208,7 +208,7 @@ namespace Tests
             // A legal move only one side has (the game goes on)
             Replay.Report missing = ReplayChanged(m => At(m, "decide", 40), m => m["legal"]!.AsArray().RemoveAt(0));
             Assert.Equal(0, missing.Diverged);
-            Assert.Single(missing.Counts, c => c.Key.StartsWith("legal: only Hexfarer allows"));
+            Assert.Single(missing.Counts, c => c.Key.StartsWith("legal: only Lanzenbrecher allows"));
             Replay.Report extra = ReplayChanged(m => At(m, "decide", 40), m => m["legal"]!.AsArray().Add(JsonNode.Parse("[\"play_monopoly\",\"ore\"]")));
             Assert.Equal(1, extra.Counts.GetValueOrDefault("legal: only the referee allows play_monopoly (main)") + extra.Counts.GetValueOrDefault("legal: only the referee allows play_monopoly (roll)"));
 
@@ -219,9 +219,9 @@ namespace Tests
             Assert.Equal(1, dice.Diverged);
             Assert.True(dice.Counts.Keys.Single().StartsWith("state: "), dice.ToString());
 
-            // A move Hexfarer doesn't allow
+            // A move Lanzenbrecher doesn't allow
             Replay.Report illegal = ReplayChanged(m => At(m, "step", 0), m => m["action"] = JsonNode.Parse("[\"end_turn\"]"));
-            Assert.Equal((1, 1), (illegal.Diverged, illegal.Counts.GetValueOrDefault("step: Hexfarer doesn't allow end_turn")));
+            Assert.Equal((1, 1), (illegal.Diverged, illegal.Counts.GetValueOrDefault("step: Lanzenbrecher doesn't allow end_turn")));
         }
 
         /// <summary>
@@ -250,7 +250,7 @@ namespace Tests
         [Fact]
         public void TheAgentTakesOverTheRefereesStateBeforeFollowingAMove()
         {
-            // Another seat's move whose state before it holds a hand Hexfarer's copy doesn't (as after Catanatron's bank
+            // Another seat's move whose state before it holds a hand Lanzenbrecher's copy doesn't (as after Catanatron's bank
             // shortage): the copy takes it over at that step, before its own next decision, and follows on
             StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU);
             StringWriter log = new();
@@ -673,7 +673,7 @@ namespace Tests
         [Fact]
         public void ADecisionWithoutASearchAddsNoSearchWork()
         {
-            // The same game twice; the second time the referee also lists a move Hexfarer's rules don't have next to every
+            // The same game twice; the second time the referee also lists a move Lanzenbrecher's rules don't have next to every
             // single legal move, so the agent answers those decisions with a forced move and no search: its search work
             // stays the same, the earlier search isn't counted again
             StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU);
@@ -699,9 +699,9 @@ namespace Tests
         }
 
         [Fact]
-        public void AGameHexfarersRulesEndedGoesOnWhenTheRefereeAsksForAMove()
+        public void AGameLanzenbrechersRulesEndedGoesOnWhenTheRefereeAsksForAMove()
         {
-            // The copy of a recorded game up to a decision, then ended by Hexfarer's rules (as when its Longest Road gives a
+            // The copy of a recorded game up to a decision, then ended by Lanzenbrecher's rules (as when its Longest Road gives a
             // player 10 points Catanatron doesn't): the referee's next decision revives it, and the agent searches on
             List<JsonNode> game = Replay.Read(Fixture).Where(m => m["game_id"]!.GetValue<string>() == "catanatron-100").ToList();
             JsonNode before = game[0].DeepClone();
@@ -724,7 +724,7 @@ namespace Tests
         [Fact]
         public void AFinishedGamesPromptIsntCompared()
         {
-            // Engines name the prompt of a finished game differently (JSettlers "over", Hexfarer the last one): after the
+            // Engines name the prompt of a finished game differently (JSettlers "over", Lanzenbrecher the last one): after the
             // game it doesn't count, while the game goes on it does
             List<JsonNode> game = Replay.Read(Fixture).Where(m => m["game_id"]!.GetValue<string>() == "catanatron-100").ToList();
             Replica replica = new(game[0]);
@@ -769,7 +769,7 @@ namespace Tests
         [Fact]
         public void TheAgentTakesOverAHandAndBankTheRefereeHoldsDifferently()
         {
-            // A referee that gave seat 2 an ore from the bank Hexfarer's rules wouldn't have (as Catanatron's bank shortage
+            // A referee that gave seat 2 an ore from the bank Lanzenbrecher's rules wouldn't have (as Catanatron's bank shortage
             // does with the rest of a short resource): the agent's copy takes both over and plays on
             StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU);
             StringWriter log = new();
@@ -854,7 +854,7 @@ namespace Tests
         }
 
         [Fact]
-        public void TheStateMeansWhatHexfarerHolds()
+        public void TheStateMeansWhatLanzenbrecherHolds()
         {
             // Names by meaning, written here rather than taken from the codec
             (string name, ResourceCardType type)[] resources = [("lumber", ResourceCardType.Lumber), ("brick", ResourceCardType.Brick), ("wool", ResourceCardType.Wool), ("grain", ResourceCardType.Grain), ("ore", ResourceCardType.Ore)];
@@ -881,7 +881,7 @@ namespace Tests
                     Assert.Equal(5, Placed("settlements") + Placed("cities") + Int(player["pieces_left"]!["settlements"]) - (4 - Int(player["pieces_left"]!["cities"])));
                     Assert.Equal(4, Placed("cities") + Int(player["pieces_left"]!["cities"]));
                 }
-                // The prompt to roll is exactly when rolling is legal, except that Hexfarer lets a player with a Road
+                // The prompt to roll is exactly when rolling is legal, except that Lanzenbrecher lets a player with a Road
                 // Building card's roads unplaced roll and give them up (road_building: optional)
                 sbyte acting = TestUtil.ActingPlayer(state);
                 string prompt = view["prompt"]!.GetValue<string>();

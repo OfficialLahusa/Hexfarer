@@ -550,7 +550,7 @@ namespace Tests
             Assert.Matches(@"[+-]?\d+ Elo \[[+-]?\d+, [+-]?\d+\]", text.TrimEnd().Split('\n')[^1]);
         }
 
-        // Hexfarer's own Open Seat Agent, built next to the tests, as an external command
+        // Lanzenbrecher's own Open Seat Agent, built next to the tests, as an external command
         private static string OpenSeatAgentCommand => $"dotnet \"{Path.Combine(AppContext.BaseDirectory, "OpenSeat.dll")}\" agent --net \"{PlainModelPath}\" --iterations 16 --leaves-per-batch 16 --provider cpu";
 
         [Fact]
@@ -569,14 +569,14 @@ namespace Tests
         [Fact]
         public void OnlyTheSidesWithANetGetNetsAndSetTheGamesAtOnce()
         {
-            AgentSpec hexfarer = AgentSpec.Parse($"H={PlainModelPath}"), external = AgentSpec.Parse("E=command:python x.py");
-            (SideNets challenger, SideNets baseline) = AgentSpec.Nets(hexfarer, external, InferenceProvider.CPU, 800, 4);
+            AgentSpec lanzenbrecher = AgentSpec.Parse($"H={PlainModelPath}"), external = AgentSpec.Parse("E=command:python x.py");
+            (SideNets challenger, SideNets baseline) = AgentSpec.Nets(lanzenbrecher, external, InferenceProvider.CPU, 800, 4);
             Assert.NotNull(challenger.Net);
             Assert.Null(baseline.Net);
             Assert.Null(baseline.Leaves);
             MergedLeaves.Close(challenger, baseline);
             // One net file: the games at once follow its batches alone
-            DuelSettings settings = new() { Challenger = hexfarer, Baseline = external, Iterations = 800 };
+            DuelSettings settings = new() { Challenger = lanzenbrecher, Baseline = external, Iterations = 800 };
             Assert.Equal(AgentSpec.GamesFor(16, files: 1), settings.GamesAtOnce);
             settings = new() { Challenger = external, Baseline = AgentSpec.Parse($"H={PlainModelPath}=b64"), Iterations = 800 };
             Assert.Equal(AgentSpec.GamesFor(64, files: 1), settings.GamesAtOnce);
@@ -635,7 +635,7 @@ namespace Tests
             string text = log.ToString();
             Assert.Contains("B Open Seat Agent: dotnet", text);
             // What the agent asked for is named once, so every game is labeled with what its seats received
-            Assert.Contains("Open Seat Agent B: hexfarer-mcts-open-16it-b16, needs truth", text);
+            Assert.Contains("Open Seat Agent B: lanzenbrecher-mcts-open-16it-b16, needs truth", text);
             Assert.DoesNotContain("failed", text);
             // Without trades between players nobody offers any
             Assert.Contains("no trades between players", text);
@@ -658,7 +658,7 @@ namespace Tests
         [Theory]
         [InlineData("truth")]
         [InlineData("world")]
-        public void CatanatronsBotsPlayUnderHexfarersReferee(string needs)
+        public void CatanatronsBotsPlayUnderLanzenbrechersReferee(string needs)
         {
             // Catanatron's adapter with its own environment (Bridges/catanatron/.venv); without it there is nothing to test
             string bridge = Path.Combine(TestUtil.SourceFixtureDirectory(), "..", "..", "Bridges", "catanatron");
@@ -699,7 +699,7 @@ namespace Tests
             var log = new StringWriter();
             PairStatistics result = new MirrorDuel(settings, log).Run();
             string text = log.ToString();
-            Assert.Contains("Open Seat Agent B: hexfarer-ismcts-fair-16it-b16, needs truth", text);
+            Assert.Contains("Open Seat Agent B: lanzenbrecher-ismcts-fair-16it-b16, needs truth", text);
             Assert.DoesNotContain("failed", text);
             Assert.Equal(1, result.Pairs);
             // Every game's agents were closed after it

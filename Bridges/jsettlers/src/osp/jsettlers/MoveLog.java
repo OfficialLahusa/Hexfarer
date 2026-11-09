@@ -47,7 +47,7 @@ import soc.server.genericServer.Connection;
  * The log's monitor is the lock for reading the game: a robot's brain that reads under it (OSPServer.read) sees no move
  * half handled. With the system property osp.record set, each game is also written there as a referee log while it
  * runs (GAME.jsonl, or GAME-2.jsonl and so on if an earlier server run wrote that game's name: before, a decide and a step
- * per move, after with the result record), the input of Hexfarer's replay harness and relay. At its end each game writes
+ * per move, after with the result record), the input of Lanzenbrecher's replay harness and relay. At its end each game writes
  * its result record (see PROTOCOL.md) as one osp-result line to standard error: the players by seat, the winner, and per
  * seat the agent and its decisions, their time, resyncs, fallbacks and failures (filled in by the seat's brain), its
  * moves, those with a choice (only for a recorded game: the legal moves are listed only for its decide lines, to spare

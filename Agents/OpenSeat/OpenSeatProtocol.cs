@@ -60,7 +60,7 @@ namespace Agents.OpenSeat
     public sealed record OpenSeatBudget(int DecideMs, int? GameMs = null, int? Threads = null, bool Gpu = true)
     {
         /// <summary>
-        /// Hexfarer's referee when whoever starts the game sets none: 5 minutes per decision, any threads, a GPU allowed
+        /// Lanzenbrecher's referee when whoever starts the game sets none: 5 minutes per decision, any threads, a GPU allowed
         /// </summary>
         public static readonly OpenSeatBudget Default = new(300_000);
 

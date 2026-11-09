@@ -8,7 +8,7 @@ namespace OpenSeat
     /// <summary>
     /// An outside referee's games shown while they are played (OpenSeat relay --live): follows a referee log as the referee
     /// writes it (a file, or a directory with a file per game, as JSettlers' server writes them with -Dosp.record, where it
-    /// follows the newest game), plays each game through Hexfarer's rules (Relay) and into a match hosted for watchers
+    /// follows the newest game), plays each game through Lanzenbrecher's rules (Relay) and into a match hosted for watchers
     /// (SimulationServer, which the client joins with the Watch role). A game or a part from the referee's state comes in
     /// as a loaded position, each move with the referee's outcome (RelayMove) and each known rule difference as an edit, so
     /// watchers can step back through the part.

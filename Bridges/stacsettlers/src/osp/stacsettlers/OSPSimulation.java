@@ -28,8 +28,8 @@ import soc.server.logger.SOCLogger;
  * Usage: java -cp build:STACSETTLERS_JAR -Dosp.agent="COMMAND" [-Dosp.log=DIR] [-Dosp.debug=true]
  *        osp.stacsettlers.OSPSimulation CONFIG
  * e.g. a config for 10 games of one Open Seat Agent against three Stac agents:
- *        Games=10 / Log=false / ChatNegotiation=true / ForceEndTurns=false / ~ / Hexfarer_vs_Stac / Trades=true /
- *        Agent=1,Hexfarer,osp / Agent=3,Stac,stac,TRY_N_BEST_BUILD_PLANS:0|FAVOUR_DEV_CARDS:-5 (one per line)
+ *        Games=10 / Log=false / ChatNegotiation=true / ForceEndTurns=false / ~ / Lanzenbrecher_vs_Stac / Trades=true /
+ *        Agent=1,Lanzenbrecher,osp / Agent=3,Stac,stac,TRY_N_BEST_BUILD_PLANS:0|FAVOUR_DEV_CARDS:-5 (one per line)
  */
 public final class OSPSimulation
 {
