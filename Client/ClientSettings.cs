@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Common;
 using Simulation;
 
 namespace Client
@@ -25,8 +24,7 @@ namespace Client
         // Outside agents the local games can seat, e.g. { "Name": "Catanatron AB:2 (fair)", "Command": "python open_seat_agent.py --bot AB:2 --needs world" }
         public List<ExternalAgent> OpenSeatAgents { get; set; } = [];
 
-        // Under the project's current name; settings kept under a former name are taken over
-        private static string FilePath => ProjectName.AppDataFile("settings.json");
+        private static string FilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Lanzenbrecher", "settings.json");
 
         private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
 

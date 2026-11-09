@@ -62,10 +62,9 @@ namespace Client
             if (scene != null) gameScreen.RunScene(scene, seed);
             if (Option("--host") is string host) gameScreen.HostFromCommandLine(host);
             if (Option("--join") is string join)
-                // The token may also come from LANZENBRECHER_TOKEN (or the former HEXFARER_TOKEN or CATANSIM_TOKEN), which keeps it
-                // out of process lists and shell history
+                // The token may also come from LANZENBRECHER_TOKEN, which keeps it out of process lists and shell history
                 gameScreen.JoinFromCommandLine(join, Option("--name"), Option("--role"), Option("--seat") is string seatText ? int.Parse(seatText) : null,
-                    Option("--token") ?? ProjectName.Variable("TOKEN"),
+                    Option("--token") ?? Environment.GetEnvironmentVariable("LANZENBRECHER_TOKEN"),
                     Option("--fingerprint"));
             if (args.Contains("--network")) gameScreen.ShowNetworkWindow();
             if (args.Contains("--menu")) gameScreen.ShowMenuPage(Option("--menu"));

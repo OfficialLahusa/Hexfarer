@@ -202,8 +202,8 @@ namespace Tests
             string[] shapes = Boards().Select(board => ToJson(ShapeOf(board))).Distinct().ToArray();
             Assert.Single(shapes);
 
-            // LANZENBRECHER_UPDATE_FIXTURES=1 (or the former HEXFARER_UPDATE_FIXTURES) writes the reference after an intended change
-            if (ProjectName.Variable("UPDATE_FIXTURES") == "1")
+            // LANZENBRECHER_UPDATE_FIXTURES=1 writes the reference after an intended change
+            if (Environment.GetEnvironmentVariable("LANZENBRECHER_UPDATE_FIXTURES") == "1")
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(ReferencePath)!);
                 File.WriteAllText(ReferencePath, shapes[0]);

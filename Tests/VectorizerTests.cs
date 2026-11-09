@@ -158,7 +158,7 @@ namespace Tests
         [SkippableFact]
         public void RegenerateParityFixtures()
         {
-            Skip.IfNot(ProjectName.Variable("UPDATE_FIXTURES") == "1", $"Set {UpdateFixturesVariable}=1 to regenerate the vectorizer fixtures.");
+            Skip.IfNot(Environment.GetEnvironmentVariable(UpdateFixturesVariable) == "1", $"Set {UpdateFixturesVariable}=1 to regenerate the vectorizer fixtures.");
 
             string directory = Path.Combine(TestUtil.SourceFixtureDirectory(), "Vectorizer");
             Directory.CreateDirectory(directory);

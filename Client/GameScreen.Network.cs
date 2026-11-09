@@ -35,9 +35,7 @@ namespace Client
         private Hello? _lastHello;
         private string? _lastFingerprint;
 
-        // Under the project's current name; a certificate kept under a former name moves over, so guests keep the
-        // fingerprint they know
-        private static string HostCertificatePath => ProjectName.AppDataFile("host.pfx");
+        private static string HostCertificatePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Lanzenbrecher", "host.pfx");
         private Uri? _lastUri;
         private string _joinAddress = "localhost:17017";
         private string _joinName = Environment.UserName;
