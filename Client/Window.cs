@@ -1,4 +1,5 @@
-﻿using SFML.Graphics;
+﻿using Common;
+using SFML.Graphics;
 using SFML.System;
 using SFML.Window;
 using System.Globalization;
@@ -61,10 +62,10 @@ namespace Client
             if (scene != null) gameScreen.RunScene(scene, seed);
             if (Option("--host") is string host) gameScreen.HostFromCommandLine(host);
             if (Option("--join") is string join)
-                // The token may also come from HEXFARER_TOKEN (or the older CATANSIM_TOKEN), which keeps it out of process lists and
-                // shell history
+                // The token may also come from LANZENBRECHER_TOKEN (or the former HEXFARER_TOKEN or CATANSIM_TOKEN), which keeps it
+                // out of process lists and shell history
                 gameScreen.JoinFromCommandLine(join, Option("--name"), Option("--role"), Option("--seat") is string seatText ? int.Parse(seatText) : null,
-                    Option("--token") ?? Environment.GetEnvironmentVariable("HEXFARER_TOKEN") ?? Environment.GetEnvironmentVariable("CATANSIM_TOKEN"),
+                    Option("--token") ?? ProjectName.Variable("TOKEN"),
                     Option("--fingerprint"));
             if (args.Contains("--network")) gameScreen.ShowNetworkWindow();
             if (args.Contains("--menu")) gameScreen.ShowMenuPage(Option("--menu"));

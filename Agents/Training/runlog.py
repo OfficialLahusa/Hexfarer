@@ -37,17 +37,43 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 REGISTRY_FILE = "runs.jsonl"
 KINDS = ("train", "export", "precision", "selfplay-loop", "selfplay-gen", "collect", "convert", "reanalysis", "duel", "bench", "other")
 
-# Set for the processes a run starts: the run they belong to, and whether they were started directly by the wrapper
-ENV_ID, ENV_DIRECT, ENV_PARENT = "HEXFARER_RUN_ID", "HEXFARER_RUN_DIRECT", "HEXFARER_RUN_PARENT"
+# Set for the processes a run starts: the run they belong to, and whether they were started directly by the wrapper; and
+# the registry. Under the project's current name, and set and read under its former one too (Hexfarer), so tools of either
+# version find them
+ENV_ID, ENV_DIRECT, ENV_PARENT, ENV_RUNS = "LANZENBRECHER_RUN_ID", "LANZENBRECHER_RUN_DIRECT", "LANZENBRECHER_RUN_PARENT", "LANZENBRECHER_RUNS"
+CURRENT_PREFIX, FORMER_PREFIX = "LANZENBRECHER_", "HEXFARER_"
+# Home folders that hold the registry, current names first: the data folder, or the arena folder on a machine without one
+HOME_FOLDERS = ("Lanzenbrecher-data", "lanzenbrecher-arena", "Hexfarer-data", "hexfarer-arena")
+
+
+def former(name):
+    """A variable's name under the project's former name"""
+    return FORMER_PREFIX + name[len(CURRENT_PREFIX):]
+
+
+def getenv(name, environ=None):
+    """A variable under the current name, else under the former one"""
+    environ = os.environ if environ is None else environ
+    return environ.get(name) or environ.get(former(name))
+
+
+def setenv(environ, name, value):
+    """Sets a variable under both names (None removes both)"""
+    for key in (name, former(name)):
+        if value is None:
+            environ.pop(key, None)
+        else:
+            environ[key] = value
 
 
 def registry_root():
-    if os.environ.get("HEXFARER_RUNS"):
-        return os.environ["HEXFARER_RUNS"]
+    if getenv(ENV_RUNS):
+        return getenv(ENV_RUNS)
     home = os.path.expanduser("~")
-    if not os.path.isdir(os.path.join(home, "Hexfarer-data")) and os.path.isdir(os.path.join(home, "hexfarer-arena")):
-        return os.path.join(home, "hexfarer-arena", "runs")
-    return os.path.join(home, "Hexfarer-data", "runs")
+    for folder in HOME_FOLDERS:
+        if os.path.isdir(os.path.join(home, folder)):
+            return os.path.join(home, folder, "runs")
+    return os.path.join(home, HOME_FOLDERS[0], "runs")
 
 
 def now():
@@ -140,10 +166,10 @@ class Run:
             print(f"runlog: could not record the {event['event']} of run {self.id} in {self.root}: {error}", file=sys.stderr)
 
     def _enter_env(self):
-        # Processes started from here on belong to this run
-        self._env = {key: os.environ.get(key) for key in (ENV_PARENT, ENV_DIRECT)}
-        os.environ[ENV_PARENT] = self.id
-        os.environ[ENV_DIRECT] = "0"
+        # Processes started from here on belong to this run (under both names; what was set before comes back at the end)
+        self._env = {key: os.environ.get(key) for name in (ENV_PARENT, ENV_DIRECT) for key in (name, former(name))}
+        setenv(os.environ, ENV_PARENT, self.id)
+        setenv(os.environ, ENV_DIRECT, "0")
 
     def _restore_env(self):
         if self._env is None:
@@ -183,7 +209,7 @@ def start(kind, name=None, argv=None, inputs=None, outputs=None, note=None, pare
     repo = repo_state()
     event = {"event": "start", "id": run.id, "time": now(), "kind": kind, "name": name, "machine": socket.gethostname(),
              "argv": argv, "command": shlex.join(argv), "cwd": os.getcwd(), "repo": repo,
-             "parent": parent if parent is not None else os.environ.get(ENV_PARENT) or None,
+             "parent": parent if parent is not None else getenv(ENV_PARENT) or None,
              "inputs": inputs or {}, "outputs": outputs or {}, "note": note, **fields}
     if binary:
         event["binary"] = {"path": os.path.abspath(binary), "commit": binary_commit(binary)}
@@ -198,8 +224,8 @@ def begin(kind, name=None, inputs=None, outputs=None, note=None, **fields):
     """For a Python tool's own entry: a new run (a child of the run that started this process, if any), or, when the wrapper
     started this process directly, the wrapper's run (results go there, it ends there). Processes started inside it
     belong to it."""
-    if os.environ.get(ENV_DIRECT) == "1" and os.environ.get(ENV_ID):
-        run = Run(os.environ[ENV_ID], registry_root(), attached=True)
+    if getenv(ENV_DIRECT) == "1" and getenv(ENV_ID):
+        run = Run(getenv(ENV_ID), registry_root(), attached=True)
         run.result(kind_detail=kind, name=name, inputs=inputs or {}, outputs=outputs or {}, **fields)
     else:
         run = start(kind, name=name, inputs=inputs, outputs=outputs, note=note, **fields)
@@ -216,8 +242,9 @@ def wrap(kind, command, name=None, note=None, inputs=None, outputs=None, root=No
     executable = command[0]
     binary = executable if os.path.isfile(executable) and not os.path.basename(executable).lower().startswith("python") else None
     run = start(kind, name=name, argv=command, inputs=inputs, outputs=outputs, note=note, root=root, binary=binary)
-    env = dict(os.environ, **{ENV_ID: run.id, ENV_DIRECT: "1", "HEXFARER_RUNS": run.root})
-    env.pop(ENV_PARENT, None)
+    env = dict(os.environ)
+    for name, value in ((ENV_ID, run.id), (ENV_DIRECT, "1"), (ENV_RUNS, run.root), (ENV_PARENT, None)):
+        setenv(env, name, value)
     tail = b""
     with open(os.path.join(run.directory, "console.log"), "wb") as log:
         try:

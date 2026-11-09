@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(REPO, "Agents", "Training"))
@@ -25,10 +26,12 @@ class RunlogTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = os.path.join(self.directory.name, "runs")
-        self.saved = {key: os.environ.get(key) for key in ("HEXFARER_RUNS", runlog.ENV_ID, runlog.ENV_DIRECT, runlog.ENV_PARENT)}
-        os.environ["HEXFARER_RUNS"] = self.root
-        for key in (runlog.ENV_ID, runlog.ENV_DIRECT, runlog.ENV_PARENT):
+        # The run variables under the project's current name and its former one (Hexfarer)
+        names = [f"{prefix}_{key}" for prefix in ("LANZENBRECHER", "HEXFARER") for key in ("RUNS", "RUN_ID", "RUN_DIRECT", "RUN_PARENT")]
+        self.saved = {key: os.environ.get(key) for key in names}
+        for key in names:
             os.environ.pop(key, None)
+        os.environ["LANZENBRECHER_RUNS"] = self.root
 
     def tearDown(self):
         for key, value in self.saved.items():
@@ -63,6 +66,43 @@ class RunlogTest(unittest.TestCase):
         with open(os.path.join(self.root, ok["id"], "console.log"), encoding="utf-8") as file:
             self.assertEqual(file.read().split(), ["first", "the", "last", "line"])
         self.assertIsNone(ok["parent"])
+
+    def test_the_registry_is_found_under_the_current_name_first_then_the_former(self):
+        # The variable: the current name's first, else the former one's
+        os.environ["HEXFARER_RUNS"] = "former"
+        self.assertEqual(runlog.registry_root(), self.root)
+        del os.environ["LANZENBRECHER_RUNS"]
+        self.assertEqual(runlog.registry_root(), "former")
+        del os.environ["HEXFARER_RUNS"]
+        # Without one, the home folder decides: a data folder before an arena folder, the current name's before the former's
+        home = os.path.join(self.directory.name, "home")
+        os.makedirs(home)
+        with mock.patch("os.path.expanduser", lambda path: path.replace("~", home, 1)):
+            self.assertEqual(runlog.registry_root(), os.path.join(home, "Lanzenbrecher-data", "runs"))
+            for folder in ("hexfarer-arena", "Hexfarer-data", "lanzenbrecher-arena", "Lanzenbrecher-data"):
+                os.makedirs(os.path.join(home, folder))
+                self.assertEqual(runlog.registry_root(), os.path.join(home, folder, "runs"), folder)
+
+    def test_a_run_reaches_its_tools_under_both_names_and_a_former_wrappers_run_is_found(self):
+        # The wrapper hands its run to the command under the current and the former name, so tools of either version find it
+        probe = ("import os; e = os.environ; print(e.get('LANZENBRECHER_RUN_ID') == e.get('HEXFARER_RUN_ID'), e.get('HEXFARER_RUN_DIRECT'), "
+                 "e.get('LANZENBRECHER_RUN_DIRECT'), e.get('HEXFARER_RUNS') == e.get('LANZENBRECHER_RUNS') != None, e.get('HEXFARER_RUN_ID'))")
+        self.assertEqual(runlog.wrap("other", self.python(probe), name="probe", quiet=True), 0)
+        probe_run = runlog.load()[0]
+        self.assertEqual(probe_run["end"]["last_line"], f"True 1 1 True {probe_run['id']}")
+        # A tool started by a wrapper that set only the former names adds to that run, and its children hang below it
+        os.environ["HEXFARER_RUN_ID"], os.environ["HEXFARER_RUN_DIRECT"] = probe_run["id"], "1"
+        with runlog.begin("train", name="attached") as run:
+            self.assertEqual(run.id, probe_run["id"])
+            # Its children find their parent under both names too
+            self.assertEqual((os.environ["LANZENBRECHER_RUN_PARENT"], os.environ["HEXFARER_RUN_PARENT"]), (run.id, run.id))
+            with runlog.begin("export", name="child"):
+                pass
+        self.assertNotIn("HEXFARER_RUN_PARENT", os.environ)
+        self.assertNotIn("LANZENBRECHER_RUN_PARENT", os.environ)
+        runs = {r["name"]: r for r in runlog.load()}
+        self.assertEqual(sorted(runs), ["child", "probe"])
+        self.assertEqual(runs["child"]["parent"], probe_run["id"])
 
     def test_a_tool_started_by_the_wrapper_adds_to_its_run_and_its_children_hang_below(self):
         child = ("import runlog, subprocess; run = runlog.begin('train', name='inner'); run.result(best=0.5); "

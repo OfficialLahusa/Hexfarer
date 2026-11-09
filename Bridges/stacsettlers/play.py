@@ -55,13 +55,14 @@ def failed(seat):
     return bool(seat["failures"]) or seat["fallbacks"] > 0
 
 
-def summary(output, our_name="Hexfarer"):
-    """The games' result lines and what they say about the Open Seat Agent's seat: games counts every game, failed_games
-    those where the seat failed, counted_games the rest; wins, win_rate and mean_vp are of the counted games only"""
+def summary(output, our_names=("Lanzenbrecher", "Hexfarer")):
+    """The games' result lines and what they say about the Open Seat Agent's seat (found by its agent, or by its player's
+    name, the project's current one or the one older records have): games counts every game, failed_games those where the
+    seat failed, counted_games the rest; wins, win_rate and mean_vp are of the counted games only"""
     lines = [json.loads(line[line.index("{"):]) for line in output.splitlines() if '"osp-result"' in line]
     games = []
     for line in lines:
-        seat = next(s for s in line["result"]["seats"] if s["agent"] is not None or line["players"][s["seat"]] == our_name)
+        seat = next(s for s in line["result"]["seats"] if s["agent"] is not None or line["players"][s["seat"]] in our_names)
         games.append({"game": line["game_id"], "seat": seat["seat"], "winner": line["winner"], "won": line["winner"] == seat["seat"],
                       "failed": failed(seat), "vp": line["vp"], "turns": line["result"]["turns"], "decisions": seat["decisions"],
                       "time_ms": seat["time_ms"], "max_ms": seat["max_ms"], "robot_decisions": seat["robot_decisions"], "fallbacks": seat["fallbacks"],

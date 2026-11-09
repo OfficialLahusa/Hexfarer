@@ -58,6 +58,15 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(7.5, result["mean_vp"])
         self.assertEqual(1, len(result["failures"]))
 
+    def test_a_seat_without_an_agent_is_found_by_its_players_name_under_either_project_name(self):
+        # Records from before the rename name our player Hexfarer, later ones Lanzenbrecher
+        for name in ("Lanzenbrecher", "Hexfarer"):
+            line = json.loads(result_line("g0", 2, 2))
+            line["result"]["seats"][2]["agent"] = None
+            line["players"][2] = name
+            result = play.summary(json.dumps(line))
+            self.assertEqual([(2, True)], [(g["seat"], g["won"]) for g in result["per_game"]], name)
+
     def test_it_sums_the_seats_trades_in_chat(self):
         # Records of a robot trading in chat carry its offers, answered offers and trades; older ones don't (zero)
         first, second = json.loads(result_line("g0", 0, 0)), json.loads(result_line("g1", 1, 1))

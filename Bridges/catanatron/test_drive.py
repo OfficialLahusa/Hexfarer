@@ -77,6 +77,13 @@ class ResumeTests(unittest.TestCase):
 
 
 class AnalyzeTests(unittest.TestCase):
+    def test_our_agent_counts_under_the_projects_current_and_former_name(self):
+        # Runs from before the rename name the agent hexfarer-..., later ones lanzenbrecher-...
+        self.assertTrue(analyze.ours("lanzenbrecher-ismcts-fair-5000it"))
+        self.assertTrue(analyze.ours("hexfarer-mcts"))
+        self.assertFalse(analyze.ours("AB:2"))
+        self.assertFalse(analyze.ours("CHALLENGER"))
+
     def test_a_failed_game_leaves_its_map_out_of_the_win_rate_and_is_counted(self):
         with tempfile.TemporaryDirectory() as directory:
             def game(seed, rotation, winner, failures=()):

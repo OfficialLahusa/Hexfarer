@@ -12,7 +12,7 @@ namespace Tests
     /// </summary>
     public class VectorizerTests
     {
-        private const string UpdateFixturesVariable = "HEXFARER_UPDATE_FIXTURES";
+        private const string UpdateFixturesVariable = "LANZENBRECHER_UPDATE_FIXTURES";
         private static readonly StateVectorizer Vectorizer = new();
 
         [Fact]
@@ -158,7 +158,7 @@ namespace Tests
         [SkippableFact]
         public void RegenerateParityFixtures()
         {
-            Skip.IfNot(Environment.GetEnvironmentVariable(UpdateFixturesVariable) == "1", $"Set {UpdateFixturesVariable}=1 to regenerate the vectorizer fixtures.");
+            Skip.IfNot(ProjectName.Variable("UPDATE_FIXTURES") == "1", $"Set {UpdateFixturesVariable}=1 to regenerate the vectorizer fixtures.");
 
             string directory = Path.Combine(TestUtil.SourceFixtureDirectory(), "Vectorizer");
             Directory.CreateDirectory(directory);

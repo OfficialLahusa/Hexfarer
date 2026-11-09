@@ -30,7 +30,8 @@ def load(run_dir):
 
 
 def ours(code):
-    return code.startswith("hexfarer")
+    """Whether a seat's code is our agent's, under the project's current name or the one older runs have (hexfarer-...)"""
+    return code.startswith(("lanzenbrecher", "hexfarer"))
 
 
 def failed(game):

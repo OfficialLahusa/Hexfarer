@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
+using Common;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -11,8 +12,8 @@ namespace Agents.Inference
 {
     /// <summary>
     /// Where the value net runs. Auto takes the GPU if it is available, through DirectML on Windows and CUDA on Linux, and
-    /// the CPU otherwise; the environment variable HEXFARER_INFERENCE (cpu, dml or cuda; the older CATANSIM_INFERENCE works
-    /// too) overrides it.
+    /// the CPU otherwise; the environment variable LANZENBRECHER_INFERENCE (cpu, dml or cuda; the former HEXFARER_INFERENCE and
+    /// CATANSIM_INFERENCE work too) overrides it.
     /// </summary>
     public enum InferenceProvider { Auto, CPU, DirectML, CUDA }
 
@@ -134,8 +135,7 @@ namespace Agents.Inference
         /// <summary>
         /// The provider forced by the environment, under the project's current or former name
         /// </summary>
-        private static string? InferenceSetting =>
-            Environment.GetEnvironmentVariable("HEXFARER_INFERENCE") ?? Environment.GetEnvironmentVariable("CATANSIM_INFERENCE");
+        private static string? InferenceSetting => ProjectName.Variable("INFERENCE");
 
         private static InferenceProvider ResolveProvider(InferenceProvider provider)
         {
