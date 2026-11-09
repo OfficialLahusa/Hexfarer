@@ -106,6 +106,50 @@ class RunGamesTests(unittest.TestCase):
         self.assertTrue(all(allowance < 0 for _, _, allowance in asked), asked)
         self.assertIsNone(stopped)
 
+    def test_a_negative_limit_ends_a_run_whose_games_all_failed(self):
+        asked = []
+
+        def simulation(round_number, games, allowance):
+            asked.append((round_number, games, allowance))
+            # A setup that fails every game; without the rule the run would play them again forever
+            if round_number > 10:
+                raise AssertionError("the run replays forever")
+            return output_of(*[(True, True)] * games)
+
+        outputs, stopped = play.run_games(simulation, games=3, max_failed=-1)
+        self.assertEqual([(1, 3, -1)], asked)
+        self.assertIn("every game of simulation 1 failed", stopped)
+        self.assertIn("3 of 3 games failed", stopped)
+
+    def test_a_negative_limit_ends_a_run_once_a_replay_failed_every_game(self):
+        asked = []
+
+        def simulation(round_number, games, allowance):
+            asked.append((round_number, games, allowance))
+            if round_number > 10:
+                raise AssertionError("the run replays forever")
+            # The first simulation counts two games, every replay fails
+            return output_of((True, False), (True, True), (False, True), (False, False)) if round_number == 1 else output_of(*[(True, True)] * games)
+
+        outputs, stopped = play.run_games(simulation, games=4, max_failed=-1)
+        self.assertEqual([(1, 4, -1), (2, 2, -3)], asked)
+        self.assertIn("every game of simulation 2 failed", stopped)
+        self.assertIn("4 of 6 games failed", stopped)
+        # The games that count stay counted
+        self.assertEqual(2, play.summary("\n".join(outputs))["counted_games"])
+
+    def test_a_limit_still_replays_after_a_simulation_whose_games_all_failed(self):
+        asked = []
+
+        def simulation(round_number, games, allowance):
+            asked.append((round_number, games, allowance))
+            # One failed game, its replay fails too, the next replay counts: within a limit of 3 the run goes on
+            return {1: output_of((True, False), (True, True)), 2: output_of((False, True))}.get(round_number, output_of((False, False)))
+
+        outputs, stopped = play.run_games(simulation, games=2, max_failed=3)
+        self.assertEqual([(1, 2, 3), (2, 1, 2), (3, 1, 1)], asked)
+        self.assertIsNone(stopped)
+
     def test_a_run_stops_once_more_games_failed_than_allowed(self):
         asked = []
 
@@ -129,6 +173,11 @@ class RunGamesTests(unittest.TestCase):
         outputs, stopped = play.run_games(simulation, games=3, max_failed=3)
         self.assertEqual([1], calls)
         self.assertIn("no game", stopped)
+        # With a negative limit too, and the reason stays that no game finished
+        calls.clear()
+        outputs, stopped = play.run_games(simulation, games=3, max_failed=-1)
+        self.assertEqual([1], calls)
+        self.assertIn("finished no game", stopped)
 
     def test_the_default_allows_three_failed_games_or_one_in_a_hundred(self):
         self.assertEqual((3, 3, 4), (play.default_max_failed(40), play.default_max_failed(300), play.default_max_failed(400)))

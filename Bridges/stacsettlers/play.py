@@ -4,8 +4,9 @@ summary: the agent's wins, its decisions and their time, fallbacks, failures, st
 declined and turns the server ended. A game whose seat failed (a failure, or moves the referee made for the seat) says
 nothing about strength: it stays out of the wins and the win rate, is counted beside them (failed_games), and is played
 again in a further simulation until N games count. A run stops once more games failed than --max-failed allows (default
-3, or one in a hundred of N; the simulation stops itself there too, osp.max_failed_games), or when a simulation finished
-no game or timed out; the summary then says why (stopped) and the exit code is 1.
+3, or one in a hundred of N; the simulation stops itself there too, osp.max_failed_games), when a simulation finished
+no game or timed out, and with a negative --max-failed (any number) when every game of a simulation failed; the summary
+then says why (stopped) and the exit code is 1.
 
 Usage: python play.py --agent "COMMAND" --opponents stac|ss|pomcp|jsettlers|random|LINE --games N --out DIR
                       [--name NAME] [--fully-observable] [--no-chat] [--no-trades] [--max-failed K] [--build]
@@ -91,9 +92,9 @@ def summary(output, our_name="Hexfarer"):
 def run_games(simulate, games, max_failed):
     """Plays until that many games count: the first simulation plays them all, each further one the games that failed so
     far. simulate(round_number, games, allowance) runs one simulation of that many games, which stops itself past
-    allowance more failed games, and returns its output. Stops once more games failed than max_failed allows, or when a
-    simulation finished no game or timed out. Returns the simulations' outputs and why the run stopped (None if enough
-    games count)"""
+    allowance more failed games, and returns its output. Stops once more games failed than max_failed allows, when a
+    simulation finished no game or timed out, and with a negative max_failed (any number) when every game of a simulation
+    failed. Returns the simulations' outputs and why the run stopped (None if enough games count)"""
     outputs = []
     while True:
         before = summary("\n".join(outputs))
@@ -109,6 +110,11 @@ def run_games(simulate, games, max_failed):
         timed_out = stacsettlers.TIMED_OUT.split("{")[0] in output
         if after["games"] == before["games"]:
             return outputs, "stopped: the simulation finished no game" + (" (it timed out)" if timed_out else "")
+        # A negative limit has no count to stop at, so a setup that fails every game would be played again forever: a
+        # simulation whose games all failed ends the run (a limit ends it by its count)
+        if max_failed < 0 and after["failed_games"] - before["failed_games"] == after["games"] - before["games"]:
+            return outputs, (f"stopped: every game of simulation {len(outputs)} failed ({after['failed_games']} of {after['games']} games failed, "
+                             "any allowed, --max-failed)")
         if timed_out:
             return outputs, f"stopped: simulation {len(outputs)} timed out"
 
@@ -123,7 +129,8 @@ def main():
     parser.add_argument("--fully-observable", action="store_true")
     parser.add_argument("--no-chat", action="store_true", help="ChatNegotiation=false (the Stac agents then hang)")
     parser.add_argument("--no-trades", action="store_true", help="Trades=false: no trades between players at all")
-    parser.add_argument("--max-failed", type=int, help="failed games the run allows before it stops (default: 3, or 1 in 100 games; negative: any)")
+    parser.add_argument("--max-failed", type=int, help="failed games the run allows before it stops (default: 3, or 1 in 100 games; negative: any, "
+                                                       "but a simulation whose games all failed ends the run)")
     parser.add_argument("--build", action="store_true", help="compile the adapter first")
     parser.add_argument("--timeout", type=int, default=24 * 3600, help="seconds per simulation")
     args = parser.parse_args()
