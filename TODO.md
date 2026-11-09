@@ -291,7 +291,7 @@
 			- army (TejasNC/catan-bot, Catanatron, 1v1, Code offen): 79-82 % gegen ValueFunction (je 1000), 88 % gegen AB:2 (60), ~160-280 ms CPU pro Partie
 			- HexMachina (LLM-Agent, Catanatron, 1v1): 54,1 % [51, 57] gegen AB:2 (1000)
 			- Monte Catano (Rust-MCTS): nennt sich stärkster Catan-Bot, ohne Benchmark
-			- Hexbandit (geschlossen): 99 % "gegen Top-Spieler", ohne Methode
+			- Hexbandit (geschlossen): behauptet 99 % "gegen Top-Spieler", bisher unbelegt
 			- Bots von Catan Universe und colonist.io: keine veröffentlichten Zahlen
 			- Paper-Agents ohne Code bei uns: Gendre/Kaneko, Xenou et al., Rubin et al. (UCT, 58,2 % 1v3 gegen JSettlers mit Handel), Deep Catan, settlers-rl
 			- Starke Menschen: noch keine Partien
@@ -326,7 +326,7 @@
 - Catanatron-Bots 1v1 (distill: ValueFunction mit Zugplaner, Räuberregeln und gelernter Eröffnung, MLP-Ensemble als Korrektur; 84 % gegen AB:2) => https://github.com/vaibhavsiingh/catan-bots
 - Catanatron-Bot 4 Spieler (Challenger: Heuristik, Handel mit der Bank, Suche nach sicheren Siegfolgen, gelernte Eröffnungsrangfolge; 2v2 76,8 % gegen AB:2) => https://github.com/midori11111111/catan-challenger-research
 - Catanatron-Bot 1v1 (army: Wertfunktion, kurze Vorausschau, gelernte Eröffnung, SPSA-Tuning im Self-Play; 79-82 % gegen ValueFunction) => https://github.com/TejasNC/catan-bot
-- Geschlossene Catan-KI ohne Methode (99 % "gegen Top-Spieler") => Hexbandit https://hexbandit-app.vercel.app/
+- Geschlossene Catan-KI (behauptet 99 % "gegen Top-Spieler", bisher unbelegt) => Hexbandit https://hexbandit-app.vercel.app/
 - Plattformen mit eigenen Bots ohne Stärkeangaben => Catan Universe https://catanuniverse.com/, colonist.io https://colonist.io/
 - JSettlers => https://nand.net/jsettlers/
 - UCT mit Domänenwissen und Handel gegen JSettlers (1v3, 10k Rollouts: 58,2 ± 7,1 % mit Handel, 41,3 ± 7,7 % ohne, Tab. 1) => Rubin, Paz, Meneguzzi: "Optimizing UCT for Settlers of Catan" (SBGames 2017) https://www.sbgames.org/sbgames2017/papers/ComputacaoFull/175405.pdf
