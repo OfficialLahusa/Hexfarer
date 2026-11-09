@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
@@ -13,6 +14,8 @@ namespace Common.Actions
     {
         // Public parameters of each action type that define its decision (history and serialization helpers excluded)
         private static readonly ConcurrentDictionary<Type, MemberInfo[]> _decisionMembers = new();
+        // Per action type, the comparison of those parameters, compiled once (IsSameDecision)
+        private static readonly ConcurrentDictionary<Type, Func<Action, Action, bool>> _decisionComparers = new();
 
         // Index of the player performing the action
         public sbyte PlayerIndex { get; init; }
@@ -50,15 +53,29 @@ namespace Common.Actions
         {
             if (other.GetType() != GetType()) return false;
 
-            foreach (MemberInfo member in _decisionMembers.GetOrAdd(GetType(), GetDecisionMembers))
+            return _decisionComparers.GetOrAdd(GetType(), DecisionComparer)(this, other);
+        }
+
+        /// <summary>
+        /// Compares the decision members of two actions of the type as Equals(object, object) does, without reflection or
+        /// boxing per call: a value type by its EqualityComparer, a reference type by object.Equals
+        /// </summary>
+        private static Func<Action, Action, bool> DecisionComparer(Type type)
+        {
+            ParameterExpression a = Expression.Parameter(typeof(Action), "a"), b = Expression.Parameter(typeof(Action), "b");
+            Expression typedA = Expression.Convert(a, type), typedB = Expression.Convert(b, type);
+            MethodInfo objectEquals = typeof(object).GetMethod(nameof(Equals), BindingFlags.Public | BindingFlags.Static, [typeof(object), typeof(object)])!;
+            Expression body = Expression.Constant(true);
+            foreach (MemberInfo member in _decisionMembers.GetOrAdd(type, GetDecisionMembers))
             {
-                object? ownValue = member is PropertyInfo property ? property.GetValue(this) : ((FieldInfo)member).GetValue(this);
-                object? otherValue = member is PropertyInfo otherProperty ? otherProperty.GetValue(other) : ((FieldInfo)member).GetValue(other);
-
-                if (!Equals(ownValue, otherValue)) return false;
+                Type memberType = member is PropertyInfo property ? property.PropertyType : ((FieldInfo)member).FieldType;
+                Expression own = Expression.MakeMemberAccess(typedA, member), theirs = Expression.MakeMemberAccess(typedB, member);
+                Expression equal = memberType.IsValueType
+                    ? Expression.Call(Expression.Property(null, typeof(EqualityComparer<>).MakeGenericType(memberType), "Default"), "Equals", null, own, theirs)
+                    : Expression.Call(objectEquals, own, theirs);
+                body = Expression.AndAlso(body, equal);
             }
-
-            return true;
+            return Expression.Lambda<Func<Action, Action, bool>>(body, a, b).Compile();
         }
 
         private static MemberInfo[] GetDecisionMembers(Type type)

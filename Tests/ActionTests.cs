@@ -169,6 +169,60 @@ namespace Tests
             Assert.True(rolled.IsSameDecision(new RollAction(roller)));
         }
 
+        // The comparison IsSameDecision made by reflection before it compiled one per type: the same members, boxed, by Equals
+        private static bool SameDecisionByReflection(Action action, Action other)
+        {
+            if (other.GetType() != action.GetType()) return false;
+            IEnumerable<MemberInfo> properties = action.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(property => property.Name != "History" && property.Name != nameof(Action.ActionType) && property.Name != nameof(Action.ForfeitedFreeRoads)
+                    && property.GetIndexParameters().Length == 0);
+            foreach (MemberInfo member in properties.Concat(action.GetType().GetFields(BindingFlags.Public | BindingFlags.Instance)))
+            {
+                object? own = member is PropertyInfo property ? property.GetValue(action) : ((FieldInfo)member).GetValue(action);
+                object? theirs = member is PropertyInfo otherProperty ? otherProperty.GetValue(other) : ((FieldInfo)member).GetValue(other);
+                if (!Equals(own, theirs)) return false;
+            }
+            return true;
+        }
+
+        [Fact]
+        public void IsSameDecisionComparesAsTheReflectionDidOnTheMovesOfRandomGames()
+        {
+            // Every pair of a state's legal moves, each against its clone and against the moves of the state before (same types,
+            // other parameters, another player): the compiled comparison gives what comparing the members by reflection gave
+            TestUtil.Seed(12);
+            Random sample = new Random(12);
+            HashSet<Type> types = [];
+            int pairs = 0, same = 0;
+            for (int game = 0; game < 12; game++)
+            {
+                List<Action>? previous = null;
+                TestUtil.PlayRandomGame(TestUtil.NewGame(), beforeApply: (state, _) =>
+                {
+                    if (sample.NextDouble() > 0.3) return;
+                    List<Action> actions = TestUtil.AllProvidedActions(state, TestUtil.ActingPlayer(state));
+                    IEnumerable<Action> others = previous == null ? actions : actions.Concat(previous);
+                    foreach (Action action in actions)
+                    {
+                        types.Add(action.GetType());
+                        Action clone = action.Clone();
+                        Assert.True(action.IsSameDecision(clone));
+                        foreach (Action other in others.Append(clone))
+                        {
+                            bool expected = SameDecisionByReflection(action, other);
+                            Assert.True(expected == action.IsSameDecision(other), $"{action} against {other}: by reflection {expected}");
+                            pairs++;
+                            same += expected ? 1 : 0;
+                        }
+                    }
+                    previous = actions;
+                });
+            }
+            Assert.True(pairs > 10000, $"{pairs} pairs");
+            Assert.True(same > 100 && same < pairs / 2, $"{same} of {pairs} the same decision");
+            Assert.True(types.Count >= 15, string.Join(", ", types.Select(type => type.Name)));
+        }
+
         [Fact]
         public void DistinctProvidedActionsAreNeverTheSameDecision()
         {
