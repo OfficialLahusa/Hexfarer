@@ -102,12 +102,21 @@ namespace Common.Actions
         public static List<Action> GetActionsForState(GameState state, sbyte playerIdx)
         {
             List<Action> actions = [];
+            AddActionsForState(state, playerIdx, actions);
+            return actions;
+        }
 
-            if(!IsTurnValid(state.Turn, playerIdx)) return actions;
+        /// <summary>
+        /// Adds the moves GetActionsForState lists to the given list, so the legal moves of all move types go into one list
+        /// (see MCTSTree.GetValidActions)
+        /// </summary>
+        public static void AddActionsForState(GameState state, sbyte playerIdx, List<Action> actions)
+        {
+            if(!IsTurnValid(state.Turn, playerIdx)) return;
 
             // Only a card that wasn't bought this turn can be played (the same check as in IsBoardValid, done once)
             PlayerState player = state.Players[playerIdx];
-            if (player.DevelopmentCards.Get(DevelopmentCardType.YearOfPlenty) <= player.NewDevelopmentCards.Get(DevelopmentCardType.YearOfPlenty)) return actions;
+            if (player.DevelopmentCards.Get(DevelopmentCardType.YearOfPlenty) <= player.NewDevelopmentCards.Get(DevelopmentCardType.YearOfPlenty)) return;
 
             foreach (ResourceCardType firstChoice in CardTypeExtensions.ResourceTypes)
             {
@@ -147,8 +156,6 @@ namespace Common.Actions
                     }
                 }
             }
-
-            return actions;
         }
 
         public override string ToString()

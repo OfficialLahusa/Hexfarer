@@ -207,17 +207,24 @@ namespace Common.Actions
 
         public static List<Action> GetActionsForState(GameState state, sbyte playerIdx)
         {
-            List<Action> actions = new List<Action>();
+            List<Action> actions = [];
+            AddActionsForState(state, playerIdx, actions);
+            return actions;
+        }
 
-            if (!IsTurnValid(state.Turn, playerIdx) || !state.Players[playerIdx].CanAffordSettlement()) return actions;
+        /// <summary>
+        /// Adds the moves GetActionsForState lists to the given list, so the legal moves of all move types go into one list
+        /// (see MCTSTree.GetValidActions)
+        /// </summary>
+        public static void AddActionsForState(GameState state, sbyte playerIdx, List<Action> actions)
+        {
+            if (!IsTurnValid(state.Turn, playerIdx) || !state.Players[playerIdx].CanAffordSettlement()) return;
 
             // Same result as IsBoardValid for every intersection, from the board's bitmasks
             foreach (int intersectionIdx in BitMask.Of(state.Board.GetSettlementSites(playerIdx)))
             {
                 actions.Add(new SettlementAction(playerIdx, intersectionIdx));
             }
-
-            return actions;
         }
 
         public static void UpdatePortPrivileges(GameState state, int intersectionIdx, int playerIdx)

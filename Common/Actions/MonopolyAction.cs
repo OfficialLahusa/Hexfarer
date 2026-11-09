@@ -122,18 +122,25 @@ namespace Common.Actions
         public static List<Action> GetActionsForState(GameState state, sbyte playerIdx)
         {
             List<Action> actions = [];
+            AddActionsForState(state, playerIdx, actions);
+            return actions;
+        }
 
-            if (!IsTurnValid(state.Turn, playerIdx)) return actions;
+        /// <summary>
+        /// Adds the moves GetActionsForState lists to the given list, so the legal moves of all move types go into one list
+        /// (see MCTSTree.GetValidActions)
+        /// </summary>
+        public static void AddActionsForState(GameState state, sbyte playerIdx, List<Action> actions)
+        {
+            if (!IsTurnValid(state.Turn, playerIdx)) return;
 
             // Validity doesn't depend on the chosen resource, so one check covers all of them (Unknown is never offered)
-            if (!new MonopolyAction(playerIdx, CardTypeExtensions.ResourceTypes[0]).IsBoardValid(state)) return actions;
+            if (!new MonopolyAction(playerIdx, CardTypeExtensions.ResourceTypes[0]).IsBoardValid(state)) return;
 
             foreach (ResourceCardType resourceType in CardTypeExtensions.ResourceTypes)
             {
                 actions.Add(new MonopolyAction(playerIdx, resourceType));
             }
-
-            return actions;
         }
 
         public override string ToString()

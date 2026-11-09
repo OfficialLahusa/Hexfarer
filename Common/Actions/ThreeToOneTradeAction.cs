@@ -92,10 +92,19 @@ namespace Common.Actions
         public static List<Action> GetActionsForState(GameState state, sbyte playerIdx)
         {
             List<Action> actions = [];
+            AddActionsForState(state, playerIdx, actions);
+            return actions;
+        }
 
-            if (!IsTurnValid(state.Turn, playerIdx)) return actions;
+        /// <summary>
+        /// Adds the moves GetActionsForState lists to the given list, so the legal moves of all move types go into one list
+        /// (see MCTSTree.GetValidActions)
+        /// </summary>
+        public static void AddActionsForState(GameState state, sbyte playerIdx, List<Action> actions)
+        {
+            if (!IsTurnValid(state.Turn, playerIdx)) return;
 
-            if (!state.Players[playerIdx].PortPrivileges.HasFlag(PortPrivileges.GenericThreeToOne)) return actions;
+            if (!state.Players[playerIdx].PortPrivileges.HasFlag(PortPrivileges.GenericThreeToOne)) return;
 
             // The trades IsBoardValid accepts, without creating the rejected ones
             CardSet<ResourceCardType> hand = state.Players[playerIdx].ResourceCards;
@@ -109,8 +118,6 @@ namespace Common.Actions
                         actions.Add(new ThreeToOneTradeAction(playerIdx, inputType, outputType));
                 }
             }
-
-            return actions;
         }
 
         public override string ToString()

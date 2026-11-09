@@ -10,38 +10,38 @@ namespace Common.Actions
     {
         public static List<Action> GetActionsForState(GameState state, sbyte playerIdx)
         {
-            List<Action> actions = [
-                .. EndTurnAction.GetActionsForState(state, playerIdx),
+            // One list for every move type, each adding its moves in this order
+            List<Action> actions = [];
+            EndTurnAction.AddActionsForState(state, playerIdx, actions);
 
-                .. RollAction.GetActionsForState(state, playerIdx),
-                .. DiscardAction.GetActionsForState(state, playerIdx),
-                .. RobberAction.GetActionsForState(state, playerIdx),
+            RollAction.AddActionsForState(state, playerIdx, actions);
+            DiscardAction.AddActionsForState(state, playerIdx, actions);
+            RobberAction.AddActionsForState(state, playerIdx, actions);
 
-                .. FirstInitialSettlementAction.GetActionsForState(state, playerIdx),
-                .. FirstInitialRoadAction.GetActionsForState(state, playerIdx),
-                .. SecondInitialSettlementAction.GetActionsForState(state, playerIdx),
-                .. SecondInitialRoadAction.GetActionsForState(state, playerIdx),
+            FirstInitialSettlementAction.AddActionsForState(state, playerIdx, actions);
+            FirstInitialRoadAction.AddActionsForState(state, playerIdx, actions);
+            SecondInitialSettlementAction.AddActionsForState(state, playerIdx, actions);
+            SecondInitialRoadAction.AddActionsForState(state, playerIdx, actions);
 
-                .. RoadAction.GetActionsForState(state, playerIdx),
-                .. SettlementAction.GetActionsForState(state, playerIdx),
-                .. CityAction.GetActionsForState(state, playerIdx),
-                .. BuyDevelopmentCardAction.GetActionsForState(state, playerIdx),
+            RoadAction.AddActionsForState(state, playerIdx, actions);
+            SettlementAction.AddActionsForState(state, playerIdx, actions);
+            CityAction.AddActionsForState(state, playerIdx, actions);
+            BuyDevelopmentCardAction.AddActionsForState(state, playerIdx, actions);
 
-                .. KnightAction.GetActionsForState(state, playerIdx),
-                .. MonopolyAction.GetActionsForState(state, playerIdx),
-                .. RoadBuildingAction.GetActionsForState(state, playerIdx),
-                .. YearOfPlentyAction.GetActionsForState(state, playerIdx),
+            KnightAction.AddActionsForState(state, playerIdx, actions);
+            MonopolyAction.AddActionsForState(state, playerIdx, actions);
+            RoadBuildingAction.AddActionsForState(state, playerIdx, actions);
+            YearOfPlentyAction.AddActionsForState(state, playerIdx, actions);
 
-                .. FourToOneTradeAction.GetActionsForState(state, playerIdx),
-                .. ThreeToOneTradeAction.GetActionsForState(state, playerIdx),
-                .. TwoToOneTradeAction.GetActionsForState(state, playerIdx),
+            FourToOneTradeAction.AddActionsForState(state, playerIdx, actions);
+            ThreeToOneTradeAction.AddActionsForState(state, playerIdx, actions);
+            TwoToOneTradeAction.AddActionsForState(state, playerIdx, actions);
 
-                // Answers to an open offer and the offerer's pick; offers and counteroffers themselves are any card
-                // combination and come from the client or an agent
-                .. RespondToTradeAction.GetActionsForState(state, playerIdx),
-                .. ConfirmTradeAction.GetActionsForState(state, playerIdx),
-                .. CancelTradeAction.GetActionsForState(state, playerIdx)
-            ];
+            // Answers to an open offer and the offerer's pick; offers and counteroffers themselves are any card
+            // combination and come from the client or an agent
+            actions.AddRange(RespondToTradeAction.GetActionsForState(state, playerIdx));
+            actions.AddRange(ConfirmTradeAction.GetActionsForState(state, playerIdx));
+            actions.AddRange(CancelTradeAction.GetActionsForState(state, playerIdx));
 
             return actions;
         }

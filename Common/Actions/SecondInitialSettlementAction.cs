@@ -140,20 +140,27 @@ namespace Common.Actions
 
         public static List<Action> GetActionsForState(GameState state, sbyte playerIdx)
         {
-            List<Action> actions = new List<Action>();
+            List<Action> actions = [];
+            AddActionsForState(state, playerIdx, actions);
+            return actions;
+        }
 
-            if (!IsTurnValid(state.Turn, playerIdx)) return actions;
+        /// <summary>
+        /// Adds the moves GetActionsForState lists to the given list, so the legal moves of all move types go into one list
+        /// (see MCTSTree.GetValidActions)
+        /// </summary>
+        public static void AddActionsForState(GameState state, sbyte playerIdx, List<Action> actions)
+        {
+            if (!IsTurnValid(state.Turn, playerIdx)) return;
 
             BuildingStock stock = state.Players[playerIdx].BuildingStock;
-            if (stock.RemainingSettlements != BuildingStock.MAX_SETTLEMENTS - 1 || stock.RemainingRoads != BuildingStock.MAX_ROADS - 1) return actions;
+            if (stock.RemainingSettlements != BuildingStock.MAX_SETTLEMENTS - 1 || stock.RemainingRoads != BuildingStock.MAX_ROADS - 1) return;
 
             // Same result as IsBoardValid for every intersection, from the board's bitmasks
             foreach (int intersectionIdx in BitMask.Of(state.Board.GetFreeBuildingSites()))
             {
                 actions.Add(new SecondInitialSettlementAction(playerIdx, intersectionIdx));
             }
-
-            return actions;
         }
 
         public override string ToString()

@@ -132,9 +132,19 @@ namespace Common.Actions
 
         public static List<Action> GetActionsForState(GameState state, sbyte playerIdx)
         {
-            EndTurnAction action = new EndTurnAction(playerIdx);
+            List<Action> actions = [];
+            AddActionsForState(state, playerIdx, actions);
+            return actions;
+        }
 
-            return action.IsValidFor(state) ? [action] : [];
+        /// <summary>
+        /// Adds the moves GetActionsForState lists to the given list, so the legal moves of all move types go into one list
+        /// (see MCTSTree.GetValidActions)
+        /// </summary>
+        public static void AddActionsForState(GameState state, sbyte playerIdx, List<Action> actions)
+        {
+            EndTurnAction action = new EndTurnAction(playerIdx);
+            if (action.IsValidFor(state)) actions.Add(action);
         }
     }
 }

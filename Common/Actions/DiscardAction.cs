@@ -86,14 +86,23 @@ namespace Common.Actions
         public static List<Action> GetActionsForState(GameState state, sbyte playerIdx)
         {
             List<Action> actions = [];
+            AddActionsForState(state, playerIdx, actions);
+            return actions;
+        }
 
-            if(!IsTurnValid(state.Turn, playerIdx)) return actions;
+        /// <summary>
+        /// Adds the moves GetActionsForState lists to the given list, so the legal moves of all move types go into one list
+        /// (see MCTSTree.GetValidActions)
+        /// </summary>
+        public static void AddActionsForState(GameState state, sbyte playerIdx, List<Action> actions)
+        {
+            if(!IsTurnValid(state.Turn, playerIdx)) return;
 
             CardSet<ResourceCardType> playerCards = state.Players[playerIdx].ResourceCards;
             int excessCards = (int)playerCards.Count() - state.Settings.RobberCardLimit;
 
             // Skip player, if no discard is needed
-            if (excessCards <= 0) return actions;
+            if (excessCards <= 0) return;
 
             int requiredDiscards = (int)(playerCards.Count() / 2);
 
@@ -124,8 +133,6 @@ namespace Common.Actions
                     actions.Add(action);
                 }
             }
-
-            return actions;
         }
 
 

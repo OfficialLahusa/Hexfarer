@@ -253,6 +253,34 @@ namespace Tests
         }
 
         [Fact]
+        public void TheProvidedMovesKeepTheSearchsOrder()
+        {
+            // With every development card in hand (so each play is listed where the turn allows it), the moves the provider
+            // lists for the player on turn are the search's, in the search's order (the provider also lists what the search
+            // leaves out, such as trades); positions with discards pending are left out (the search lists the lowest seat's)
+            TestUtil.Seed(32);
+            Random random = new Random(32);
+            int compared = 0;
+            for (int game = 0; game < 10; game++)
+            {
+                TestUtil.PlayRandomGame(TestUtil.NewGame(), beforeApply: (state, _) =>
+                {
+                    if (random.Next(4) != 0 || state.Turn.PendingTrade != null) return;
+                    GameState copy = new(state);
+                    sbyte player = (sbyte)copy.Turn.PlayerIndex;
+                    foreach (DevelopmentCardType card in new[] { DevelopmentCardType.Knight, DevelopmentCardType.Monopoly, DevelopmentCardType.RoadBuilding, DevelopmentCardType.YearOfPlenty })
+                        copy.Players[player].DevelopmentCards.Add(card, 1);
+                    List<string> search = Agents.MCTS.MCTSTree.GetValidActions(copy).Select(action => action.ToString()).ToList();
+                    if (search.Count < 2 || search[0].StartsWith(nameof(DiscardAction))) return;
+                    List<string> provided = LegalActionProvider.GetActionsForState(copy, player).Select(action => action.ToString()).Where(search.Contains).ToList();
+                    Assert.Equal(search, provided);
+                    compared++;
+                });
+            }
+            Assert.True(compared > 200, $"{compared} positions");
+        }
+
+        [Fact]
         public void DistinctProvidedActionsAreNeverTheSameDecision()
         {
             // The MCTS tree matches played actions to its children by decision, so the legal actions of a state must be

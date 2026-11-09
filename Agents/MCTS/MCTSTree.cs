@@ -731,13 +731,17 @@ namespace Agents.MCTS
             if (state.Turn.PendingTrade is TradeOffer offer)
                 return LegalActionProvider.GetActionsForState(state, offer.NextResponder ?? offer.Offerer);
 
-            List<Action> firstInitialSettlementActions = FirstInitialSettlementAction.GetActionsForState(state, activePlayerIdx);
-            if (firstInitialSettlementActions.Count > 0)
-                return firstInitialSettlementActions;
+            // One list for every move type, each adding its moves in this order (the order of a node's children, their priors
+            // and the policy targets)
+            List<Action> actions = [];
 
-            List<Action> secondInitialSettlementActions = SecondInitialSettlementAction.GetActionsForState(state, activePlayerIdx);
-            if (secondInitialSettlementActions.Count > 0)
-                return secondInitialSettlementActions;
+            FirstInitialSettlementAction.AddActionsForState(state, activePlayerIdx, actions);
+            if (actions.Count > 0)
+                return actions;
+
+            SecondInitialSettlementAction.AddActionsForState(state, activePlayerIdx, actions);
+            if (actions.Count > 0)
+                return actions;
 
             // Discards are assumed to be in player index order, since the outcome is order-invariant
             // Therefore only the discards of the next player in order are shown
@@ -745,36 +749,34 @@ namespace Agents.MCTS
             {
                 if (DiscardAction.IsTurnValid(state.Turn, playerToDiscardIdx))
                 {
-                    List<Action> discardActions = DiscardAction.GetActionsForState(state, (sbyte)playerToDiscardIdx);
+                    DiscardAction.AddActionsForState(state, (sbyte)playerToDiscardIdx, actions);
 
-                    if (discardActions.Count > 0)
-                        return discardActions;
+                    if (actions.Count > 0)
+                        return actions;
                 }
             }
 
-            List<Action> actions = [
-                .. EndTurnAction.GetActionsForState(state, activePlayerIdx),
+            EndTurnAction.AddActionsForState(state, activePlayerIdx, actions);
 
-                .. RollAction.GetActionsForState(state, activePlayerIdx),
-                .. RobberAction.GetActionsForState(state, activePlayerIdx),
+            RollAction.AddActionsForState(state, activePlayerIdx, actions);
+            RobberAction.AddActionsForState(state, activePlayerIdx, actions);
 
-                .. FirstInitialRoadAction.GetActionsForState(state, activePlayerIdx),
-                .. SecondInitialRoadAction.GetActionsForState(state, activePlayerIdx),
+            FirstInitialRoadAction.AddActionsForState(state, activePlayerIdx, actions);
+            SecondInitialRoadAction.AddActionsForState(state, activePlayerIdx, actions);
 
-                .. RoadAction.GetActionsForState(state, activePlayerIdx),
-                .. SettlementAction.GetActionsForState(state, activePlayerIdx),
-                .. CityAction.GetActionsForState(state, activePlayerIdx),
-                .. BuyDevelopmentCardAction.GetActionsForState(state, activePlayerIdx),
+            RoadAction.AddActionsForState(state, activePlayerIdx, actions);
+            SettlementAction.AddActionsForState(state, activePlayerIdx, actions);
+            CityAction.AddActionsForState(state, activePlayerIdx, actions);
+            BuyDevelopmentCardAction.AddActionsForState(state, activePlayerIdx, actions);
 
-                .. KnightAction.GetActionsForState(state, activePlayerIdx),
-                .. MonopolyAction.GetActionsForState(state, activePlayerIdx),
-                .. RoadBuildingAction.GetActionsForState(state, activePlayerIdx),
-                .. YearOfPlentyAction.GetActionsForState(state, activePlayerIdx),
+            KnightAction.AddActionsForState(state, activePlayerIdx, actions);
+            MonopolyAction.AddActionsForState(state, activePlayerIdx, actions);
+            RoadBuildingAction.AddActionsForState(state, activePlayerIdx, actions);
+            YearOfPlentyAction.AddActionsForState(state, activePlayerIdx, actions);
 
-                .. FourToOneTradeAction.GetActionsForState(state, activePlayerIdx),
-                .. ThreeToOneTradeAction.GetActionsForState(state, activePlayerIdx),
-                .. TwoToOneTradeAction.GetActionsForState(state, activePlayerIdx)
-            ];
+            FourToOneTradeAction.AddActionsForState(state, activePlayerIdx, actions);
+            ThreeToOneTradeAction.AddActionsForState(state, activePlayerIdx, actions);
+            TwoToOneTradeAction.AddActionsForState(state, activePlayerIdx, actions);
 
             return actions;
         }

@@ -115,9 +115,18 @@ namespace Common.Actions
 
         public static List<Action> GetActionsForState(GameState state, sbyte playerIdx)
         {
-            List<Action> actions = new List<Action>();
+            List<Action> actions = [];
+            AddActionsForState(state, playerIdx, actions);
+            return actions;
+        }
 
-            if (!IsTurnValid(state.Turn, playerIdx) || !state.Players[playerIdx].CanAffordCity()) return actions;
+        /// <summary>
+        /// Adds the moves GetActionsForState lists to the given list, so the legal moves of all move types go into one list
+        /// (see MCTSTree.GetValidActions)
+        /// </summary>
+        public static void AddActionsForState(GameState state, sbyte playerIdx, List<Action> actions)
+        {
+            if (!IsTurnValid(state.Turn, playerIdx) || !state.Players[playerIdx].CanAffordCity()) return;
 
             // Only the player's own buildings can be settlements of the player
             foreach (int intersectionIdx in BitMask.Of(state.Board.GetBuildingMask(playerIdx)))
@@ -125,8 +134,6 @@ namespace Common.Actions
                 if (state.Board.GetBuilding(intersectionIdx) == Intersection.BuildingType.Settlement)
                     actions.Add(new CityAction(playerIdx, intersectionIdx));
             }
-
-            return actions;
         }
 
         public override string ToString()
