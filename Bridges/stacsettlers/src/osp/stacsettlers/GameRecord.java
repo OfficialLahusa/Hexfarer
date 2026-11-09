@@ -51,7 +51,8 @@ final class GameRecord
     {
         private String agent, needs;
         private Boolean observe, lean;
-        private int decisions, resyncs, fallbacks, robotDecisions, stalls, declined;
+        // Trades in chat (osp.trade_in_chat): offers the seat made, offers its agent answered, trades it was part of
+        private int decisions, resyncs, fallbacks, robotDecisions, stalls, declined, offers, answers, trades;
         private long timeMs, maxMs;
         private final List<Object> failures = new ArrayList<>();
 
@@ -95,6 +96,21 @@ final class GameRecord
             declined++;
         }
 
+        synchronized void offered()
+        {
+            offers++;
+        }
+
+        synchronized void answered()
+        {
+            answers++;
+        }
+
+        synchronized void traded()
+        {
+            trades++;
+        }
+
         synchronized void failed(Long n, String code, boolean byAgent, String message)
         {
             failures.add(Json.object("n", n, "code", code, "by", byAgent ? "agent" : "referee", "message", message));
@@ -105,6 +121,7 @@ final class GameRecord
             return Json.object("seat", (long) seat, "agent", agent, "needs", needs, "observe", observe, "lean", lean,
                 "decisions", (long) decisions, "time_ms", timeMs, "max_ms", maxMs, "resyncs", (long) resyncs, "fallbacks", (long) fallbacks,
                 "failures", new ArrayList<>(failures), "robot_decisions", (long) robotDecisions, "stalls", (long) stalls, "declined", (long) declined,
+                "offers", (long) offers, "answers", (long) answers, "trades", (long) trades,
                 "moves", agent == null ? null : (Object) (long) robotDecisions);
         }
     }

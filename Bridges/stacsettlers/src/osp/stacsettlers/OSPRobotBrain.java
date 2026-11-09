@@ -1,6 +1,8 @@
 package osp.stacsettlers;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,11 +17,13 @@ import soc.game.SOCResourceConstants;
 import soc.game.SOCResourceSet;
 import soc.game.SOCRoad;
 import soc.game.SOCSettlement;
+import soc.game.StacTradeOffer;
 import soc.dialogue.StacDialogueManager;
 import soc.dialogue.StacTradeMessage;
 import soc.message.SOCGameTextMsg;
 import soc.message.SOCMessage;
 import soc.robot.SOCRobotBrainImpl;
+import soc.robot.stac.Persuasion;
 import soc.robot.stac.StacRobotDialogueManager;
 import soc.robot.SOCRobotClient;
 import soc.util.CappedQueue;
@@ -32,9 +36,20 @@ import soc.util.SOCRobotParameters;
  * legal moves as OSPGame writes them (the true state for an open-hand agent, the seat's view otherwise) and plays the
  * answer through the robot client's requests, a protocol move that takes StacSettlers two steps (a bought piece and its
  * place, a card and its resources, a robber move and its victim) one after the other. It keeps none of StacSettlers' own
- * robot logic or game tracking, and it takes no part in the trades the other robots negotiate in chat: it never announces
- * that it participates (so Stac agents don't wait for its answers) and declines every offer made to it (Dobre's MCTS
- * agents wait for the answer).
+ * robot logic or game tracking. By default it takes no part in the trades the other robots negotiate in chat: it never
+ * announces that it participates (so Stac agents don't wait for its answers) and declines every offer made to it (Dobre's
+ * MCTS agents wait for the answer).
+ *
+ * With osp.trade_in_chat it takes part, in StacSettlers' chat format: it announces that it participates (PARTICIPATE),
+ * so the Stac agents wait for its answer to every offer, with no time limit; it owes them NULL:ST once a turn and an
+ * answer to every offer (NO_RESPONSE to one not made to it), which it gives itself, also once its agent failed. An offer
+ * made to its seat becomes a decision (prompt answer_offer, with the offer in the state): accept (ACC; the offerer then
+ * picks among its accepts and confirms one, which the server carries out), decline (REJ) or a counteroffer (an offer of
+ * the seat's to the offerer, whose accept the seat confirms, having written the terms). On its own turn after the roll
+ * its agent may offer (trades in the decision, at most OFFERS_PER_TURN a turn): the first accept trades at once (the seat
+ * confirms it, player_trading first_accept), counteroffers wait until every addressee answered (OFFER_WAIT_MILLIS at
+ * most), then the agent takes one (prompt pick_partner) or withdraws. A trade that happens is the move log's offer and
+ * accept on what changed hands; the negotiation around it makes no step.
  *
  * It speaks version 2: it serves view and truth (no worlds), steps and lean decisions. An agent that observes gets every
  * move of the game as a step from the game's start (the server's move log, MoveLog), before each decision and before the
@@ -80,6 +95,54 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
     private final Set<String> refused = new HashSet<>();
     private boolean pinged;
 
+    // Taking part in the Stac agents' chat trades (see above)
+    static final boolean TRADE_IN_CHAT = Boolean.getBoolean("osp.trade_in_chat");
+    // How long the seat's own offer waits for its addressees' answers (missing ones then count as declines), and for the
+    // server to carry out a trade the seat confirmed
+    private static final long OFFER_WAIT_MILLIS = Long.getLong("osp.offer_wait_ms", 20_000L), TRADE_WAIT_MILLIS = 5_000L;
+    // Offers the seat may make in one turn (the ruleset's offer_limit; its agent keeps its own, lower limit)
+    static final int OFFERS_PER_TURN = 10;
+    // The turn (round and player on turn) the robot last sent NULL:ST for, the turn its offers so far were made in and
+    // their number
+    private String stSentFor, offersTurn;
+    private int offersThisTurn;
+    // The seat's own offer while it stands, and the StacSettlers player a counteroffer of the seat's went to (-1: none)
+    private OwnOffer own;
+    private int counterTo = -1;
+
+    /** The seat's own offer in chat: its terms and addressees (seats), their answers and counteroffers as they come */
+    private static final class OwnOffer
+    {
+        final Map<String, Object> give, get;
+        final List<Object> to;
+        // By seat (as a string): accept, decline or counter; the counteroffers in the offerer's terms
+        final Map<String, Object> answers = new LinkedHashMap<>(), counters = new LinkedHashMap<>();
+        // The position it was made in, and when
+        final String key;
+        final long at = System.currentTimeMillis();
+        // The seat the seat's confirming accept went to (-1 before), and when
+        int partner = -1;
+        long confirmedAt;
+
+        OwnOffer(Map<String, Object> give, Map<String, Object> get, List<Object> to, String key)
+        {
+            this.give = give;
+            this.get = get;
+            this.to = to;
+            this.key = key;
+        }
+
+        boolean addressed(int seat)
+        {
+            return to.contains((long) seat);
+        }
+
+        boolean answered()
+        {
+            return answers.size() >= to.size();
+        }
+    }
+
     public OSPRobotBrain(SOCRobotClient rc, SOCRobotParameters params, SOCGame ga, CappedQueue mq)
     {
         super(rc, params, ga, mq);
@@ -120,6 +183,7 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
                     alive = false;
                     break;
                 }
+                SOCGameTextMsg chat = null;
                 if (type == SOCMessage.GAMETEXTMSG)
                 {
                     if (! pinged)
@@ -127,17 +191,23 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
                         pinged = true;
                         debug("pinged", null);
                     }
-                    declineOffer((SOCGameTextMsg) message);
+                    if (TRADE_IN_CHAT)
+                        chat = (SOCGameTextMsg) message;
+                    else
+                        declineOffer((SOCGameTextMsg) message);
                 }
                 try
                 {
                     // Read outside the brain's lock: the server's thread may wait for it (gameEnding) while it holds a lock
                     Seen seen = look();
-                    if (seen != null)
-                        synchronized (this)
-                        {
+                    synchronized (this)
+                    {
+                        // A trade message is answered even without a game to look at (the robot owes every offer one)
+                        if (chat != null)
+                            tradeMessage(chat, seen);
+                        if (seen != null)
                             act(seen);
-                        }
+                    }
                 }
                 catch (Exception e)
                 {
@@ -192,6 +262,336 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
         }
     }
 
+    /** At the game's start, taking part in the chat trades: the Stac agents then wait for the robot's answers */
+    @Override
+    public void startGameChat()
+    {
+        if (TRADE_IN_CHAT)
+            send(StacRobotDialogueManager.ANN_PARTICIPATION);
+    }
+
+    // A chat line to the game
+    private void send(String text)
+    {
+        debug("chat", Json.object("text", text));
+        client.sendText(game, text);
+    }
+
+    private static String accept(int sender, int receiver)
+    {
+        return StacRobotDialogueManager.makeAcceptMessage(sender, receiver, "Deal.");
+    }
+
+    private static String reject(int sender, int receiver)
+    {
+        return StacRobotDialogueManager.makeRejectMessage(sender, receiver, "No, thanks.");
+    }
+
+    private static String noResponse(int sender, int receiver)
+    {
+        return new StacTradeMessage(Integer.toString(sender), Integer.toString(receiver), false, false, false, false, null, true, "Nothing from me.").toMessage();
+    }
+
+    // An offer from the player to those named, giving give and getting get (StacSettlers' resources)
+    private String offerMessage(int from, boolean[] to, SOCResourceSet give, SOCResourceSet get)
+    {
+        StacTradeOffer offer = new StacTradeOffer(game.getName(), from, to, give, false, get, false);
+        return new StacTradeMessage(Integer.toString(from), StacTradeMessage.getToAsString(to), offer, false, new Persuasion(), "Would you trade?").toMessage();
+    }
+
+    // Once a turn, at its first PLAY1 (after the roll and the robber), NULL:ST, which every Stac agent waits for from each
+    // participant before the player on turn goes on; a new turn also starts the seat's count of offers afresh
+    private void turnDuties(Seen seen)
+    {
+        if (! seen.turn.equals(offersTurn))
+        {
+            offersTurn = seen.turn;
+            offersThisTurn = 0;
+            counterTo = -1;
+        }
+        if (seen.state == SOCGame.PLAY1 && ! seen.turn.equals(stSentFor))
+        {
+            stSentFor = seen.turn;
+            send("NULL:ST");
+        }
+    }
+
+    // The seat's offer made: in chat to the seats it names
+    private void offer(int seat, Map<String, Object> terms, Seen seen)
+    {
+        @SuppressWarnings("unchecked")
+        List<Object> seats = (List<Object>) terms.get("to");
+        boolean[] to = new boolean[game.maxPlayers];
+        for (Object s : seats)
+            to[osp.playerOf(Json.integer(s))] = true;
+        @SuppressWarnings("unchecked")
+        Map<String, Object> give = (Map<String, Object>) terms.get("give"), get = (Map<String, Object>) terms.get("get");
+        send(offerMessage(ourPlayerNumber(), to, OSPGame.resourceSet(give), OSPGame.resourceSet(get)));
+        own = new OwnOffer(give, get, new ArrayList<>(seats), seen.key);
+        offersThisTurn++;
+        record.seat(seat).offered();
+    }
+
+    // The seat's own offer while it stands: done once the server carried out the trade the seat confirmed (or gave up on
+    // it); once every addressee answered (or the time is up), the agent takes a counteroffer or withdraws, else it is over
+    private void standingOffer(int seat, Seen seen)
+    {
+        long now = System.currentTimeMillis();
+        if (own.partner >= 0)
+        {
+            if (! seen.key.equals(own.key) || now - own.confirmedAt > TRADE_WAIT_MILLIS)
+                own = null;
+            return;
+        }
+        if (! own.answered() && now - own.at < OFFER_WAIT_MILLIS)
+            return;
+        for (Object s : own.to)
+            own.answers.putIfAbsent(String.valueOf(s), "decline");
+        if (own.counters.isEmpty())
+        {
+            own = null;
+            return;
+        }
+        // Withdrawing first: the move a failed agent's robot plays
+        List<Object> legal = new ArrayList<>();
+        legal.add(Json.array("cancel"));
+        for (String s : own.counters.keySet())
+            legal.add(Json.array("confirm", Json.object("partner", Long.valueOf(s))));
+        Map<String, Object> state = OSPGame.copy(seen.position);
+        state.put("prompt", "pick_partner");
+        state.put("current", (long) seat);
+        state.put("offer", Json.object("from", (long) seat, "give", own.give, "get", own.get, "to", own.to, "answers", own.answers, "counters", own.counters));
+        @SuppressWarnings("unchecked")
+        List<Object> move = (List<Object>) ask(seat, legal, seen, state, null);
+        if ("confirm".equals(move.get(0)))
+        {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> pick = (Map<String, Object>) move.get(1);
+            confirm(Json.integer(pick.get("partner")));
+            return;
+        }
+        int us = ourPlayerNumber();
+        for (String s : own.counters.keySet())
+            send(reject(us, osp.playerOf(Integer.parseInt(s))));
+        own = null;
+    }
+
+    // The seat confirms a trade on its offer: an accept of it (the seat wrote the terms, so its accept carries the trade
+    // out), or a counteroffer it takes (its accept, which the counterer then confirms); the other counteroffers declined
+    private void confirm(int partner)
+    {
+        int us = ourPlayerNumber();
+        send(accept(us, osp.playerOf(partner)));
+        own.partner = partner;
+        own.confirmedAt = System.currentTimeMillis();
+        for (String s : own.counters.keySet())
+            if (Integer.parseInt(s) != partner)
+                send(reject(us, osp.playerOf(Integer.parseInt(s))));
+    }
+
+    /**
+     * A trade line in the game's chat, taking part in the chat trades (TRADE_IN_CHAT): an offer not made to the seat gets
+     * NO_RESPONSE; on the seat's own turn an offer to it is a counteroffer to its own offer (kept for the agent's pick, or
+     * declined once that offer is through); on another's turn its agent answers it (answerOffer). An accept of the seat's
+     * offer is confirmed if it is the first (first_accept), an accept of its counteroffer always; rejects count as
+     * declines. Without a game to look at, every offer to the seat is declined.
+     */
+    private void tradeMessage(SOCGameTextMsg message, Seen seen)
+    {
+        String text = message.getText();
+        if (text == null || ! text.startsWith(StacTradeMessage.TRADE) || client.getNickname().equals(message.getNickname()) || ourPlayerData == null)
+            return;
+        StacTradeMessage trade;
+        try
+        {
+            trade = StacTradeMessage.parse(StacDialogueManager.fromMessage(text));
+        }
+        catch (RuntimeException e)
+        {
+            System.err.println(client.getNickname() + " in " + game.getName() + ": can't read the trade message " + text + ": " + e);
+            return;
+        }
+        int us = ourPlayerNumber(), from = trade.getSenderInt();
+        if (from == us || from < 0 || from >= game.maxPlayers)
+            return;
+        boolean toUs = Arrays.asList(trade.getReceivers().split(",")).contains(Integer.toString(us));
+        StacTradeOffer offer = trade.getOffer();
+        if (offer != null)
+        {
+            if (! toUs)
+            {
+                send(noResponse(us, from));
+                return;
+            }
+            int fromSeat = osp == null ? -1 : osp.seatOf(from);
+            if (own != null && own.partner < 0 && own.addressed(fromSeat) && ! own.answers.containsKey(String.valueOf(fromSeat)))
+            {
+                // A counteroffer to the seat's offer, in the offerer's terms: what the counterer gets, the seat gives
+                own.answers.put(String.valueOf(fromSeat), "counter");
+                own.counters.put(String.valueOf(fromSeat), Json.object("give", OSPGame.cardSet(offer.getGetSet()), "get", OSPGame.cardSet(offer.getGiveSet())));
+                return;
+            }
+            boolean ourTurn = game.getCurrentPlayerNumber() == us;
+            if (seen == null || osp == null || ourTurn || agentFailed)
+            {
+                send(reject(us, from));
+                // An offer on another's turn declined (a late counteroffer to the seat's own offer is none)
+                if (record != null && ! ourTurn)
+                    record.seat(osp.seatOf(us)).declined();
+                return;
+            }
+            answerOffer(offer, from, seen);
+            return;
+        }
+        if (! toUs || osp == null)
+            return;
+        int fromSeat = osp.seatOf(from);
+        boolean ownAddressee = own != null && own.addressed(fromSeat) && ! own.answers.containsKey(String.valueOf(fromSeat));
+        if (trade.isAccept())
+        {
+            if (ownAddressee)
+            {
+                own.answers.put(String.valueOf(fromSeat), "accept");
+                if (own.partner < 0)
+                    confirm(fromSeat);
+            }
+            else if (counterTo == from)
+            {
+                // The offerer took the seat's counteroffer: the seat wrote the terms, so it confirms them
+                send(accept(us, from));
+                counterTo = -1;
+            }
+            // Else the offerer confirmed the seat's accept, which the server carries out
+            return;
+        }
+        if (trade.isReject() || trade.isNoResponse())
+        {
+            if (ownAddressee)
+                own.answers.put(String.valueOf(fromSeat), "decline");
+            if (counterTo == from)
+                counterTo = -1;
+        }
+    }
+
+    // An offer of another seat's to this one, answered by the agent: accept (only with the cards it asks for), decline, or
+    // a counteroffer in the offerer's terms; an offer the protocol can't hold (one side empty, either side "one of") is
+    // declined
+    private void answerOffer(StacTradeOffer offer, int from, Seen seen)
+    {
+        int us = ourPlayerNumber(), seat = osp.seatOf(us);
+        Map<String, Object> give = OSPGame.cardSet(offer.getGiveSet()), get = OSPGame.cardSet(offer.getGetSet());
+        if (give.isEmpty() || get.isEmpty() || offer.hasDisjunctiveGiveSet() || offer.hasDisjunctiveGetSet())
+        {
+            send(reject(us, from));
+            record.seat(seat).declined();
+            return;
+        }
+        List<Object> to = new ArrayList<>();
+        boolean[] receivers = offer.getTo();
+        for (int s = 0; s < game.maxPlayers; s++)
+            if (receivers[osp.playerOf(s)])
+                to.add((long) s);
+        // Declining first: the move a failed agent's robot plays
+        List<Object> legal = new ArrayList<>();
+        legal.add(Json.array("respond", Json.object("accept", false)));
+        if (holds(seen.position, seat, get))
+            legal.add(Json.array("respond", Json.object("accept", true)));
+        Map<String, Object> state = OSPGame.copy(seen.position);
+        state.put("prompt", "answer_offer");
+        state.put("current", (long) seat);
+        state.put("offer", Json.object("from", (long) osp.seatOf(from), "give", give, "get", get, "to", to, "answers", new LinkedHashMap<>()));
+        record.seat(seat).answered();
+        @SuppressWarnings("unchecked")
+        List<Object> move = (List<Object>) ask(seat, legal, seen, state, Json.object("counter", Json.object()));
+        if ("counter".equals(move.get(0)))
+        {
+            // The seat's own offer to the offerer: it gives what the counteroffer has the offerer get, and back
+            @SuppressWarnings("unchecked")
+            Map<String, Object> terms = (Map<String, Object>) move.get(1);
+            boolean[] back = new boolean[game.maxPlayers];
+            back[from] = true;
+            send(offerMessage(us, back, OSPGame.resourceSet(terms.get("get")), OSPGame.resourceSet(terms.get("give"))));
+            counterTo = from;
+            return;
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> answer = (Map<String, Object>) move.get(1);
+        if (Boolean.TRUE.equals(answer.get("accept")))
+            send(accept(us, from));
+        else
+        {
+            send(reject(us, from));
+            record.seat(seat).declined();
+        }
+    }
+
+    // Whether the seat's hand in the state holds the cards
+    @SuppressWarnings("unchecked")
+    private static boolean holds(Map<String, Object> state, int seat, Map<String, Object> cards)
+    {
+        Map<String, Object> hand = (Map<String, Object>) ((Map<String, Object>) ((List<Object>) state.get("players")).get(seat)).get("hand");
+        for (Map.Entry<String, Object> card : cards.entrySet())
+            if (hand == null || ! hand.containsKey(card.getKey()) || Json.integer(hand.get(card.getKey())) < Json.integer(card.getValue()))
+                return false;
+        return true;
+    }
+
+    // Why a trade the agent proposed is invalid (PROTOCOL.md, trades between players), or null if it is valid: card sets of
+    // resources with at least one card each, no resource on both sides, an offer's give and a counteroffer's get (what the
+    // offerer would get) within the seat's hand, an offer to seats the decision named, each once
+    @SuppressWarnings("unchecked")
+    static String tradeError(Object answer, Map<String, Object> trades, int seat, Map<String, Object> state)
+    {
+        if (! (answer instanceof List) || ((List<Object>) answer).size() != 2 || ! (((List<Object>) answer).get(1) instanceof Map))
+            return "not a legal move or a trade";
+        List<Object> move = (List<Object>) answer;
+        String kind = String.valueOf(move.get(0));
+        if (! ("offer".equals(kind) || "counter".equals(kind)) || ! trades.containsKey(kind))
+            return "not a legal move or a trade the decision names";
+        Map<String, Object> terms = (Map<String, Object>) move.get(1);
+        if (! cardSet(terms.get("give")) || ! cardSet(terms.get("get")))
+            return "give and get have to be card sets of resources with at least one card";
+        Map<String, Object> give = (Map<String, Object>) terms.get("give"), get = (Map<String, Object>) terms.get("get");
+        for (String name : give.keySet())
+            if (get.containsKey(name))
+                return name + " on both sides";
+        if (! holds(state, seat, "offer".equals(kind) ? give : get))
+            return "more cards than the seat holds";
+        if ("counter".equals(kind))
+            return terms.containsKey("to") ? "a counteroffer names no seats" : null;
+        Object to = terms.get("to");
+        List<Object> named = (List<Object>) ((Map<String, Object>) trades.get("offer")).get("to");
+        if (! (to instanceof List) || ((List<Object>) to).isEmpty())
+            return "an offer names at least one seat";
+        Set<Object> once = new HashSet<>();
+        for (Object s : (List<Object>) to)
+            if (! (s instanceof Long) || ! named.contains(s) || ! once.add(s))
+                return "the seat " + Json.write(s) + " isn't one to name, or is named twice";
+        return null;
+    }
+
+    // Whether the value is a card set of resources: names to positive counts, at least one card
+    @SuppressWarnings("unchecked")
+    private static boolean cardSet(Object value)
+    {
+        if (! (value instanceof Map) || ((Map<String, Object>) value).isEmpty())
+            return false;
+        for (Map.Entry<String, Object> card : ((Map<String, Object>) value).entrySet())
+        {
+            if (! (card.getValue() instanceof Long) || (Long) card.getValue() < 1)
+                return false;
+            try
+            {
+                OSPGame.resourceType(card.getKey());
+            }
+            catch (RuntimeException e)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** What the brain read of the true game at one moment */
     private static final class Seen
     {
@@ -199,6 +599,8 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
         boolean over, deciding;
         // The game's state and position, which changes with every move the server takes
         String key;
+        // The turn: the round and the player on turn
+        String turn;
         // The state the next move starts from (in the protocol's order of discards)
         Map<String, Object> position;
         // The game's moves so far, its gaps, and the steps the agent hasn't been sent
@@ -234,6 +636,7 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
             seen.gaps = log.gaps();
             seen.steps = log.stepsFrom(sent);
             seen.key = seen.state + "/" + OSPGame.hash(seen.position);
+            seen.turn = truthGame.getRoundCount() + "/" + truthGame.getCurrentPlayerNumber();
             seen.acting = osp.acting();
             seen.deciding = osp.deciding();
             int seat = osp.seatOf(ourPlayerNumber());
@@ -256,6 +659,16 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
             if (record.end() != null)
                 finish();
             return;
+        }
+        if (TRADE_IN_CHAT)
+        {
+            turnDuties(seen);
+            // While the seat's own offer stands nothing else is decided
+            if (own != null)
+            {
+                standingOffer(seat, seen);
+                return;
+            }
         }
         if (seen.acting != seat)
         {
@@ -293,8 +706,26 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
         if (legal.isEmpty())
             return;
         record.seat(seat).robotDecided();
+        // On its own turn after the roll the seat may offer a trade, to every other seat
+        Map<String, Object> trades = null;
+        if (TRADE_IN_CHAT && state == SOCGame.PLAY1 && offersThisTurn < OFFERS_PER_TURN && ! agentFailed)
+        {
+            List<Object> others = new ArrayList<>();
+            for (int s = 0; s < game.maxPlayers; s++)
+                if (s != seat)
+                    others.add((long) s);
+            trades = Json.object("offer", Json.object("to", others, "left", (long) (OFFERS_PER_TURN - offersThisTurn)));
+        }
         @SuppressWarnings("unchecked")
-        List<Object> move = (List<Object>) (legal.size() == 1 ? legal.get(0) : ask(seat, legal, seen));
+        List<Object> move = (List<Object>) (legal.size() == 1 && trades == null ? legal.get(0) : ask(seat, legal, seen, seen.position, trades));
+        if ("offer".equals(move.get(0)))
+        {
+            // A chat message, no move: the game stays where it is until the offer is through
+            @SuppressWarnings("unchecked")
+            Map<String, Object> terms = (Map<String, Object>) move.get(1);
+            offer(seat, terms, seen);
+            return;
+        }
         pendingFrom = state;
         acted(seen);
         decided = seen.key + Json.write(move, true);
@@ -393,8 +824,9 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
         return new AgentFailure(code instanceof String ? (String) code : "internal", "the agent reported a failure: " + failure.get("message"), true);
     }
 
-    // Asks the agent; the first legal move once it failed
-    private Object ask(int seat, List<Object> legal, Seen seen)
+    // Asks the agent about the true state given (the game's, or with an offer to answer or pick from), with the trades it
+    // may propose (null: none); the first legal move once it failed
+    private Object ask(int seat, List<Object> legal, Seen seen, Map<String, Object> full, Map<String, Object> trades)
     {
         long started = System.currentTimeMillis();
         Long n = seen.moves;
@@ -405,7 +837,9 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
             if (agent == null)
                 return fallback(legal);
             sendSteps(seat, seen.steps);
-            Map<String, Object> state = truth ? seen.position : OSPGame.hide(seen.position, seat);
+            // The steps are sent: a further decision before the next look doesn't send them again
+            seen.steps = null;
+            Map<String, Object> state = truth ? full : OSPGame.hide(full, seat);
             // A lean agent gets only the hash, unless a change no step explains came since its last decision
             boolean force = seen.gaps != gapsAtDecision;
             gapsAtDecision = seen.gaps;
@@ -413,6 +847,8 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
             if (! lean || force)
                 decide.put("state", state);
             decide.put("legal", legal);
+            if (trades != null)
+                decide.put("trades", trades);
             agent.send(decide);
             while (true)
             {
@@ -434,9 +870,9 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
                 if ("resync".equals(type) && n.equals(answer.get("n")))
                 {
                     record.seat(seat).resynced();
-                    Map<String, Object> full = new LinkedHashMap<>(decide);
-                    full.put("state", state);
-                    agent.send(full);
+                    Map<String, Object> resent = new LinkedHashMap<>(decide);
+                    resent.put("state", state);
+                    agent.send(resent);
                     continue;
                 }
                 if (! "decide".equals(type) || ! answer.containsKey("action"))
@@ -450,7 +886,14 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
                         record.seat(seat).decided(System.currentTimeMillis() - started);
                         return move;
                     }
-                throw fail(n, "illegal", "the agent answered " + chosen + ", not a legal move", null);
+                // A trade the decision names, on terms of the agent's (PROTOCOL.md, trades between players)
+                String wrong = trades == null ? "not a legal move" : tradeError(answer.get("action"), trades, seat, full);
+                if (wrong == null)
+                {
+                    record.seat(seat).decided(System.currentTimeMillis() - started);
+                    return answer.get("action");
+                }
+                throw fail(n, "illegal", "the agent answered " + chosen + ": " + wrong, null);
             }
         }
         catch (AgentFailure e)

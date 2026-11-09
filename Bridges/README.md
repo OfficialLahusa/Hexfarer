@@ -81,10 +81,14 @@ Contents:
     which the robot reads the true game under the lock the server handles requests with; the robot serves its agent
     the true state or its seat's view, as it asks, and if it observes, every move of the game as a step from the
     game's start (`MoveLog`, which turns the requests of all seats, StacSettlers' agents' too, into protocol moves), and
-    plays the answer through StacSettlers' requests. It takes no part in the trades
+    plays the answer through StacSettlers' requests. By default it takes no part in the trades
     StacSettlers' agents negotiate in chat: it never announces that it participates (so Stac agents don't wait for its
     answers) and declines every offer made to it (Dobre's MCTS agents wait for the answer);
-    with the bank and the harbors it trades as usual. Each game ends with its result record as an `osp-result` line on
+    with the bank and the harbors it trades as usual. With -Dosp.trade_in_chat=true (`play.py --trade-in-chat`) it takes
+    part in StacSettlers' chat format: it announces that it participates, keeps what that obliges it to (NULL:ST each
+    turn, an answer to every offer), its agent answers the offers made to its seat (accept, decline or a counteroffer)
+    and makes its own on its turn, the first accept trades at once, and the result record counts its offers, answered
+    offers and trades. Each game ends with its result record as an `osp-result` line on
     standard error (the seat's decisions, their time, fallbacks, failures, offers declined and stalls: moves the
     server didn't take within 20 s, after which the robot decides again without that move). -Dosp.log=DIR keeps each
     agent's standard error, -Dosp.debug=true prints the robot's moves. Run with `ChatNegotiation=true` (the Stac agents

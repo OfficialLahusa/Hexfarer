@@ -9,16 +9,19 @@ no game or timed out, and with a negative --max-failed (any number) when every g
 then says why (stopped) and the exit code is 1.
 
 Usage: python play.py --agent "COMMAND" --opponents stac|ss|pomcp|jsettlers|random|LINE --games N --out DIR
-                      [--name NAME] [--fully-observable] [--no-chat] [--no-trades] [--max-failed K] [--build]
+                      [--name NAME] [--fully-observable] [--no-chat] [--no-trades] [--trade-in-chat] [--max-failed K]
+                      [--build]
 The opponents fill the other three seats: a preset (stac: the Stac agent with the parameters its README calls best and
 at most 3 offers without building; ss: SmartSettlers; pomcp: Dobre's typed POMCP agent at 10 000 iterations on 4
 threads, as in his thesis; jsettlers: JSettlers 1.1's robot; random) or an agent line's value as Simulation reads it
 (COUNT,NAME,KIND[,FLAGS]). SmartSettlers and Dobre's MCTS agents without a belief model need --fully-observable (the
-pomcp preset keeps a factored belief and plays without it; StacSettlers then shows
-every hand, discard, robbery and bought card to everyone). The games run with ChatNegotiation=true (the Stac agents only
-trade that way), Trades=true (--no-trades: false) and ForceEndTurns=false (the server ends no turn on its own, however long the agent
-thinks). DIR gets the simulation's working directory (config.txt, results/), the agents' standard error (agents/), the
-output (simulation.log) and summary.json; a further simulation's go to simulation-2 and simulation-2.log, and so on.
+pomcp preset keeps a factored belief and plays without it; StacSettlers then shows every hand, discard, robbery and
+bought card to everyone). The games run with ChatNegotiation=true (the Stac agents only trade that way), Trades=true
+(--no-trades: false) and ForceEndTurns=false (the server ends no turn on its own, however long the agent thinks). With
+--trade-in-chat our seat takes part in the chat trades (its agent answers the offers made to it and makes its own;
+without it, it declines every offer and makes none). DIR gets the simulation's working directory (config.txt, results/),
+the agents' standard error (agents/), the output (simulation.log) and summary.json; a further simulation's go to
+simulation-2 and simulation-2.log, and so on.
 Needs a JDK and StacSettlers' jar in STACSETTLERS_JAR.
 """
 
@@ -63,6 +66,8 @@ def summary(output, our_name="Hexfarer"):
                       "failed": failed(seat), "vp": line["vp"], "turns": line["result"]["turns"], "decisions": seat["decisions"],
                       "time_ms": seat["time_ms"], "max_ms": seat["max_ms"], "robot_decisions": seat["robot_decisions"], "fallbacks": seat["fallbacks"],
                       "failures": seat["failures"], "stalls": seat["stalls"], "declined": seat.get("declined"), "agent": seat["agent"],
+                      # Trading in chat (--trade-in-chat): offers made, offers its agent answered, trades it was part of
+                      "offers": seat.get("offers", 0), "answers": seat.get("answers", 0), "trades": seat.get("trades", 0),
                       # What the seat asked for: the true state or its view, steps or none, lean decisions
                       "needs": seat.get("needs"), "observe": seat.get("observe"), "lean": seat.get("lean")})
     decisions = sum(g["decisions"] for g in games)
@@ -82,6 +87,9 @@ def summary(output, our_name="Hexfarer"):
         "failures": [f for g in games for f in g["failures"]],
         "stalls": sum(g["stalls"] for g in games),
         "declined": sum(g["declined"] or 0 for g in games),
+        "offers": sum(g["offers"] for g in games),
+        "answers": sum(g["answers"] for g in games),
+        "trades": sum(g["trades"] for g in games),
         "forced_turn_ends": output.count("force end turn"),
         "asked": dict(collections.Counter(f'needs {g["needs"]}, {"observes" if g["observe"] else "no steps"}{", lean" if g["lean"] else ""}' for g in games)),
         "timed_out": stacsettlers.TIMED_OUT.split("{")[0] in output,
@@ -129,6 +137,8 @@ def main():
     parser.add_argument("--fully-observable", action="store_true")
     parser.add_argument("--no-chat", action="store_true", help="ChatNegotiation=false (the Stac agents then hang)")
     parser.add_argument("--no-trades", action="store_true", help="Trades=false: no trades between players at all")
+    parser.add_argument("--trade-in-chat", action="store_true",
+                        help="our seat takes part in the Stac agents' chat trades (osp.trade_in_chat): its agent answers their offers and makes its own")
     parser.add_argument("--max-failed", type=int, help="failed games the run allows before it stops (default: 3, or 1 in 100 games; negative: any, "
                                                        "but a simulation whose games all failed ends the run)")
     parser.add_argument("--build", action="store_true", help="compile the adapter first")
@@ -152,7 +162,8 @@ def main():
                                      fully_observable=args.fully_observable, trades=not args.no_trades)
         configs.append(config)
         output = stacsettlers.simulate(os.path.join(out, "simulation" + suffix), config, args.agent,
-                                       {"osp.log": agents, "osp.max_failed_games": allowance}, timeout=args.timeout)
+                                       {"osp.log": agents, "osp.max_failed_games": allowance, **({"osp.trade_in_chat": "true"} if args.trade_in_chat else {})},
+                                       timeout=args.timeout)
         with open(os.path.join(out, f"simulation{suffix}.log"), "w", encoding="utf-8") as file:
             file.write(output)
         return output

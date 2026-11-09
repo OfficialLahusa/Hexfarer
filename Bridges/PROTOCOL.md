@@ -86,7 +86,8 @@ Every message that is answered may also be answered with `failure`.
 - StacSettlers' robot sends steps the same way, from its server's requests. A trade its agents make in chat comes as
   the two steps it takes under `player_trading` `first_accept`: the offer of the player on turn to the partner, on
   exactly the terms that changed hands, and the partner's accept; the negotiation before it (offers declined, withdrawn
-  or countered) makes no step.
+  or countered) makes no step. Where its robot trades in chat too (-Dosp.trade_in_chat), so do the seat's own trades,
+  and a decision about an offer (`answer_offer`, `pick_partner`) shows the offer in its state though no step made it.
 
 ### `before` and `ready`
 

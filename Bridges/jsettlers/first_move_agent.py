@@ -10,9 +10,10 @@ lean (--lean, with --observe: it asks for the state whenever a decision comes wi
 with a move that isn't listed (--illegal), turn every game down (--refuse), or stall SECONDS before its first decision
 after the setup (--stall SECONDS), past a short turn limit of the server. With --trades it proposes where a decision names
 trades: once per turn an offer of one card of the resource it holds most for one it holds least, to every seat named,
-and a counteroffer (one card of its own for the offer's give) when it can't accept an offer.
+and a counteroffer (one card of its own for the offer's give) when it can't accept an offer; with --take-counters it
+takes the first counteroffer to its own offer where it picks a partner.
 Usage: python first_move_agent.py [--needs truth|view|world] [--builds] [--weighted] [--observe] [--full] [--lean] [--illegal]
-       [--refuse] [--stall S] [--trades]
+       [--refuse] [--stall S] [--trades] [--take-counters]
 """
 
 import json
@@ -39,6 +40,7 @@ def main():
     lean, illegal, refuse = "--lean" in sys.argv, "--illegal" in sys.argv, "--refuse" in sys.argv
     stall = float(sys.argv[sys.argv.index("--stall") + 1]) if "--stall" in sys.argv else 0
     trades = "--trades" in sys.argv
+    take_counters = "--take-counters" in sys.argv
     decisions, stalled, offered_at = 0, False, -100
     for line in sys.stdin:
         if not line.strip():
@@ -87,6 +89,9 @@ def main():
                 if mine:
                     # In the offerer's terms: the offerer gives what it offered, gets one card of the counterer's
                     move = ["counter", {"give": offer["give"], "get": {mine[-1]: 1}}]
+            confirms = [m for m in legal if m[0] == "confirm"]
+            if take_counters and message["state"]["prompt"] == "pick_partner" and confirms:
+                move = confirms[0]
             answer = {"type": "decide", "game_id": message["game_id"], "n": message["n"], "action": move}
         else:
             continue

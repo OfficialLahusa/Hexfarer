@@ -171,6 +171,21 @@ class MCTSOpponentTests(unittest.TestCase):
         self.assertEqual((0, [], 0), (seats[0]["fallbacks"], seats[0]["failures"], seats[0]["stalls"]), seats[0])
         self.assertGreater(seats[0]["declined"], 0, seats[0])
 
+    def test_the_robot_trades_in_chat_with_them_and_the_game_ends(self):
+        # The robot takes part (osp.trade_in_chat): its agent answers their offers, which they wait for, and makes its own
+        stacsettlers.build()
+        logs = tempfile.mkdtemp()
+        pomcp = (3, "POMCP", "mcts", "MCTS_FACTORED_BELIEF|MCTS_POMCP|MCTS_LIST_POMS|MCTS_PUCT|MCTS_Cp:4|MCTS_HUMAN_ACTION_TYPE_PDF_CONDITIONED_SEEDING"
+                 "|MCTS_HUMAN_ACTION_TYPE_PDF_SEEDING_TEMPERATURE:7|MCTS_TYPED_ROLLOUTS|MCTS_HUMAN_ACTION_TYPE_CONDITIONED_DIST_ROLLOUTS"
+                 "|MCTS_ITERATIONS:300|MCTS_THREADS:1|MCTS_OFFERS_LIMIT:3")
+        output, _ = play(1, agent_command("--weighted", "--trades"), logs, name="OSPMCTSTrade", opponents=pomcp, properties={"osp.trade_in_chat": "true"})
+        lines, seats = results(output)
+        self.assertEqual(1, len(lines), output[-3000:])
+        self.assertIsNotNone(lines[0]["winner"], lines[0])
+        self.assertEqual((0, [], 0), (seats[0]["fallbacks"], seats[0]["failures"], seats[0]["stalls"]), seats[0])
+        self.assertGreater(seats[0]["answers"], 0, seats[0])
+        self.assertGreater(seats[0]["offers"], 0, seats[0])
+
 
 @unittest.skipUnless(stacsettlers.available(), "needs a JDK and StacSettlers' jar in STACSETTLERS_JAR")
 class FailureTests(unittest.TestCase):
@@ -188,6 +203,22 @@ class FailureTests(unittest.TestCase):
         self.assertEqual([("illegal", "referee")], [(f["code"], f["by"]) for f in seats[0]["failures"]])
         told = [m for m in messages(logs)[0] if m["type"] == "failure"]
         self.assertEqual(["illegal"], [m["code"] for m in told])
+
+    def test_a_failed_agent_leaves_the_robots_trade_duties_kept(self):
+        # Taking part in the chat trades, the robot owes the Stac agents its turn's NULL:ST and an answer to every offer
+        # (they wait for it with no time limit, and the server ends no turn): once its agent failed it keeps them itself,
+        # declining what is offered to it, so the games still end
+        stacsettlers.build()
+        logs = tempfile.mkdtemp()
+        output, _ = play(2, agent_command("--illegal", "--trades"), logs, name="OSPIllegalTrade", properties={"osp.trade_in_chat": "true"})
+        lines, seats = results(output)
+        self.assertEqual(2, len(lines), output[-3000:])
+        for line, seat in zip(lines, seats):
+            self.assertIsNotNone(line["winner"], line)
+            self.assertEqual(["illegal"], [f["code"] for f in seat["failures"]], seat)
+            self.assertEqual(0, seat["stalls"], seat)
+        # Offers came after the failure and were declined in chat
+        self.assertGreater(sum(seat["declined"] for seat in seats), 0, seats)
 
     def test_a_run_stops_once_more_games_failed_than_allowed(self):
         # Every game fails (an illegal answer); one failed game is allowed, so the simulation stops at the second and

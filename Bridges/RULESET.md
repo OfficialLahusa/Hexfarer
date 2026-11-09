@@ -24,15 +24,15 @@ The rules of an Open Seat Protocol game (see `PROTOCOL.md`) are a set of options
 |---|---|---|---|---|
 | `victory_points` | 10 | 10 | 10 | 10 |
 | `discard_limit` | 7 | 7 | 7 | 7 |
-| `player_trading` | `rulebook` | `none` | `first_accept`, `none` with game option NT | `first_accept` with Trades=true (its agents trade among themselves in chat; our seat declines every offer), `none` with Trades=false |
-| `counteroffers` | `true` | `false` | `true` | (no trades for our seat) |
+| `player_trading` | `rulebook` | `none` | `first_accept`, `none` with game option NT | `first_accept` with Trades=true (its agents trade among themselves in chat; our seat declines every offer, or with -Dosp.trade_in_chat trades with them in chat), `none` with Trades=false |
+| `counteroffers` | `true` | `false` | `true` | `true` with -Dosp.trade_in_chat, else no trades for our seat |
 | `bank_shortage` | `rulebook` | `nobody` | `unlimited` | `unlimited` |
 | `win_timing` | `own_turn` | `any_time` | `own_turn`, by Largest Army only after the robber moved | `own_turn`, by Largest Army only after the robber moved |
 | `robber_victims` | `adjacent` | `with_cards` | `with_cards` | `with_cards` |
 | `bank_rates` | `all` | `best_only` | `best_only` | `all` |
 | `road_building` | `optional` | `forced` | `forced` | `forced` |
 | `turn_limit` | none | 1000 | none | none (its config's NoTurns unset) |
-| `offer_limit` | none | none (no trading) | none | (no trades for our seat; its Stac agents keep their own limit) |
+| `offer_limit` | none | none (no trading) | none | 10 with -Dosp.trade_in_chat, else no trades for our seat (its Stac agents keep their own limit) |
 
 The JSettlers column comes from replaying 100 random JSettlers games through Hexfarer's rules (`Recorder` and
 `OpenSeat replay`). Its `unlimited` bank and its Largest Army timing are what its engine does, not values an agent
@@ -104,4 +104,4 @@ How long an agent may think is no rule of the game: it is the game's budget in `
 | Catanatron's referee (`drive.py`) | `catanatron` | |
 | Catanatron's agent (`open_seat_agent.py`) | `standard`, `catanatron` | rebuilds its game from the referee's state at each decision |
 | JSettlers' server with our robot | `standard` | sends `player_trading` `first_accept` with `offer_limit` null (`none` with game option NT), `bank_shortage` `unlimited`, `bank_rates` `best_only`, `robber_victims` `with_cards`, `road_building` `forced` |
-| StacSettlers' simulation with our robot | `standard` | sends `player_trading` `first_accept` (Trades=true, its agents' trades as offers and accepts) or `none`, `bank_shortage` `unlimited`, `robber_victims` `with_cards`, `road_building` `forced` |
+| StacSettlers' simulation with our robot | `standard` | sends `player_trading` `first_accept` (Trades=true, its agents' trades as offers and accepts; with -Dosp.trade_in_chat also `offer_limit` 10) or `none`, `bank_shortage` `unlimited`, `robber_victims` `with_cards`, `road_building` `forced` |

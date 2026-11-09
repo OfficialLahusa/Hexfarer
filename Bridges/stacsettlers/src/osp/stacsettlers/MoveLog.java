@@ -457,6 +457,10 @@ final class MoveLog
         offered.put("offer", Json.object("from", (long) onTurn, "give", give, "get", get, "to", Json.array((long) partner), "answers", new LinkedHashMap<>()));
         step(partner, Json.array("respond", Json.object("accept", true)), null, offered,
             Json.array(Json.array("respond", Json.object("accept", true)), Json.array("respond", Json.object("accept", false))));
+        // Both seats count it (the result record's trades)
+        GameRecord results = OSPServer.recordOf(game);
+        results.seat(onTurn).traded();
+        results.seat(partner).traded();
         return true;
     }
 

@@ -44,14 +44,19 @@ public final class OSPGame
 
     /**
      * The rules of this process's games: RULESET, with player_trading first_accept where StacSettlers' agents trade among
-     * themselves (its simulation's Trades=true), so their trades come to observers as offers and accepts (MoveLog); the
-     * seat of an Open Seat Agent still takes no part (its robot declines every offer and makes none)
+     * themselves (its simulation's Trades=true), so their trades come to observers as offers and accepts (MoveLog). The
+     * seat of an Open Seat Agent takes no part (its robot declines every offer and makes none), unless its robot trades in
+     * chat (osp.trade_in_chat, see OSPRobotBrain): then it may make OFFERS_PER_TURN offers a turn (offer_limit)
      */
     public static Map<String, Object> ruleset()
     {
         Map<String, Object> ruleset = new LinkedHashMap<>(RULESET);
         if (tradesBetweenPlayers())
+        {
             ruleset.put("player_trading", "first_accept");
+            if (OSPRobotBrain.TRADE_IN_CHAT)
+                ruleset.put("offer_limit", (long) OSPRobotBrain.OFFERS_PER_TURN);
+        }
         return ruleset;
     }
 

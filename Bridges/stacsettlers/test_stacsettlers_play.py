@@ -58,6 +58,16 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(7.5, result["mean_vp"])
         self.assertEqual(1, len(result["failures"]))
 
+    def test_it_sums_the_seats_trades_in_chat(self):
+        # Records of a robot trading in chat carry its offers, answered offers and trades; older ones don't (zero)
+        first, second = json.loads(result_line("g0", 0, 0)), json.loads(result_line("g1", 1, 1))
+        first["result"]["seats"][0].update(offers=4, answers=7, trades=2)
+        second["result"]["seats"][1].update(offers=1, answers=0, trades=1)
+        older = result_line("g2", 2, 0)
+        result = play.summary("\n".join([json.dumps(first), json.dumps(second), older]))
+        self.assertEqual((5, 7, 3), (result["offers"], result["answers"], result["trades"]))
+        self.assertEqual([(4, 7, 2), (1, 0, 1), (0, 0, 0)], [(g["offers"], g["answers"], g["trades"]) for g in result["per_game"]])
+
 
 def output_of(*games):
     """A simulation's output with one result line per (won, failed) pair, our seat 0"""
