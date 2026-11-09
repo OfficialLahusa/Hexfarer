@@ -223,6 +223,35 @@ namespace Tests
             Assert.True(types.Count >= 15, string.Join(", ", types.Select(type => type.Name)));
         }
 
+        // The legal moves of the positions below, recorded before the move lists were built into one list per call (every move
+        // type wrote a list of its own): the same moves in the same order since
+        private const string RecordedLegalMoves = "6919:69120DB8D72E949BCA41F4A9D496A26BE0A02A98F73B98896D2CCC4976550F72";
+
+        [Fact]
+        public void TheLegalMovesOfRandomPositionsAreTheRecordedOnes()
+        {
+            // Every fourth position of 25 random games: the search's moves (MCTSTree.GetValidActions) and every player's
+            // provided moves (LegalActionProvider), hashed in order
+            TestUtil.Seed(31);
+            Random sample = new Random(31);
+            System.Text.StringBuilder all = new();
+            int positions = 0;
+            for (int game = 0; game < 25; game++)
+            {
+                TestUtil.PlayRandomGame(TestUtil.NewGame(), beforeApply: (state, _) =>
+                {
+                    if (sample.Next(4) != 0) return;
+                    positions++;
+                    all.Append(string.Join("|", Agents.MCTS.MCTSTree.GetValidActions(state))).Append('\n');
+                    for (sbyte player = 0; player < 4; player++)
+                        all.Append(player).Append(':').Append(string.Join("|", LegalActionProvider.GetActionsForState(state, player))).Append('\n');
+                });
+            }
+            Assert.True(positions > 1000, $"{positions} positions");
+            string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(all.ToString())));
+            Assert.Equal(RecordedLegalMoves, $"{positions}:{hash}");
+        }
+
         [Fact]
         public void DistinctProvidedActionsAreNeverTheSameDecision()
         {
