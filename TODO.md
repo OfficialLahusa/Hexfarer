@@ -1,6 +1,6 @@
 ## Simulator
 - Projekt in Lanzenbrecher umbenannt (2026-11-09; vorher Hexfarer, davor CatanSim; CATAN ist Marke der CATAN GmbH), überall umgestellt, alte Namen werden nicht mehr gelesen
-	- Domains (Cloudflare noch einzurichten): lanzenbrecher.de (INWX, DNS bei Cloudflare, DNSSEC); hexfarer.dev und hexfarer.com per Redirect Rule (301, Pfad und Query bleiben) auf lanzenbrecher.de; lanzenbrecher.de bis zur Website auf das GitHub-Repo; Email Routing (contact@lanzenbrecher.de)
+	- Offen: Cloudflare einrichten (bis dahin antwortet keine der Domains per HTTPS): Zone lanzenbrecher.de, Nameserver und DNSSEC (DS-Eintrag) bei INWX, 2FA; hexfarer.dev und hexfarer.com per Redirect Rule (301, Pfad und Query bleiben) auf lanzenbrecher.de; lanzenbrecher.de bis zur Website auf das GitHub-Repo; Email Routing (contact@lanzenbrecher.de)
 	- Später: Cloudflare Tunnel vom Server für Web-Client und Match-Server (wss mit Cloudflare-Zertifikat, kein Fingerprint, keine offenen Ports)
 - Save Files auch mit Handel vollständig, alte Dateien laden richtig => keine neue Version nötig
 	- Offen: Edits und Sitze im Save für Share Links
