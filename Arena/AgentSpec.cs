@@ -4,7 +4,6 @@ using Agents.MCTS;
 using Agents.OpenSeat;
 using Common;
 using System.Globalization;
-using System.Numerics;
 using System.Text.Json.Nodes;
 
 namespace Arena
@@ -52,39 +51,13 @@ namespace Arena
         public static readonly OpenSeatBudget OpenSeatAgentBudget = OpenSeatBudget.Default;
 
         /// <summary>
-        /// Tree updates per decision that the default batch size keeps with an iteration budget: the tree takes in the
-        /// evaluations after every batch, so small batches search much better at the same budget (800 iterations: 16 leaves,
-        /// 50 updates, against 256 +111 Elo; 5000: 32 leaves, 156 updates, against 256 +54), while larger ones fill the net
-        /// calls faster
-        /// </summary>
-        public const int UpdatesPerDecision = 100;
-
-        /// <summary>
-        /// Fewest leaves per batch by default with an iteration budget: at the same games at once batches of 8 played about
-        /// half the games per hour of 16, and what they would gain in strength is unmeasured
-        /// </summary>
-        public const int MinLeavesPerBatch = 16;
-
-        /// <summary>
-        /// Leaves per batch by default for a search of this many iterations: the largest power of two that still gives the tree
-        /// UpdatesPerDecision updates, at least MinLeavesPerBatch and at most MCTSAgent.DefaultLeavesPerBatch (800 and
-        /// 1600 iterations: 16, 3200 and 5000: 32, 6400: 64, from 25600: 256)
-        /// </summary>
-        public static int LeavesFor(long iterations)
-        {
-            long most = Math.Max(1, iterations / UpdatesPerDecision);
-            long leaves = Math.Min(MCTSAgent.DefaultLeavesPerBatch, 1L << BitOperations.Log2((ulong)most));
-            return (int)Math.Max(MinLeavesPerBatch, leaves);
-        }
-
-        /// <summary>
-        /// The leaves per batch of the search: bN if given, else LeavesFor its iterations with an iteration budget (PIMC's
-        /// determinizations share the budget, so each searches a tree of its share) and MCTSAgent.DefaultLeavesPerBatch with
-        /// a time budget (where the throughput of large batches counts: 32 against 256 gained nothing at 0.1 s, on DirectML
-        /// and on the CPU), the same on every machine
+        /// The leaves per batch of the search: bN if given, else MCTSAgent.LeavesFor its iterations with an iteration budget
+        /// (PIMC's determinizations share the budget, so each searches a tree of its share) and MCTSAgent.DefaultLeavesPerBatch
+        /// with a time budget (where the throughput of large batches counts: 32 against 256 gained nothing at 0.1 s, on
+        /// DirectML and on the CPU), the same on every machine
         /// </summary>
         public int BatchFor(long iterations) => LeavesPerBatch
-            ?? (iterations > 0 ? LeavesFor(iterations / Math.Max(1, Determinizations)) : MCTSAgent.DefaultLeavesPerBatch);
+            ?? (iterations > 0 ? MCTSAgent.LeavesFor(iterations / Math.Max(1, Determinizations)) : MCTSAgent.DefaultLeavesPerBatch);
 
         /// <summary>
         /// Leaf rows per net file that the games played at once keep in flight by default: throughput follows games times

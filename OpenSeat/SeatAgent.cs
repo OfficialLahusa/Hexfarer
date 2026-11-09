@@ -26,9 +26,15 @@ namespace OpenSeat
     /// Information Set MCTS over worlds drawn from what its seat knows (BeliefTracker), which takes in every move as the seat
     /// sees it.
     /// </summary>
-    internal sealed class SeatAgent(StateValueNet net, long iterations, double seconds, TextWriter log, int leavesPerBatch = MCTSAgent.DefaultLeavesPerBatch,
+    internal sealed class SeatAgent(StateValueNet net, long iterations, double seconds, TextWriter log, int? leavesPerBatch = null,
         bool parallelSelection = true, bool fair = false, bool lean = false, int threads = 0, bool declineTrades = false)
     {
+        /// <summary>
+        /// Leaves per batch of the search: as given, else as in the Arena, MCTSAgent.LeavesFor an iteration budget (100 tree
+        /// updates per decision; 5000 iterations: 32) and MCTSAgent.DefaultLeavesPerBatch for a time budget
+        /// </summary>
+        public int LeavesPerBatch { get; } = leavesPerBatch ?? (iterations > 0 ? MCTSAgent.LeavesFor(iterations) : MCTSAgent.DefaultLeavesPerBatch);
+
         private Replica? _replica;
         private MCTSAgent? _agent;
         // The fair agent around the search (null for the open-hand agent)
@@ -61,7 +67,7 @@ namespace OpenSeat
         private TimeSpan _cpuAtStart;
 
         public string Name => $"hexfarer-{(fair ? "ismcts-fair" : "mcts-open")}-{(iterations > 0 ? $"{iterations}it" : $"{seconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}s")}"
-            + (leavesPerBatch != MCTSAgent.DefaultLeavesPerBatch ? $"-b{leavesPerBatch}" : "") + (parallelSelection ? "" : "-serial");
+            + (LeavesPerBatch != MCTSAgent.DefaultLeavesPerBatch ? $"-b{LeavesPerBatch}" : "") + (parallelSelection ? "" : "-serial");
 
         /// <summary>
         /// Answers the referee's messages until its input ends; a message it can't handle is answered with a failure
@@ -203,7 +209,7 @@ namespace OpenSeat
             // doesn't watch it, so for a replay the referee has to allow the time
             double budgetSeconds = before["budget"]?["decide_ms"] is JsonValue ms && ms.TryGetValue(out int decideMs) ? decideMs * 0.8 / 1000 : double.MaxValue;
             _agent = new MCTSAgent(_seat, _replica.State, timeLimitSeconds: seconds > 0 ? Math.Min(seconds, budgetSeconds) : seconds, valueNet: net,
-                iterationLimit: iterations, leavesPerBatch: leavesPerBatch, parallelSelection: parallelSelection, seed: gameSeed);
+                iterationLimit: iterations, leavesPerBatch: LeavesPerBatch, parallelSelection: parallelSelection, seed: gameSeed);
             // The fair agent's worlds and trees draw from a stream of their own, also from the game's seed: mixed, since two
             // sources from one seed draw the same numbers (its worlds would follow the MCTS agent's tree seeds)
             _fair = fair ? new InformationSetMCTSAgent(_agent, _replica.State, seed: gameSeed is int fairSeed ? fairSeed ^ 0x2545F491 : null) : null;

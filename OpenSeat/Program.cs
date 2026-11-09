@@ -1,6 +1,5 @@
 using Agents;
 using Agents.Inference;
-using Agents.MCTS;
 using Common;
 using Common.Actions;
 using Common.OSP;
@@ -40,15 +39,16 @@ namespace OpenSeat
             the client on ws://ADDRESS:P (default 127.0.0.1:17018; in the client Join, role Watch, no token), each move
             with the referee's outcome, at most one move per S seconds (default 0).
 
-            agent: plays one seat for a referee over the protocol on standard input and output, with open-hand MCTS and the
-            value net (default: the deployed net, 5000 iterations per decision; budgets round up to whole batches of B leaves,
-            default 256). Needs the full state ("truth"). Writes one stats line per game to standard error, with the
-            search's leaf evaluations and the distinct positions among them. --threads sets the value net's threads per
-            evaluation (default half the logical cores), --serial selects each batch on one thread instead of all cores:
-            both for an agent pinned to few cores, e.g. at equal thinking time on one core against another engine's bot.
-            With --serial and an iteration budget the agent plays a game again exactly from its seed (before), on the same
-            build, net and provider; an iteration budget doesn't keep to the referee's decide_ms, so the referee has to allow
-            the time.
+            agent: plays one seat for a referee over the protocol on standard input and output, with open-hand MCTS and
+            the value net (default: the deployed net, 5000 iterations per decision; budgets round up to whole batches of
+            B leaves, by default as in the Arena: with --iterations the largest power of two that leaves the tree 100
+            updates per decision, 16 to 256, e.g. 32 at 5000; with --seconds 256). Needs the full state ("truth").
+            Writes one stats line per game to standard error, with the search's leaf evaluations and the distinct
+            positions among them. --threads sets the value net's threads per evaluation (default half the logical
+            cores), --serial selects each batch on one thread instead of all cores: both for an agent pinned to few
+            cores, e.g. at equal thinking time on one core against another engine's bot. With --serial and an iteration
+            budget the agent plays a game again exactly from its seed (before), on the same build, net and provider; an
+            iteration budget doesn't keep to the referee's decide_ms, so the referee has to allow the time.
             --fair plays like Hexfarer's fair agents (Information Set MCTS over what the seat knows) instead of open-hand.
             --decline-trades declines every offer between players and makes none (a seat without trades at a table with them).
 
@@ -148,7 +148,9 @@ namespace OpenSeat
                         // The agents' console output would mix with the protocol
                         TextWriter protocol = Console.Out;
                         Console.SetOut(TextWriter.Null);
-                        int leavesPerBatch = int.Parse(Option("--leaves-per-batch", MCTSAgent.DefaultLeavesPerBatch.ToString()));
+                        // Leaves per batch as given, else by the budget as in the Arena (SeatAgent.LeavesPerBatch)
+                        string batch = Option("--leaves-per-batch", "");
+                        int? leavesPerBatch = batch == "" ? null : int.Parse(batch);
                         // Select each batch on the calling thread instead of on all cores (e.g. for a process pinned to one core)
                         bool serial = args.Contains("--serial");
                         // Information Set MCTS over what the seat knows instead of the open-hand search

@@ -26,6 +26,31 @@ namespace Agents.MCTS
         // Leaves selected before their evaluation, unless the constructor is given another number
         public const int DefaultLeavesPerBatch = 256;
 
+        /// <summary>
+        /// Tree updates per decision that LeavesFor keeps with an iteration budget: the tree takes in the evaluations after
+        /// every batch, so small batches search much better at the same budget (800 iterations: 16 leaves, 50 updates,
+        /// against 256 +111 Elo; 5000: 32 leaves, 156 updates, against 256 +54), while larger ones fill the net calls faster
+        /// </summary>
+        public const int UpdatesPerDecision = 100;
+
+        /// <summary>
+        /// Fewest leaves per batch LeavesFor gives: at the same games at once batches of 8 played about half the games per
+        /// hour of 16, and what they would gain in strength is unmeasured
+        /// </summary>
+        public const int MinLeavesPerBatch = 16;
+
+        /// <summary>
+        /// Leaves per batch by default for a search of this many iterations (the Arena's and the Open Seat Agent's): the
+        /// largest power of two that still gives the tree UpdatesPerDecision updates, at least MinLeavesPerBatch and at most
+        /// DefaultLeavesPerBatch (800 and 1600 iterations: 16, 3200 and 5000: 32, 6400: 64, from 25600: 256)
+        /// </summary>
+        public static int LeavesFor(long iterations)
+        {
+            long most = Math.Max(1, iterations / UpdatesPerDecision);
+            long leaves = Math.Min(DefaultLeavesPerBatch, 1L << System.Numerics.BitOperations.Log2((ulong)most));
+            return (int)Math.Max(MinLeavesPerBatch, leaves);
+        }
+
         // Search tree, kept across moves by HandleAction (null until the next Act builds a new one)
         protected MCTSTree? _tree;
         protected double _explorationParameter;

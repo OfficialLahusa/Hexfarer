@@ -1350,6 +1350,20 @@ namespace Tests
             finally { File.Delete(errors); }
         }
 
+        [Theory]
+        [InlineData("--iterations 5000", "-5000it-b32")]
+        [InlineData("--iterations 800", "-800it-b16")]
+        [InlineData("--iterations 5000 --leaves-per-batch 256", "-5000it")]
+        [InlineData("--seconds 0.5", "-0.5s")]
+        public void TheAgentProcessTakesItsBatchFromItsBudget(string options, string suffix)
+        {
+            // Without --leaves-per-batch the batch follows the budget (the Arena's rule for iterations, 256 for time), which
+            // the name in the handshake shows where it isn't 256
+            using OpenSeatAgentProcess process = OpenSeatAgentProcess.Start(
+                $"dotnet \"{Path.Combine(AppContext.BaseDirectory, "OpenSeat.dll")}\" agent --net \"{TinyNet}\" --provider cpu {options}", TimeSpan.FromSeconds(60));
+            Assert.EndsWith(suffix, OpenSeatHandshake.Exchange(process).Name);
+        }
+
         [Fact]
         public void AProcessThatQuitsFailsWithWhatItSaid()
         {

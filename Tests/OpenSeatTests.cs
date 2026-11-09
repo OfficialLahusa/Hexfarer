@@ -1,5 +1,6 @@
 using Agents;
 using Agents.Inference;
+using Agents.MCTS;
 using Common;
 using Common.Actions;
 using Common.OSP;
@@ -326,14 +327,33 @@ namespace Tests
             Assert.Equal(differs, Int(stats["patches"]) > 0);
         }
 
-        [Fact]
-        public void TheAgentReportsItsSearchWorkPerGame()
+        [Theory]
+        [InlineData(800, 0, null, 16, "-800it-b16")]
+        [InlineData(5000, 0, null, 32, "-5000it-b32")]
+        [InlineData(25600, 0, null, 256, "-25600it")]
+        [InlineData(0, 0.5, null, MCTSAgent.DefaultLeavesPerBatch, "-0.5s")]
+        [InlineData(5000, 0, 256, 256, "-5000it")]
+        [InlineData(5000, 0, 64, 64, "-5000it-b64")]
+        public void TheDefaultBatchFollowsTheArenasBudgetRule(long iterations, double seconds, int? given, int leaves, string suffix)
         {
-            // Budget 40 in batches of 16: each search evaluates whole batches, at least 48 leaves (three batches) and at
-            // most a few batches more while the root waits for its moves; two games in a row, each with its own counts
+            // Without a batch size, an iteration budget takes the Arena's (100 tree updates per decision, 16 to 256 leaves)
+            // and a time budget the default; a given one holds. The name shows the batch where it isn't the default's 256
+            SeatAgent agent = new(null!, iterations, seconds, TextWriter.Null, leavesPerBatch: given);
+            Assert.Equal(leaves, agent.LeavesPerBatch);
+            Assert.EndsWith(suffix, agent.Name);
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void TheAgentReportsItsSearchWorkPerGame(bool batchGiven)
+        {
+            // Budget 40 in batches of 16 (given, or the budget rule's for 40): each search evaluates whole batches, at least
+            // 48 leaves (three batches) and at most a few batches more while the root waits for its moves; two games in a
+            // row, each with its own counts
             StateValueNet net = new(TestUtil.FixturePath("ValueNet", "plain_tiny.onnx"), provider: InferenceProvider.CPU);
             StringWriter log = new();
-            SeatAgent agent = new(net, 40, 0, log, leavesPerBatch: 16);
+            SeatAgent agent = new(net, 40, 0, log, leavesPerBatch: batchGiven ? 16 : null);
             Assert.EndsWith("-40it-b16", agent.Name);
             foreach (string game in new[] { "catanatron-100", "catanatron-102" })
             {

@@ -86,7 +86,7 @@ namespace Tests
         public void TheDefaultBatchLeavesTheTreeAHundredUpdates(long iterations, int leaves)
         {
             // The largest power of two with at least 100 updates per decision, from 16 to 256
-            Assert.Equal(leaves, AgentSpec.LeavesFor(iterations));
+            Assert.Equal(leaves, MCTSAgent.LeavesFor(iterations));
             Assert.Equal(leaves, AgentSpec.Parse("A=a.onnx").BatchFor(iterations));
         }
 
