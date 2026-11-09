@@ -286,8 +286,8 @@
 	- 8. SmartSettlers als Baseline (MCTS auf JSettlers, Szita et al. 2009): Code und Regeländerungen klären, dann als Robot oder Open Seat Agent
 	- 9. Ausführlichere Recherche nach weiteren starken Baselines (Paper, Code, Turniere, Bots anderer Plattformen) mit Stärke und Verfügbarkeit, bevor Leaderboard-Ergebnisse als Stand der Technik gelten
 		- Ungetestet (Stand 2026-11-09, Quellen s. Related Work):
-			- distill/ens_distill (Catanatron, 1v1, Code offen): 84,0 % gegen AB:2 (300, beide Sitze, gleiche Würfel), ~0,3 CPU-s pro Partie; AB:2 dort etwa gleichauf mit ValueFunction => stärkster Kandidat
-			- Challenger (Catanatron, 4 Spieler, Code offen): 2 Challenger gegen 2 AB:2 (Belief-Hülle, ohne Pruning) 76,8 % [73,3, 80,0] (600), ohne Spielerhandel; wir 2v2 gegen AB:2 ~90 %
+			- distill/ens_distill (Catanatron, 1v1, Code offen): 84,0 % gegen AB:2 (300, beide Sitze, gleiche Würfel), ~0,3 CPU-s pro Partie; AB:2 dort etwa gleichauf mit ValueFunction => stärkster Kandidat, aber kein direkter Vergleich: Code fest auf 2 Spieler (Gegner = 1 - ich), Hexfarer nur 4 Spieler
+			- Challenger (Catanatron, 4 Spieler, Code offen): 2 Challenger gegen 2 AB:2 (Belief-Hülle, ohne Pruning) 76,8 % [73,3, 80,0] (600), ohne Spielerhandel; wir 2v2 gegen AB:2 ~90 %; direkt auf dem Server (drive.py --bot, challenger_player.py): 2 Challenger gegen 2 AB:2, 1 gegen 3 und 2 gegen 2, je 400 Partien
 			- army (TejasNC/catan-bot, Catanatron, 1v1, Code offen): 79-82 % gegen ValueFunction (je 1000), 88 % gegen AB:2 (60), ~160-280 ms CPU pro Partie
 			- HexMachina (LLM-Agent, Catanatron, 1v1): 54,1 % [51, 57] gegen AB:2 (1000)
 			- Monte Catano (Rust-MCTS): nennt sich stärkster Catan-Bot, ohne Benchmark
