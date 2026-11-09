@@ -31,7 +31,7 @@ Contents:
   (`osp_game.py`), and a recorder that plays Catanatron games and writes them as the referee's protocol messages
   (`record.py --bots AB:2,R,W,R --games 100 --out games.jsonl.gz`), the input of Hexfarer's replay harness. Setup and
   tests: `python -m venv .venv`, `.venv/Scripts/python -m pip install -r requirements.txt`,
-  `.venv/Scripts/python -m unittest test_osp_board test_osp_game test_open_seat_agent test_drive`.
+  `.venv/Scripts/python -m unittest test_osp_board test_osp_game test_open_seat_agent test_drive test_challenger_player`.
   - `open_seat_agent.py --bot AB:2 [--needs world|truth]`: Catanatron's bots as an Open Seat Agent under another
     referee (e.g. Hexfarer's Arena: `--baseline "AB2=command:python open_seat_agent.py --bot AB:2"`); each decision
     rebuilds a Catanatron game from the referee's state, the bot picks among the referee's legal moves.
@@ -39,7 +39,15 @@ Contents:
     (no worlds), steps and lean decisions, gives each decision `--decide-ms` (default 300 000), ends a game at a failure
     and records it in the game's result, which every result line carries; past `--max-failed` failed games (default 3,
     or one in a hundred of the run's) the run stops. `analyze.py` leaves a map with a failed game out of the win rate
-    and counts the failed games; `resume.py` plays those maps again.
+    and counts the failed games; `resume.py` plays those maps again. `--bot NAME=path/to/bot.py` adds an outside
+    Catanatron player the lineup can name, as `catanatron-play --bot` does; bots hear each game's start and end
+    (`before`, `after`) as under Catanatron's own loop.
+  - `challenger_player.py`: the Challenger bot of "Catan Challenger Research"
+    (github.com/midori11111111/catan-challenger-research, GPL-3.0, Catanatron ecf9311) for `drive.py --bot
+    CHALLENGER=challenger_player.py`, lineup entry `CHALLENGER` (gen0) or `CHALLENGER:gen1`. It plays through the
+    release's own bridge (its JavaScript policy in a Node.js process per game, decisions on worlds drawn from public
+    information); `CHALLENGER_ROOT` names the release's folder, Node.js 20+ must be on PATH (Linux or macOS: the
+    release's bridge doesn't run on Windows).
 - `jsettlers/`: JSettlers in protocol terms (Java, built by `jsettlers.py` against JSettlers' jar into `build/`):
   - `OSPBoard`: its classic board in protocol keys, from its own adjacency; `OSPGame`: states, legal moves by its own
     rules and moves played through its game logic.

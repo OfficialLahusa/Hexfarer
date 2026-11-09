@@ -147,6 +147,29 @@ def read_lines(path):
         return [json.loads(line) for line in file]
 
 
+# An outside bot for --bot: picks the first legal move and writes every call of its lifecycle to CALLS
+COUNTING_BOT = '''
+import json
+from catanatron.models.player import Player
+
+
+class CountingBot(Player):
+    def write(self, kind, game):
+        with open(CALLS, "a", encoding="utf-8") as file:
+            file.write(json.dumps({"kind": kind, "game": game.id, "color": self.color.value}) + "\\n")
+
+    def before(self, game):
+        self.write("before", game)
+
+    def decide(self, game, playable_actions):
+        self.write("decide", game)
+        return playable_actions[0]
+
+    def after(self, game):
+        self.write("after", game)
+'''
+
+
 class DriveTests(unittest.TestCase):
     def drive(self, needs="truth", mode="", maps="0:1", decide_ms=None, max_failed=None):
         """One map (4 rotations) with the stand-in agent in the lineup's first entry: what it got, the results, the log"""
@@ -249,6 +272,35 @@ class DriveTests(unittest.TestCase):
         self.assertIn("at most 2", str(stopped.exception))
         self.assertEqual(3, len(read_lines(out)))
         self.assertEqual((3, 3, 4), (drive.default_max_failed(8), drive.default_max_failed(300), drive.default_max_failed(400)))
+
+    def test_an_outside_bot_is_seated_by_its_name_and_sees_each_game_start_and_end(self):
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        boards = os.path.join(directory, "boards.jsonl")
+        with open(boards, "w", encoding="utf-8") as file:
+            file.write(json.dumps({"seed": 905, "board": random_board(5)[0]}) + "\n")
+        calls, bot = os.path.join(directory, "calls.jsonl"), os.path.join(directory, "counting_bot.py")
+        with open(bot, "w", encoding="utf-8") as file:
+            file.write(f"CALLS = {calls!r}\n" + COUNTING_BOT)
+        seen, out = os.path.join(directory, "seen.jsonl"), os.path.join(directory, "results.jsonl")
+        drive.main(["--boards", boards, "--lineup", "open-seat-agent,COUNTER,R,COUNTER", "--bot", f"COUNTER={bot}",
+                    "--open-seat-agent", fake_agent(seen), "--maps", "0:1", "--out", out])
+
+        # Its two entries sit where each rotation puts them, named by the bot's name
+        results = read_lines(out)
+        self.assertEqual(4, len(results))
+        for result in results:
+            self.assertEqual(["COUNTER", "R", "COUNTER"], [result["seats"][(i + result["rotation"]) % 4] for i in (1, 2, 3)])
+        # Every seated bot sees its game start once, decides only after it, and sees it end once, after its last decision,
+        # as under Catanatron's own game loop (the driver plays its own)
+        by_seat = {}
+        for call in read_lines(calls):
+            by_seat.setdefault((call["game"], call["color"]), []).append(call["kind"])
+        self.assertEqual(8, len(by_seat))
+        for kinds in by_seat.values():
+            self.assertEqual("before", kinds[0])
+            self.assertEqual("after", kinds[-1])
+            self.assertEqual(["decide"] * (len(kinds) - 2), kinds[1:-1])
+            self.assertGreater(len(kinds), 2)
 
     def test_a_match_with_a_stand_in_agent(self):
         with tempfile.TemporaryDirectory() as directory:

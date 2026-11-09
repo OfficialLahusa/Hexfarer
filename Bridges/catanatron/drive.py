@@ -13,6 +13,7 @@ One result line per game, with each side's time per decision and the game's resu
 
 Usage: python drive.py --boards boards.jsonl --lineup open-seat-agent,AB:2,AB:2,AB:2 --open-seat-agent "dotnet OpenSeat.dll agent --iterations 5000"
                        --maps 0:25 --out results.jsonl [--log games.jsonl.gz] [--decide-ms 300000] [--max-failed K]
+                       [--bot NAME=path/to/bot.py ...] (outside Catanatron players the lineup names, e.g. challenger_player.py)
 """
 
 import argparse
@@ -33,7 +34,7 @@ import catanatron.players  # noqa: F401 (registers the bots)
 from catanatron import Color, Game, Player
 from catanatron.game import TURNS_LIMIT
 from catanatron.models.enums import ActionPrompt, ActionType
-from catanatron.registry import REGISTRY
+from catanatron.registry import REGISTRY, SpecError
 
 import osp_board
 from osp_game import Encoder, card_set
@@ -371,6 +372,10 @@ def play(game, open_seat_agents, write, game_id, codes, budget_ms=DEFAULT_DECIDE
             agent.send(after)
         except AgentFailure as failure:
             lost(seat, failure, None)
+    # Catanatron's own loop (Game.play) ends a game by telling its observers, the players among them; this driver plays its
+    # own loop, so it tells them here (a bot that runs a process per game, as the Challenger seat, ends it there)
+    for observer in game.observers:
+        observer.after(game)
     return {"game_id": game_id, "seats": codes, "winner": winner_seat, "winner_code": None if winner_seat is None else codes[winner_seat],
             "vp": [p["vp"] for p in final["players"]], "truncated": winner is None, "turns": state.num_turns, "moves": n,
             "seconds": [round(times[s][0], 3) for s in range(4)], "decisions": [times[s][1] for s in range(4)], "result": result}
@@ -387,7 +392,18 @@ def main(argv=None):
     parser.add_argument("--agent-log", help="the agents' standard error (their stats lines)")
     parser.add_argument("--decide-ms", type=int, default=DEFAULT_DECIDE_MS, help="the agents' time per decision (the game's budget)")
     parser.add_argument("--max-failed", type=int, help="failed games the run allows before it stops (default: 3, or 1 in 100 games; negative: any)")
+    parser.add_argument("--bot", action="append", default=[], metavar="NAME=SOURCE",
+                        help="an outside bot the lineup can name, as with catanatron-play's --bot: a Catanatron Player in a Python file "
+                             "(path/to/bot.py, #Class to pick one); repeatable")
     args = parser.parse_args(argv)
+
+    # Outside bots join Catanatron's registry under their names (the class name without NAME=), as its own bots are
+    for spec in args.bot:
+        name, given, source = spec.partition("=")
+        try:
+            REGISTRY.register_source(source if given else name, name if given else None)
+        except SpecError as error:
+            raise SystemExit(f"--bot {spec}: {error}")
 
     lineup = args.lineup.split(",")
     if len(lineup) != 4:
