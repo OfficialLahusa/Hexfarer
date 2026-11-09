@@ -285,6 +285,16 @@
 		- Geplant: SmartSettlers auf 10k Simulationen patchen (N_IT = 1000 fest in originalsmartsettlers/boardlayout/BoardLayout.java), erst 49 % gegen 3 JSettlers 1.x nachstellen, dann gegen uns bei gleicher CPU pro Entscheidung
 	- 8. SmartSettlers als Baseline (MCTS auf JSettlers, Szita et al. 2009): Code und Regeländerungen klären, dann als Robot oder Open Seat Agent
 	- 9. Ausführlichere Recherche nach weiteren starken Baselines (Paper, Code, Turniere, Bots anderer Plattformen) mit Stärke und Verfügbarkeit, bevor Leaderboard-Ergebnisse als Stand der Technik gelten
+		- Ungetestet (Stand 2026-11-09, Quellen s. Related Work):
+			- distill/ens_distill (Catanatron, 1v1, Code offen): 84,0 % gegen AB:2 (300, beide Sitze, gleiche Würfel), ~0,3 CPU-s pro Partie; AB:2 dort etwa gleichauf mit ValueFunction => stärkster Kandidat
+			- Challenger (Catanatron, 4 Spieler, Code offen): 2 Challenger gegen 2 AB:2 (Belief-Hülle, ohne Pruning) 76,8 % [73,3, 80,0] (600), ohne Spielerhandel; wir 2v2 gegen AB:2 ~90 %
+			- army (TejasNC/catan-bot, Catanatron, 1v1, Code offen): 79-82 % gegen ValueFunction (je 1000), 88 % gegen AB:2 (60), ~160-280 ms CPU pro Partie
+			- HexMachina (LLM-Agent, Catanatron, 1v1): 54,1 % [51, 57] gegen AB:2 (1000)
+			- Monte Catano (Rust-MCTS): nennt sich stärkster Catan-Bot, ohne Benchmark
+			- Hexbandit (geschlossen): 99 % "gegen Top-Spieler", ohne Methode
+			- Bots von Catan Universe und colonist.io: keine veröffentlichten Zahlen
+			- Paper-Agents ohne Code bei uns: Gendre/Kaneko, Xenou et al., Rubin et al. (UCT, 58,2 % 1v3 gegen JSettlers mit Handel), Deep Catan, settlers-rl
+			- Starke Menschen: noch keine Partien
 	- 10. Mit unserem Aufbau die Kernzahlen der Baselines nachstellen (Siegquoten und Rechenzeiten, z.B. POMCP-TS-CR 40,70 %/53,65 % gegen 3 Stac bei 10k/40k, SmartSettlers 27 %/49 % gegen 3 JSettlers 1.x bei 1k/10k), bevor eigene Vergleiche gegen sie zählen
 		- Nachgestellt: 4 Stac je ~25 %, POMCP-TS-CR 10k gegen 3 Stac 41,5 % [34,9, 48,4] (200; veröffentlicht 40,70 %; Flags aus der Dissertation erschlossen, ~2,6 min/Partie), SmartSettlers 1k gegen 3 JSettlers 1.x 23,0 % (27 %; der Port hat 1000 Simulationen fest), 4 JSettlers-Robots mit Handel je 22-29 % (400); offen: 40k und die Rechenzeiten
 - Interface für JSettlers Agents/Server
@@ -313,6 +323,11 @@
 - Catan Policy Gradient mit Self-Play (schlägt JSettlers) => Gendre, Kaneko: "Playing Catan with Cross-dimensional Neural Network" (ICONIP 2020) https://arxiv.org/abs/2008.07079
 - Catan RL + MCTS (Hobbyprojekt: Strategie per RL wählen, dann heuristisch spielen) => https://github.com/kvombatkere/Catan-AI
 - Catanatron => https://github.com/bcollazo/catanatron
+- Catanatron-Bots 1v1 (distill: ValueFunction mit Zugplaner, Räuberregeln und gelernter Eröffnung, MLP-Ensemble als Korrektur; 84 % gegen AB:2) => https://github.com/vaibhavsiingh/catan-bots
+- Catanatron-Bot 4 Spieler (Challenger: Heuristik, Handel mit der Bank, Suche nach sicheren Siegfolgen, gelernte Eröffnungsrangfolge; 2v2 76,8 % gegen AB:2) => https://github.com/midori11111111/catan-challenger-research
+- Catanatron-Bot 1v1 (army: Wertfunktion, kurze Vorausschau, gelernte Eröffnung, SPSA-Tuning im Self-Play; 79-82 % gegen ValueFunction) => https://github.com/TejasNC/catan-bot
+- Geschlossene Catan-KI ohne Methode (99 % "gegen Top-Spieler") => Hexbandit https://hexbandit-app.vercel.app/
+- Plattformen mit eigenen Bots ohne Stärkeangaben => Catan Universe https://catanuniverse.com/, colonist.io https://colonist.io/
 - JSettlers => https://nand.net/jsettlers/
 - UCT mit Domänenwissen und Handel gegen JSettlers (1v3, 10k Rollouts: 58,2 ± 7,1 % mit Handel, 41,3 ± 7,7 % ohne, Tab. 1) => Rubin, Paz, Meneguzzi: "Optimizing UCT for Settlers of Catan" (SBGames 2017) https://www.sbgames.org/sbgames2017/papers/ComputacaoFull/175405.pdf
 - POMCP/Belief-MCTS mit Präferenzen aus menschlichen Partien => Dobre, Lascarides: "POMCP with Human Preferences in Settlers of Catan" (AIIDE 2018) https://doi.org/10.1609/aiide.v14i1.13014
