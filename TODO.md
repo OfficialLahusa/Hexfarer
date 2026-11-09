@@ -287,7 +287,6 @@
 	- 9. Ausführlichere Recherche nach weiteren starken Baselines (Paper, Code, Turniere, Bots anderer Plattformen) mit Stärke und Verfügbarkeit, bevor Leaderboard-Ergebnisse als Stand der Technik gelten
 		- Ungetestet (Stand 2026-11-09, Quellen s. Related Work):
 			- distill/ens_distill (Catanatron, 1v1, Code offen): 84,0 % gegen AB:2 (300, beide Sitze, gleiche Würfel), ~0,3 CPU-s pro Partie; AB:2 dort etwa gleichauf mit ValueFunction => stärkster Kandidat, aber kein direkter Vergleich: Code fest auf 2 Spieler (Gegner = 1 - ich), Lanzenbrecher nur 4 Spieler
-			- Challenger (Catanatron, 4 Spieler, Code offen): 2 Challenger gegen 2 AB:2 (Belief-Hülle, ohne Pruning) 76,8 % [73,3, 80,0] (600), ohne Spielerhandel; wir 2v2 gegen AB:2 ~90 %; direkt auf dem Server (drive.py --bot, challenger_player.py): 2 Challenger gegen 2 AB:2, 1 gegen 3 und 2 gegen 2, je 400 Partien
 			- army (TejasNC/catan-bot, Catanatron, 1v1, Code offen): 79-82 % gegen ValueFunction (je 1000), 88 % gegen AB:2 (60), ~160-280 ms CPU pro Partie
 			- HexMachina (LLM-Agent, Catanatron, 1v1): 54,1 % [51, 57] gegen AB:2 (1000)
 			- Monte Catano (Rust-MCTS): nennt sich stärkster Catan-Bot, ohne Benchmark
@@ -295,6 +294,7 @@
 			- Bots von Catan Universe und colonist.io: keine veröffentlichten Zahlen
 			- Paper-Agents ohne Code bei uns: Gendre/Kaneko, Xenou et al., Rubin et al. (UCT, 58,2 % 1v3 gegen JSettlers mit Handel), Deep Catan, settlers-rl
 			- Starke Menschen: noch keine Partien
+		- Challenger getestet (Catanatron, 4 Spieler, gen0, deren eigene Bridge über drive.py --bot; je 400 Partien auf 100 Karten, wir fair 5k): wir 1 gegen 3 Challenger 51,7 % [46,5, 56,8] (gleich stark 25 %), 2 gegen 2 78,8 % [75,0, 82,5]; 2 Challenger gegen 2 AB:2 79,8 % [75,7, 83,8] => deren 76,8 % (600, AB:2 dort nur mit öffentlicher Information, hier sieht es alle Hände) nachgestellt (wir 2 gegen 2 AB:2 ~90 %); Challenger ~63 ms pro Entscheidung, wir ~500 ms; die Website-Stufe "Invincible" (gen0 plus Rollout-Suche) erreicht die Bridge des Release nicht, ungetestet
 	- 10. Mit unserem Aufbau die Kernzahlen der Baselines nachstellen (Siegquoten und Rechenzeiten, z.B. POMCP-TS-CR 40,70 %/53,65 % gegen 3 Stac bei 10k/40k, SmartSettlers 27 %/49 % gegen 3 JSettlers 1.x bei 1k/10k), bevor eigene Vergleiche gegen sie zählen
 		- Nachgestellt: 4 Stac je ~25 %, POMCP-TS-CR 10k gegen 3 Stac 41,5 % [34,9, 48,4] (200; veröffentlicht 40,70 %; Flags aus der Dissertation erschlossen, ~2,6 min/Partie), SmartSettlers 1k gegen 3 JSettlers 1.x 23,0 % (27 %; der Port hat 1000 Simulationen fest), 4 JSettlers-Robots mit Handel je 22-29 % (400); offen: 40k und die Rechenzeiten
 - Interface für JSettlers Agents/Server
