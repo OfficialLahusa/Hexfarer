@@ -381,6 +381,15 @@ def play(game, open_seat_agents, write, game_id, codes, budget_ms=DEFAULT_DECIDE
             "seconds": [round(times[s][0], 3) for s in range(4)], "decisions": [times[s][1] for s in range(4)], "result": result}
 
 
+def agent_log_paths(path, lineup):
+    """Where each entry of the lineup writes its agent's standard error (None for bots, or without a path): a single Open
+    Seat Agent the given path; several each their own file, NAME-entryI.EXT for entry I, since processes writing one file
+    at once break each other's lines"""
+    entries = [i for i, code in enumerate(lineup) if code == "open-seat-agent"]
+    stem, ext = os.path.splitext(path or "")
+    return [None if not path or i not in entries else path if len(entries) == 1 else f"{stem}-entry{i}{ext}" for i in range(len(lineup))]
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Play Catanatron games with Open Seat Agents in some seats")
     parser.add_argument("--boards", required=True, help="protocol boards, one per line ({seed, board}), e.g. from OpenSeat boards")
@@ -389,7 +398,8 @@ def main(argv=None):
     parser.add_argument("--maps", default="0:10", help="the boards to play, FIRST:END (line numbers, END exclusive), several comma-separated")
     parser.add_argument("--out", required=True, help="result lines, appended")
     parser.add_argument("--log", help="every game's referee messages, gzipped (for OpenSeat replay)")
-    parser.add_argument("--agent-log", help="the agents' standard error (their stats lines)")
+    parser.add_argument("--agent-log", help="the agents' standard error (their stats lines); with several Open Seat Agents in the lineup "
+                                            "each writes its own file, NAME-entryI.EXT for lineup entry I")
     parser.add_argument("--decide-ms", type=int, default=DEFAULT_DECIDE_MS, help="the agents' time per decision (the game's budget)")
     parser.add_argument("--max-failed", type=int, help="failed games the run allows before it stops (default: 3, or 1 in 100 games; negative: any)")
     parser.add_argument("--bot", action="append", default=[], metavar="NAME=SOURCE",
@@ -414,9 +424,11 @@ def main(argv=None):
     boards = [board for part in args.maps.split(",") for board in all_boards[slice(*(int(x) for x in part.split(":")))]]
     max_failed = args.max_failed if args.max_failed is not None else default_max_failed(4 * len(boards))
     played = failed_games = 0
-    agent_log = open(args.agent_log, "a", encoding="utf-8") if args.agent_log else subprocess.DEVNULL
+    # Each agent's standard error goes to its own file (see agent_log_paths), open for the whole run
+    agent_logs = [open(p, "a", encoding="utf-8") if p else None for p in agent_log_paths(args.agent_log, lineup)]
     # One agent process per Open Seat Agent entry of the lineup, kept for all games (it follows the entry from seat to seat)
-    agents = [OpenSeatAgent(args.open_seat_agent, agent_log) if code == "open-seat-agent" else None for code in lineup]
+    agents = [OpenSeatAgent(args.open_seat_agent, agent_logs[i] or subprocess.DEVNULL) if code == "open-seat-agent" else None
+              for i, code in enumerate(lineup)]
     log = gzip.open(args.log, "at", encoding="utf-8") if args.log else None
     write = (lambda m: log.write(json.dumps(m, separators=(",", ":")) + "\n")) if log else (lambda m: None)
 
@@ -455,6 +467,10 @@ def main(argv=None):
         for agent in agents:
             if agent:
                 agent.close()
+        # The agents' logs close after their processes ended (nothing more gets written)
+        for file in agent_logs:
+            if file:
+                file.close()
         if log:
             log.close()
 

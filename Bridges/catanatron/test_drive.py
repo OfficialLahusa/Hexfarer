@@ -4,6 +4,7 @@ in the wanted order with the same dice and development cards in every rotation, 
 gives the agent its seat's messages in order and records every game. Run: .venv/Scripts/python -m unittest test_drive
 """
 
+import glob
 import gzip
 import json
 import os
@@ -75,6 +76,23 @@ class ResumeTests(unittest.TestCase):
                 resume.main([directory, "1", "4", "1", "--boards", boards])
             self.assertEqual(["2:4"], printed.getvalue().split())
 
+    def test_redo_lost_reads_past_a_stats_line_two_agents_wrote_into_each_other(self):
+        with tempfile.TemporaryDirectory() as directory:
+            boards = os.path.join(directory, "boards.jsonl")
+            with open(boards, "w", encoding="utf-8") as file:
+                file.writelines(json.dumps({"seed": 500 + i, "board": None}) + "\n" for i in range(4))
+            with open(os.path.join(directory, "results-0.jsonl"), "w", encoding="utf-8") as file:
+                file.writelines(json.dumps({"map_seed": s, "rotation": r}) + "\n" for s in (501, 502, 503) for r in range(4))
+            stat = lambda game_id, lost: json.dumps({"type": "stats", "game_id": game_id, "lost": lost}, separators=(",", ":"))
+            # A merged line first, then the record that a game of map 502 lost the agent's copy
+            with open(os.path.join(directory, "agent-0.log"), "w", encoding="utf-8") as file:
+                file.write(stat("map501-r0", False)[:30] + stat("map503-r2", False) + "\n" + stat("map502-r1", True) + "\n")
+            printed, warned = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(warned):
+                resume.main([directory, "1", "4", "1", "--boards", boards, "--redo-lost"])
+            self.assertEqual(["2:3"], printed.getvalue().split())
+            self.assertIn("1 stats line unreadable", warned.getvalue())
+
 
 class AnalyzeTests(unittest.TestCase):
     def test_our_agent_counts_under_the_projects_current_and_former_name(self):
@@ -98,6 +116,86 @@ class AnalyzeTests(unittest.TestCase):
                 file.writelines(json.dumps(g) + "\n" for g in games)
             summary = analyze.summarize(directory)
             self.assertEqual((1, 4, 1.0, 1), (summary["maps"], summary["games"], summary["win_rate"], summary["failed_games"]))
+
+    def test_a_run_without_our_agent_reports_each_sides_share(self):
+        # Two Challengers (entries 0, 1) against two AlphaBeta (entries 2, 3), three maps: the Challengers win 9 of 12
+        lineup = ["CHALLENGER", "CHALLENGER", "AB:2", "AB:2"]
+        winners = [0, 0, 1, 2, 0, 1, 0, 2, 0, 0, 2, 1]
+        games = [rotated_game(seed, r, lineup, winners[4 * (seed - 1) + r], vp={"CHALLENGER": 8, "AB:2": 4}, seconds={"CHALLENGER": 0.5, "AB:2": 1.0})
+                 for seed in (1, 2, 3) for r in range(4)]
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        write_run(directory, games)
+        summary = analyze.summarize(directory)
+        self.assertNotIn("agent", summary)
+        sides = summary["sides"]
+        self.assertEqual({"CHALLENGER", "AB:2"}, set(sides))
+        self.assertEqual((0.75, 2, 0.5, 8.0, 50.0), tuple(sides["CHALLENGER"][k] for k in ("win_rate", "seats", "equal_strength", "vp", "ms_per_decision")))
+        self.assertEqual((0.25, 2, 0.5, 4.0, 100.0), tuple(sides["AB:2"][k] for k in ("win_rate", "seats", "equal_strength", "vp", "ms_per_decision")))
+        for side in sides.values():
+            self.assertTrue(0 <= side["interval"][0] <= side["win_rate"] <= side["interval"][1] <= 1)
+        # The printed summary names both sides instead of stopping at the missing agent
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            analyze.main([directory])
+        self.assertIn("no seat of ours", printed.getvalue())
+        self.assertIn("CHALLENGER in 2 of 4 seats: wins 75.0%", printed.getvalue())
+        self.assertIn("AB:2 in 2 of 4 seats: wins 25.0%", printed.getvalue())
+
+    def test_our_share_keeps_its_interval_and_appears_among_the_sides(self):
+        # Our agent wins 4, 1, 2 and 0 of the four maps' rotations: the interval spreads, and must stay as before
+        lineup = ["lanzenbrecher-mcts", "AB:2", "AB:2", "AB:2"]
+        ours_wins = [4, 1, 2, 0]
+        games = [rotated_game(seed, r, lineup, 0 if r < ours_wins[seed - 1] else 1) for seed in (1, 2, 3, 4) for r in range(4)]
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        write_run(directory, games)
+        summary = analyze.summarize(directory)
+        # The interval as analyze.py drew it before sides existed: Random(1), maps drawn whole, 2000 resamples
+        maps = {}
+        for g in games:
+            maps.setdefault(g["map_seed"], []).append(g)
+        rng, keys = random.Random(1), list(maps)
+        share = lambda sample: sum(1 for g in sample if analyze.ours(g["seats"][g["winner"]])) / len(sample)
+        boot = sorted(share([g for k in (rng.choice(keys) for _ in keys) for g in maps[k]]) for _ in range(2000))
+        expected = [round(boot[50], 4), round(boot[1949], 4)]
+        self.assertEqual((7 / 16, expected), (summary["win_rate"], summary["interval"]))
+        self.assertLess(expected[0], expected[1])
+        self.assertEqual((7 / 16, expected, 1), (summary["sides"]["ours"]["win_rate"], summary["sides"]["ours"]["interval"], summary["sides"]["ours"]["seats"]))
+        self.assertEqual((9 / 16, 3), (summary["sides"]["AB:2"]["win_rate"], summary["sides"]["AB:2"]["seats"]))
+
+    def test_stats_lines_two_agents_wrote_into_each_other_are_skipped_and_counted(self):
+        lineup = ["lanzenbrecher-mcts", "AB:2", "AB:2", "AB:2"]
+        games = [rotated_game(1, r, lineup, 0) for r in range(4)]
+        stats = [json.dumps({"type": "stats", "game_id": f"map1-r{r}", "seat": r, "patches": int(r == 0), "fallbacks": r, "lost": False}, separators=(",", ":"))
+                 for r in range(4)]
+        # As on the server: the line of rotation 3 lands in the middle of rotation 2's
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        write_run(directory, games, [stats[0], stats[1], stats[2][:40] + stats[3]])
+        summary = analyze.summarize(directory)
+        self.assertEqual((2, 1, 1, 1), (summary["agent_stats_games"], summary["agent_games_with_patches"], summary["agent_fallbacks"], summary["broken_stats_lines"]))
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            analyze.main([directory])
+        self.assertIn("1 stats line unreadable", printed.getvalue())
+
+
+def rotated_game(seed, rotation, lineup, winner_entry, vp=None, seconds=None):
+    """A result record as drive.py writes it: entry i of the lineup sits in seat (i + rotation) % 4"""
+    seats = [None] * 4
+    for i, code in enumerate(lineup):
+        seats[(i + rotation) % 4] = code
+    winner = (winner_entry + rotation) % 4
+    return {"game_id": f"map{seed}-r{rotation}", "map_seed": seed, "rotation": rotation,
+            "lineup": ["open-seat-agent" if analyze.ours(c) else c for c in lineup], "seats": seats, "winner": winner,
+            "vp": [(vp or {}).get(c, 10 if s == winner else 5) for s, c in enumerate(seats)], "truncated": False, "turns": 60,
+            "seconds": [(seconds or {}).get(c, 1.0) for c in seats], "decisions": [10] * 4, "result": {"seats": [{"seat": s, "failures": []} for s in range(4)]}}
+
+
+def write_run(directory, games, agent_lines=()):
+    with open(os.path.join(directory, "results-0.jsonl"), "w", encoding="utf-8") as file:
+        file.writelines(json.dumps(g) + "\n" for g in games)
+    if agent_lines:
+        with open(os.path.join(directory, "agent-0.log"), "w", encoding="utf-8") as file:
+            file.writelines(line + "\n" for line in agent_lines)
 
 
 def as_sets(board):
@@ -193,6 +291,31 @@ class DriveTests(unittest.TestCase):
             arguments += ["--max-failed", str(max_failed)]
         drive.main(arguments)
         return read_lines(seen), read_lines(out), read_lines(log)
+
+    def test_each_open_seat_agent_of_the_lineup_writes_its_own_log(self):
+        # Two agent processes writing one file at once interleave their lines; one agent keeps the given name
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        boards = os.path.join(directory, "boards.jsonl")
+        with open(boards, "w", encoding="utf-8") as file:
+            file.write(json.dumps({"seed": 905, "board": random_board(5)[0]}) + "\n")
+        seen, out = os.path.join(directory, "seen.jsonl"), os.path.join(directory, "results.jsonl")
+
+        def hellos(path):
+            with open(path, encoding="utf-8") as file:
+                return [json.loads(line)["pid"] for line in file if line.startswith('{"type": "hello"')]
+
+        two = os.path.join(directory, "agent-7-0.log")
+        drive.main(["--boards", boards, "--lineup", "open-seat-agent,R,open-seat-agent,R", "--open-seat-agent", fake_agent(seen),
+                    "--maps", "0:1", "--out", out, "--agent-log", two])
+        self.assertEqual(["agent-7-0-entry0.log", "agent-7-0-entry2.log"], sorted(os.path.basename(p) for p in glob.glob(os.path.join(directory, "agent-*.log"))))
+        first, second = hellos(os.path.join(directory, "agent-7-0-entry0.log")), hellos(os.path.join(directory, "agent-7-0-entry2.log"))
+        self.assertEqual((1, 1), (len(first), len(second)))
+        self.assertNotEqual(first, second)
+
+        one = os.path.join(directory, "agent-8-0.log")
+        drive.main(["--boards", boards, "--lineup", "R,open-seat-agent,W,R", "--open-seat-agent", fake_agent(seen), "--maps", "0:1", "--out", out, "--agent-log", one])
+        self.assertEqual(1, len(hellos(one)))
+        self.assertFalse(glob.glob(os.path.join(directory, "agent-8-0-*")))
 
     def test_a_view_agent_sees_only_its_seat_and_a_world_agent_is_refused(self):
         messages, results, logged = self.drive(needs="view")

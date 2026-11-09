@@ -8,6 +8,7 @@ a message before each answer).
 """
 
 import json
+import os
 import sys
 import time
 
@@ -28,6 +29,8 @@ with open(sys.argv[1], "a", encoding="utf-8") as seen:
         seen.write(line if line.endswith("\n") else line + "\n")
         seen.flush()
         if message["type"] == "handshake":
+            # On standard error, as real agents write their stats there: which process this is (for the driver's agent log)
+            print(json.dumps({"type": "hello", "pid": os.getpid()}), file=sys.stderr, flush=True)
             print(answer({"type": "handshake", "protocol": "osp", "version": 2, "name": "first-legal", "rulesets": ["catanatron"],
                           "observe": MODE != "blind", "needs": NEEDS, "lean": MODE == "lean"}), flush=True)
         elif message["type"] == "before":

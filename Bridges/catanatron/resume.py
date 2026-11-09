@@ -10,7 +10,10 @@ import argparse
 import glob
 import json
 import os
+import sys
 from collections import defaultdict
+
+import analyze
 
 
 def ranges(indices):
@@ -54,11 +57,13 @@ def main(argv=None):
     complete = {seed for seed, done in rotations.items() if done == {0, 1, 2, 3} and seed not in failed}
     if args.redo_lost:
         # A map where an agent's copy lost the game (it then played the first legal move) is played again
-        for path in glob.glob(os.path.join(args.run_dir, "agent-*.log")):
-            with open(path, encoding="utf-8", errors="replace") as file:
-                for line in file:
-                    if line.startswith('{"type":"stats"') and json.loads(line)["lost"]:
-                        complete.discard(int(json.loads(line)["game_id"].split("-")[0][3:]))
+        stats, broken = analyze.read_stats(sorted(glob.glob(os.path.join(args.run_dir, "agent-*.log"))))
+        for s in stats:
+            if s.get("lost"):
+                complete.discard(int(s["game_id"].split("-")[0][3:]))
+        # A merged line can't say whether its games lost the copy: they count as played, and the count is shown
+        if broken:
+            print(f"{analyze.unreadable(broken)}; a lost game among them is not played again", file=sys.stderr)
 
     # Unfinished maps leave the results (into partial.jsonl), so every map counts with all four rotations or not at all
     with open(os.path.join(args.run_dir, "partial.jsonl"), "a", encoding="utf-8") as partial:
