@@ -187,6 +187,37 @@ class MCTSOpponentTests(unittest.TestCase):
         self.assertGreater(seats[0]["offers"], 0, seats[0])
 
 
+REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
+# Hexfarer's own agent, as the repository builds it (dotnet build OpenSeat -c Release), and a tiny net of the tests
+OPEN_SEAT = os.environ.get("OPEN_SEAT_DLL", os.path.join(REPO, "OpenSeat", "bin", "Release", "net10.0", "OpenSeat.dll"))
+TINY_NET = os.path.join(REPO, "Tests", "Fixtures", "ValueNet", "policy_tiny.onnx")
+
+
+@unittest.skipUnless(stacsettlers.available() and os.path.exists(OPEN_SEAT), "needs a JDK, StacSettlers' jar in STACSETTLERS_JAR and a built OpenSeat")
+class HexfarerTradingTests(unittest.TestCase):
+    """Hexfarer's own agent (OpenSeat agent, which keeps a copy of the game and checks it against each decision's state)
+    trading in chat (osp.trade_in_chat), open-hand and fair, at a few iterations: its copy follows every decision about an
+    offer, so it never gets lost, and it trades"""
+
+    def check(self, flags):
+        stacsettlers.build()
+        agent = f'dotnet "{OPEN_SEAT}" agent --net "{TINY_NET}" --iterations 16 --leaves-per-batch 16 --provider cpu --threads 1 {flags}'.strip()
+        output, _ = play(2, agent, tempfile.mkdtemp(), name="OSPHexfarerTrade", properties={"osp.trade_in_chat": "true"})
+        lines, seats = results(output)
+        self.assertEqual(2, len(lines), output[-3000:])
+        for line, seat in zip(lines, seats):
+            self.assertIsNotNone(line["winner"], line)
+            self.assertEqual((0, [], 0), (seat["fallbacks"], seat["failures"], seat["stalls"]), seat)
+        self.assertGreater(sum(seat["answers"] for seat in seats), 0, seats)
+        self.assertGreater(sum(seat["trades"] for seat in seats), 0, seats)
+
+    def test_open_hand(self):
+        self.check("")
+
+    def test_fair(self):
+        self.check("--fair")
+
+
 @unittest.skipUnless(stacsettlers.available(), "needs a JDK and StacSettlers' jar in STACSETTLERS_JAR")
 class FailureTests(unittest.TestCase):
     """An agent that fails: the failure is told to it (if it still listens), recorded with its code in the game's result,

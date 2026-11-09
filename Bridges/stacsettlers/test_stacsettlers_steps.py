@@ -243,7 +243,10 @@ class ChatTradeStepTests(TradeStepTests):
                     # An offer of another seat to this one, its answers and the counteroffer it may make instead
                     self.assertNotEqual(seat, offer["from"], decide)
                     self.assertIn(seat, offer["to"], decide)
-                    self.assertEqual(seat, state["current"], decide)
+                    # The next to answer as the rules name it, the first addressee from the offerer's left (the seat may
+                    # answer out of that order under first_accept)
+                    first = next(s for s in ((offer["from"] + k) % 4 for k in range(1, 4)) if s in offer["to"])
+                    self.assertEqual(first, state["current"], decide)
                     self.assertTrue(offer["give"] and offer["get"], decide)
                     self.assertTrue(decide["legal"] and all(m[0] == "respond" for m in decide["legal"]), decide)
                     self.assertIn(["respond", {"accept": False}], decide["legal"])

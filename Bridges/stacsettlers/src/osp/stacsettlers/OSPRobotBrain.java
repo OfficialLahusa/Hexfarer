@@ -498,8 +498,18 @@ public class OSPRobotBrain extends SOCRobotBrainImpl
             legal.add(Json.array("respond", Json.object("accept", true)));
         Map<String, Object> state = OSPGame.copy(seen.position);
         state.put("prompt", "answer_offer");
-        state.put("current", (long) seat);
-        state.put("offer", Json.object("from", (long) osp.seatOf(from), "give", give, "get", get, "to", to, "answers", new LinkedHashMap<>()));
+        // The next to answer as the rules name it: the first addressee in seat order from the offerer's left (under
+        // first_accept the seat may answer out of that order all the same)
+        int offerer = osp.seatOf(from);
+        long current = seat;
+        for (int k = 1; k < game.maxPlayers; k++)
+            if (to.contains((long) ((offerer + k) % game.maxPlayers)))
+            {
+                current = (offerer + k) % game.maxPlayers;
+                break;
+            }
+        state.put("current", current);
+        state.put("offer", Json.object("from", (long) offerer, "give", give, "get", get, "to", to, "answers", new LinkedHashMap<>()));
         record.seat(seat).answered();
         @SuppressWarnings("unchecked")
         List<Object> move = (List<Object>) ask(seat, legal, seen, state, Json.object("counter", Json.object()));
