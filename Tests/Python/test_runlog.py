@@ -1,7 +1,8 @@
 """Run registry (Agents/Training/runlog.py): the wrapper records command, commit, exit code and output; a tool started by
 the wrapper adds to its run instead of starting a second one, anything it starts becomes a child; events merge per run;
-sync merges without duplicates, copies every run folder however many there are and reports those that did not arrive;
-.NET build commits, dirty diffs and W&B runs are read.
+a run stopped by a signal records its end (the wrapper passes the signal on to its command and waits for it); sync merges
+without duplicates, copies every run folder however many there are and reports those that did not arrive; .NET build
+commits, dirty diffs and W&B runs are read.
 
 Run from the repository root:  python -m unittest discover -s Tests/Python -v
 """
@@ -12,9 +13,12 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -116,6 +120,157 @@ class RunlogTest(unittest.TestCase):
         crashed = next(r for r in runlog.load() if r["name"] == "crashes")
         self.assertEqual(crashed["end"]["exit"], 1)
         self.assertIn("boom", crashed["end"]["error"])
+
+    def run_python(self, code):
+        """Runs code in a fresh Python with runlog importable; returns the finished process"""
+        return subprocess.run(self.python(code), capture_output=True, text=True, timeout=60)
+
+    def test_a_run_stopped_by_a_signal_records_its_end(self):
+        # SIGTERM inside a run (as from kill): the run ends with 128 + 15 and names the signal, the process exits with it
+        stopped = self.run_python("import runlog, signal, time\n"
+                                  "with runlog.begin('train', name='terminated'):\n"
+                                  "    signal.raise_signal(signal.SIGTERM)\n"
+                                  "    time.sleep(30)\n")
+        self.assertEqual(stopped.returncode, 143, stopped.stderr)
+        self.assertNotIn("Traceback", stopped.stderr)
+        # Ctrl-C: 128 + 2
+        self.run_python("import runlog\n"
+                        "with runlog.begin('train', name='interrupted'):\n"
+                        "    raise KeyboardInterrupt\n")
+        # A second signal while the first one unwinds must not cut the cleanup (and the run's end) short
+        twice = self.run_python("import runlog, signal\n"
+                                "with runlog.begin('train', name='twice'):\n"
+                                "    try:\n"
+                                "        signal.raise_signal(signal.SIGTERM)\n"
+                                "    finally:\n"
+                                "        signal.raise_signal(signal.SIGTERM)\n"
+                                "        print('the cleanup ran to its end')\n")
+        self.assertIn("the cleanup ran to its end", twice.stdout, twice.stderr)
+        # A tracked command and the run around it both end by the signal
+        self.run_python("import runlog, signal\n"
+                        "with runlog.begin('selfplay-loop', name='around'):\n"
+                        "    with runlog.track('collect', ['collector'], None) as finish:\n"
+                        "        signal.raise_signal(signal.SIGTERM)\n")
+
+        runs = {r["name"] or r["kind"]: r for r in runlog.load()}
+        for name in ("terminated", "twice", "around", "collect"):
+            self.assertEqual((runs[name]["end"]["exit"], runs[name]["end"].get("signal")), (143, "SIGTERM"), name)
+        self.assertEqual((runs["interrupted"]["end"]["exit"], runs["interrupted"]["end"].get("signal")), (130, "SIGINT"))
+        self.assertNotIn("error", runs["terminated"]["end"])
+
+    def test_a_selfplay_loop_stopped_by_a_signal_ends_its_open_runs(self):
+        loop_dir = os.path.join(self.directory.name, "loop").replace(os.sep, "/")
+        stopped = self.run_python("import runlog, selfplay_loop, signal\n"
+                                  "def stand_in(command, output_path, kind=None):\n"
+                                  "    with runlog.track(kind or 'other', command, output_path):\n"
+                                  "        signal.raise_signal(signal.SIGTERM)\n"
+                                  "selfplay_loop.run = stand_in\n"
+                                  f"selfplay_loop.main(['--loop-dir', {loop_dir!r}, '--start-checkpoint', 'start.ckpt', "
+                                  "'--start-model', 'start.onnx', '--generations', '2'])\n")
+        self.assertEqual(stopped.returncode, 143, stopped.stderr)
+        runs = {r["kind"]: r for r in runlog.load()}
+        for kind in ("selfplay-loop", "selfplay-gen", "collect"):
+            self.assertEqual((runs[kind]["end"]["exit"], runs[kind]["end"].get("signal")), (143, "SIGTERM"), kind)
+
+    def test_begin_keeps_a_programs_own_signal_handlers(self):
+        if threading.current_thread() is not threading.main_thread():
+            self.skipTest("signal handlers can only be set in the main thread")
+        before = signal.getsignal(signal.SIGTERM)
+        try:
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            with runlog.begin("train", name="default"):
+                self.assertNotEqual(signal.getsignal(signal.SIGTERM), signal.SIG_DFL, "a run catches SIGTERM to record its end")
+            self.assertEqual(signal.getsignal(signal.SIGTERM), signal.SIG_DFL, "and gives it back when it ends")
+
+            def own(signum, frame):
+                pass
+            signal.signal(signal.SIGTERM, own)
+            with runlog.begin("train", name="own"):
+                self.assertIs(signal.getsignal(signal.SIGTERM), own, "a handler the program set stays")
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            with runlog.begin("train", name="ignored"):
+                self.assertEqual(signal.getsignal(signal.SIGTERM), signal.SIG_IGN, "an ignored signal stays ignored")
+        finally:
+            signal.signal(signal.SIGTERM, before)
+
+    def wrap_with_a_signal(self, signum, child_seconds, name):
+        """Runs a child that prints a line every 0.1 s for child_seconds under the wrapper and raises signum in this process
+        after 1 s; a guard handler catches the signal if the wrapper does not. Returns (exit code, seconds, guard hits)."""
+        if threading.current_thread() is not threading.main_thread():
+            self.skipTest("signal handlers can only be set in the main thread")
+        hits = []
+
+        def guard(s, f):
+            hits.append(s)
+        before = signal.signal(signum, guard)
+        timer = threading.Timer(1.0, signal.raise_signal, [signum])
+        try:
+            timer.start()
+            started = time.time()
+            code = runlog.wrap("other", self.python(f"import time\nfor i in range({int(child_seconds * 10)}):\n"
+                                                    "    print(i, flush=True); time.sleep(0.1)\nprint('done')"),
+                               name=name, quiet=True)
+            seconds = time.time() - started
+            self.assertEqual(len(hits), 0, "the signal reached this process's handler instead of the wrapper's")
+            self.assertIs(signal.getsignal(signum), guard, "the wrapper restores the handler it found")
+        finally:
+            timer.cancel()
+            signal.signal(signum, before)
+        return code, seconds, hits
+
+    def test_the_wrapper_passes_sigterm_on_and_records_the_end(self):
+        code, seconds, _ = self.wrap_with_a_signal(signal.SIGTERM, 30, "terminated")
+        self.assertNotEqual(code, 0)
+        self.assertLess(seconds, 15, "the command must be stopped, not run to its end")
+        (run,) = runlog.load()
+        self.assertEqual(run["end"]["signal"], "SIGTERM")
+        self.assertEqual(run["end"]["exit"], code)
+        with open(os.path.join(self.root, run["id"], "console.log"), encoding="utf-8") as file:
+            self.assertIn("5", file.read().split(), "what the command printed before the signal is kept")
+
+    def test_the_wrapper_waits_for_a_command_that_got_the_terminals_ctrl_c(self):
+        # From the terminal Ctrl-C reaches the command as well; the wrapper doesn't pass it on a second time and keeps
+        # recording until the command ends (Arena prints its result so far after a Ctrl-C)
+        original = runlog._terminal_sent_it
+        runlog._terminal_sent_it = lambda: True
+        try:
+            code, seconds, _ = self.wrap_with_a_signal(signal.SIGINT, 2, "interrupted")
+        finally:
+            runlog._terminal_sent_it = original
+        self.assertEqual(code, 0, "this command does not react to Ctrl-C, so it finishes")
+        (run,) = runlog.load()
+        self.assertEqual((run["end"]["signal"], run["end"]["last_line"]), ("SIGINT", "done"))
+
+    def test_the_wrapper_leaves_an_ignored_signal_ignored(self):
+        # A background job ignores Ctrl-C; so does its wrapper, which doesn't record or pass on what it ignores
+        if threading.current_thread() is not threading.main_thread():
+            self.skipTest("signal handlers can only be set in the main thread")
+        before = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        timer = threading.Timer(1.0, signal.raise_signal, [signal.SIGINT])
+        try:
+            timer.start()
+            code = runlog.wrap("other", self.python("import time\nfor i in range(20):\n    print(i, flush=True); time.sleep(0.1)"),
+                               name="background", quiet=True)
+            self.assertEqual(signal.getsignal(signal.SIGINT), signal.SIG_IGN)
+        finally:
+            timer.cancel()
+            signal.signal(signal.SIGINT, before)
+        self.assertEqual(code, 0)
+        (run,) = runlog.load()
+        self.assertNotIn("signal", run["end"])
+
+    @unittest.skipIf(os.name == "nt", "Windows' console sends Ctrl-C to every process itself; it can't be passed on")
+    def test_the_wrapper_passes_on_a_ctrl_c_that_was_sent_to_it_alone(self):
+        original = runlog._terminal_sent_it
+        runlog._terminal_sent_it = lambda: False
+        try:
+            code, seconds, _ = self.wrap_with_a_signal(signal.SIGINT, 30, "interrupted")
+        finally:
+            runlog._terminal_sent_it = original
+        self.assertNotEqual(code, 0)
+        self.assertLess(seconds, 15)
+        (run,) = runlog.load()
+        self.assertEqual(run["end"]["signal"], "SIGINT")
 
     def test_a_registry_that_fails_during_a_run_does_not_stop_the_work(self):
         os.environ[runlog.ENV_PARENT] = "the-caller"

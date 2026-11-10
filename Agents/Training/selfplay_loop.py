@@ -124,9 +124,12 @@ def main(argv=None):
     with runlog.begin("selfplay-loop", name=os.path.basename(os.path.normpath(args.loop_dir)), outputs={"loop_dir": args.loop_dir}) as run:
         try:
             code = run_loop(args, generation_runs)
-        finally:
+        except BaseException as error:
+            # The generation it stopped in (the only one still open) ends the way the loop does: by an error, or a signal
+            ending, fields = runlog.ended_by(error)
             for generation_run in generation_runs:
-                generation_run.end(1)  # only one stopped by an exception is still open
+                generation_run.end(ending, **fields)
+            raise
         run.result(stopped_by="an evaluation" if code == 2 else "generations done")
     return code
 

@@ -16,6 +16,10 @@ Two ways in:
   the wrapper, a tool adds its results to the wrapper's run instead of starting a second one; anything it starts itself
   becomes a child run (LANZENBRECHER_RUN_PARENT).
 
+A run stopped by a signal still gets its end event, with "signal" naming it: a tool's run on Ctrl-C (exit 130), SIGTERM
+or SIGHUP (128 + its number; the tool then exits with that code), and the wrapper's run when its command has ended after
+the wrapper passed the signal on (Ctrl-C from the terminal reaches the command by itself and isn't passed on twice).
+
 More commands: list, show ID, sync (pulls another machine's registry over ssh), import-wandb (backfill from W&B runs),
 add (enters a run by hand, e.g. reconstructed from logs).
 """
@@ -27,9 +31,11 @@ import os
 import re
 import secrets
 import shlex
+import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -39,6 +45,81 @@ KINDS = ("train", "export", "precision", "selfplay-loop", "selfplay-gen", "colle
 
 # Set for the processes a run starts: the run they belong to, and whether they were started directly by the wrapper
 ENV_ID, ENV_DIRECT, ENV_PARENT = "LANZENBRECHER_RUN_ID", "LANZENBRECHER_RUN_DIRECT", "LANZENBRECHER_RUN_PARENT"
+# Signals that stop a run (kill, a closed terminal or ssh session); those a platform lacks are left out where they're set
+STOP_SIGNALS = ("SIGTERM", "SIGHUP")
+
+
+class Stopped(SystemExit):
+    """Raised in a tool's main thread when SIGTERM or SIGHUP arrives during a run, so the run records its end on the way
+    out; uncaught, the process exits with 128 + the signal's number as if the signal had ended it"""
+
+    def __init__(self, signum):
+        super().__init__(128 + signum)
+        self.signal = signal.Signals(signum).name
+
+
+# Set once a signal has stopped a run: further ones are ignored so they can't cut its end short
+_stopping = False
+
+
+def _stop(signum, frame):
+    """The handler begin() sets for STOP_SIGNALS"""
+    global _stopping
+    if _stopping:
+        return
+    _stopping = True
+    raise Stopped(signum)
+
+
+def _set_handlers(handler, names, only_default):
+    """Sets handler for the named signals this platform has (in the main thread only, where Python allows it) and returns
+    {signal: handler before}. A signal the process ignores stays ignored (a background job's Ctrl-C, nohup's SIGHUP), and
+    with only_default so does one the program handles itself."""
+    previous = {}
+    if threading.current_thread() is not threading.main_thread():
+        return previous
+    for name in names:
+        signum = getattr(signal, name, None)
+        if signum is None:
+            continue
+        current = signal.getsignal(signum)
+        # None: a handler set outside Python, which couldn't be put back
+        if current is None or current == signal.SIG_IGN or (only_default and current != signal.SIG_DFL):
+            continue
+        previous[signum] = signal.signal(signum, handler)
+    return previous
+
+
+def _restore_handlers(previous):
+    for signum, handler in previous.items():
+        signal.signal(signum, handler)
+
+
+def _terminal_sent_it():
+    """Whether a Ctrl-C came from the terminal and so reached the wrapped command as well: always on Windows (the console
+    sends it to every process attached to it), on POSIX when this process is in its terminal's foreground group"""
+    if os.name == "nt":
+        return True
+    try:
+        terminal = os.open("/dev/tty", os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        return os.tcgetpgrp(terminal) == os.getpgrp()
+    except OSError:
+        return False
+    finally:
+        os.close(terminal)
+
+
+def ended_by(error):
+    """Exit code and end fields of a run an exception ended: a signal by 128 + its number and its name, anything else as
+    exit 1 with the error"""
+    if isinstance(error, Stopped):
+        return error.code, {"signal": error.signal}
+    if isinstance(error, KeyboardInterrupt):
+        return 130, {"signal": "SIGINT"}
+    return 1, {"error": f"{type(error).__name__}: {error}"[:500]}
 
 
 def registry_root():
@@ -113,6 +194,7 @@ class Run:
         self.started = time.time()
         self.ended = False
         self._env = None
+        self._signals = {}
 
     @property
     def directory(self):
@@ -130,6 +212,7 @@ class Run:
             self._append({"event": "end", "id": self.id, "time": now(), "exit": exit_code,
                           "seconds": round(time.time() - self.started, 1), **fields})
         self._restore_env()
+        self._release_signals()
 
     def _append(self, event):
         """An event of the started run: a registry that can't be written then is reported but doesn't stop the work, which
@@ -155,11 +238,32 @@ class Run:
                 os.environ[key] = value
         self._env = None
 
+    def _catch_signals(self):
+        # Python ends on SIGTERM or SIGHUP without unwinding; as an exception they end this run (and any around it) first.
+        # Only the outermost run of a process sets the handler, and gives it back when it ends
+        self._signals = _set_handlers(_stop, STOP_SIGNALS, only_default=True)
+
+    def _release_signals(self):
+        global _stopping
+        if not self._signals:
+            return
+        try:
+            _restore_handlers(self._signals)
+        except ValueError:
+            # Ended from another thread: the handler stays, it only acts within a run
+            return
+        self._signals = {}
+        _stopping = False
+
     def __enter__(self):
         return self
 
     def __exit__(self, kind, value, traceback):
-        self.end(0 if kind is None else 1, **({} if kind is None else {"error": f"{kind.__name__}: {value}"[:500]}))
+        if kind is None:
+            self.end(0)
+        else:
+            code, fields = ended_by(value)
+            self.end(code, **fields)
         return False
 
 
@@ -204,6 +308,7 @@ def begin(kind, name=None, inputs=None, outputs=None, note=None, **fields):
     else:
         run = start(kind, name=name, inputs=inputs, outputs=outputs, note=note, **fields)
     run._enter_env()
+    run._catch_signals()
     return run
 
 
@@ -225,15 +330,33 @@ def wrap(kind, command, name=None, note=None, inputs=None, outputs=None, root=No
         except OSError as error:
             run.end(127, error=str(error))
             raise
-        with process:
-            for chunk in iter(lambda: process.stdout.read1(65536), b""):
-                log.write(chunk)
-                if not quiet:
-                    sys.stdout.buffer.write(chunk)
-                    sys.stdout.buffer.flush()
-                tail = (tail + chunk)[-4096:]
-        code = process.wait()
-    run.end(code, last_line=last_line(tail.decode("utf-8", errors="replace")))
+        received = []
+
+        def pass_on(signum, frame):
+            # The command decides how it stops (Arena prints its result so far): the signal goes on to it, and the run
+            # ends when the command has ended, with what it printed until then
+            if not received:
+                received.append(signal.Signals(signum).name)
+            if signum == signal.SIGINT and _terminal_sent_it():
+                return
+            try:
+                process.send_signal(signum)
+            except (OSError, ValueError):
+                pass
+
+        previous = _set_handlers(pass_on, ("SIGINT",) + STOP_SIGNALS, only_default=False)
+        try:
+            with process:
+                for chunk in iter(lambda: process.stdout.read1(65536), b""):
+                    log.write(chunk)
+                    if not quiet:
+                        sys.stdout.buffer.write(chunk)
+                        sys.stdout.buffer.flush()
+                    tail = (tail + chunk)[-4096:]
+            code = process.wait()
+        finally:
+            _restore_handlers(previous)
+    run.end(code, last_line=last_line(tail.decode("utf-8", errors="replace")), **({"signal": received[0]} if received else {}))
     return code
 
 
@@ -248,12 +371,12 @@ def track(kind, command, output_path=None, name=None):
         def __init__(self):
             self.done = False
 
-        def __call__(self, code):
+        def __call__(self, code, **fields):
             last = ""
             if output_path and os.path.exists(output_path):
                 with open(output_path, encoding="utf-8", errors="replace") as file:
                     last = last_line(file.read())
-            run.end(code, last_line=last, log=output_path)
+            run.end(code, last_line=last, log=output_path, **fields)
             self.done = True
 
     class Context:
@@ -263,7 +386,8 @@ def track(kind, command, output_path=None, name=None):
 
         def __exit__(self, kind_, value, traceback):
             if not self.finish.done:
-                self.finish(1 if kind_ else 0)
+                code, fields = (0, {}) if kind_ is None else ended_by(value)
+                self.finish(code, **fields)
             return False
 
     return Context()
