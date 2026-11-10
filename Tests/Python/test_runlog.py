@@ -1,6 +1,7 @@
 """Run registry (Agents/Training/runlog.py): the wrapper records command, commit, exit code and output; a tool started by
 the wrapper adds to its run instead of starting a second one, anything it starts becomes a child; events merge per run;
-sync merges without duplicates; .NET build commits, dirty diffs and W&B runs are read.
+sync merges without duplicates, copies every run folder however many there are and reports those that did not arrive;
+.NET build commits, dirty diffs and W&B runs are read.
 
 Run from the repository root:  python -m unittest discover -s Tests/Python -v
 """
@@ -9,6 +10,8 @@ import contextlib
 import io
 import json
 import os
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,6 +22,23 @@ sys.path.insert(0, os.path.join(REPO, "Agents", "Training"))
 
 import runlog  # noqa: E402
 import selfplay_loop  # noqa: E402
+
+
+def posix_shell():
+    """bash for a stand-in of another machine: on Windows Git's (System32's bash.exe would be WSL's), else the system's"""
+    if os.name != "nt":
+        return shutil.which("bash")
+    git = shutil.which("git")
+    folder = os.path.dirname(git) if git else None
+    # git.exe lies in Git\cmd or Git\mingw64\bin; bash.exe in Git\bin
+    for _ in range(3):
+        if folder is None:
+            break
+        candidate = os.path.join(folder, "bin", "bash.exe")
+        if os.path.isfile(candidate):
+            return candidate
+        folder = os.path.dirname(folder)
+    return None
 
 
 class RunlogTest(unittest.TestCase):
@@ -154,6 +174,67 @@ class RunlogTest(unittest.TestCase):
         self.assertEqual(runlog.merge(other, lines), 4)
         self.assertEqual(runlog.merge(other, lines + lines[:2]), 0)
         self.assertEqual(len(runlog.load(other)), 1)
+
+    def fake_remote(self, count, folders):
+        """Another machine's registry with count runs, the first `folders` of them with a run folder (later ones were
+        entered by hand and have none); and an ssh stand-in that runs the command in a POSIX shell after cutting it to
+        8191 characters, as Git for Windows' ssh does. Returns (the --ssh string, the remote dir, the ids with folders)."""
+        shell = posix_shell()
+        if shell is None:
+            self.skipTest("no POSIX shell (bash) to stand in for the other machine")
+        remote = os.path.join(self.directory.name, "remote")
+        os.makedirs(remote)
+        ids = [f"20261110-{i:06d}-otherhost-duel-{i:04x}" for i in range(count)]
+        with open(os.path.join(remote, runlog.REGISTRY_FILE), "w", encoding="utf-8") as file:
+            for run_id in ids:
+                file.write(json.dumps({"event": "start", "id": run_id, "time": "2026-11-10T12:00:00+01:00", "kind": "duel"}) + "\n")
+        for run_id in ids[:folders]:
+            os.makedirs(os.path.join(remote, run_id))
+            with open(os.path.join(remote, run_id, "console.log"), "w", encoding="utf-8") as file:
+                file.write(f"output of {run_id}\n")
+        stand_in = os.path.join(self.directory.name, "fake_ssh.py")
+        with open(stand_in, "w", encoding="utf-8") as file:
+            file.write("import os, subprocess, sys\n"
+                       "command = sys.argv[1][:8191]\n"
+                       "data = None\n"
+                       "if os.environ.get('FAKE_SSH_DROP_LAST_NAME') and 'tar c' in command:\n"
+                       "    data = b''.join(sys.stdin.buffer.read().splitlines(keepends=True)[:-1])\n"
+                       f"sys.exit(subprocess.run([{shell!r}, '-c', command], input=data).returncode)\n")
+        return f"{shlex.join([sys.executable, stand_in])}", remote.replace(os.sep, "/"), ids[:folders]
+
+    def test_sync_copies_every_run_folder_however_many_there_are(self):
+        # 300 runs with folders: their names alone are ~12,000 characters, more than the ssh command line carries
+        ssh, remote, with_folders = self.fake_remote(320, 300)
+        os.makedirs(self.root)
+        os.makedirs(os.path.join(self.root, with_folders[5]))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(runlog.main(["sync", "--ssh", ssh, "--remote-dir", remote]), 0)
+        self.assertIn("320 new events, 299 run folders", output.getvalue())
+        for run_id in with_folders:
+            path = os.path.join(self.root, run_id, "console.log")
+            # A folder already here is left as it is
+            self.assertEqual(os.path.isfile(path), run_id != with_folders[5], run_id)
+        with open(os.path.join(self.root, with_folders[-1], "console.log"), encoding="utf-8") as file:
+            self.assertEqual(file.read(), f"output of {with_folders[-1]}\n")
+        self.assertEqual(len(runlog.load()), 320)
+        # Nothing new the second time
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(runlog.main(["sync", "--ssh", ssh, "--remote-dir", remote]), 0)
+        self.assertIn("0 new events, 0 run folders", output.getvalue())
+
+    def test_sync_reports_run_folders_that_did_not_arrive(self):
+        ssh, remote, with_folders = self.fake_remote(4, 3)
+        os.environ["FAKE_SSH_DROP_LAST_NAME"] = "1"
+        try:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(runlog.main(["sync", "--ssh", ssh, "--remote-dir", remote]), 1)
+        finally:
+            os.environ.pop("FAKE_SSH_DROP_LAST_NAME")
+        self.assertIn("4 new events, 2 run folders", output.getvalue())
+        self.assertIn(f"1 run folder did not arrive: {with_folders[-1]}", output.getvalue())
 
     def test_build_commit_of_a_dotnet_program_and_the_diff_of_a_dirty_repository(self):
         sha = "0123456789abcdef0123456789abcdef01234567"

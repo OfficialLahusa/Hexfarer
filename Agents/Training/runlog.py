@@ -313,6 +313,40 @@ def merge(root, lines):
     return len(unique)
 
 
+def sync(ssh, remote_dir, root=None):
+    """Pulls another machine's registry over ssh (the command as a list, e.g. ["ssh", "user@host"]): its events merged
+    in, then the run folders (console logs, diffs) not here yet. Returns (new events, run folders copied, the ids of
+    run folders that should have come but did not)."""
+    root = root or registry_root()
+    remote = shlex.quote(remote_dir)
+    lines = subprocess.run(ssh + [f"cat {remote}/{REGISTRY_FILE} 2>/dev/null"], capture_output=True, check=True).stdout.decode("utf-8").splitlines()
+    added = merge(root, lines)
+    # Only runs started live have a folder there; ask for those, not for every run
+    there = subprocess.run(ssh + [f"cd {remote} && ls -1"], capture_output=True, check=True).stdout.decode("utf-8").splitlines()
+    ids = {json.loads(line)["id"] for line in lines if line.strip()}
+    wanted = sorted((ids & set(there)) - set(os.listdir(root)))
+    if wanted:
+        # The names go to tar on its input: the command line ssh carries is limited (Git for Windows' ssh cuts it at
+        # 8191 characters, which lost every folder after the cut and the error redirect with it)
+        pack = subprocess.Popen(ssh + [f"cd {remote} && tar cf - -T -"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        unpack = subprocess.Popen(["tar", "xf", "-"], stdin=pack.stdout, cwd=root)
+        pack.stdout.close()
+        try:
+            pack.stdin.write("".join(name + "\n" for name in wanted).encode("utf-8"))
+        except OSError:
+            # ssh ended early (e.g. the connection dropped): what did not arrive is reported below
+            pass
+        finally:
+            try:
+                pack.stdin.close()
+            except OSError:
+                pass
+        unpack.wait()
+        pack.wait()
+    missing = [name for name in wanted if not os.path.isdir(os.path.join(root, name))]
+    return added, len(wanted) - len(missing), missing
+
+
 def summary(run):
     """One line per run for list"""
     end = run.get("end") or {}
@@ -478,21 +512,13 @@ def main(argv=None):
         print(json.dumps(matches[0], indent=2, ensure_ascii=False))
         return 0
     if args.action == "sync":
-        ssh = shlex.split(args.ssh)
-        remote = subprocess.run(ssh + [f"cat {shlex.quote(args.remote_dir)}/{REGISTRY_FILE} 2>/dev/null"], capture_output=True, check=True)
-        lines = remote.stdout.decode("utf-8").splitlines()
-        added = merge(registry_root(), lines)
-        # The run folders (console logs, diffs) of the runs not here yet
-        ids = sorted({json.loads(line)["id"] for line in lines if line.strip()} - set(os.listdir(registry_root())))
-        if ids:
-            # Only runs started live have a folder; tar skips the others
-            pack = subprocess.Popen(ssh + [f"cd {shlex.quote(args.remote_dir)} && tar cf - " + " ".join(shlex.quote(i) for i in ids) + " 2>/dev/null"],
-                                    stdout=subprocess.PIPE)
-            subprocess.run(["tar", "xf", "-"], stdin=pack.stdout, cwd=registry_root(), check=False)
-            pack.wait()
-        copied = sum(1 for run_id in ids if os.path.isdir(os.path.join(registry_root(), run_id)))
-        print(f"{added} new events, {copied} run folders")
-        return 0
+        added, copied, missing = sync(shlex.split(args.ssh), args.remote_dir)
+        line = f"{added} new events, {copied} run folders"
+        if missing:
+            line += (f"; {len(missing)} run folder{'s' if len(missing) != 1 else ''} did not arrive: "
+                     + ", ".join(missing[:5]) + (" ..." if len(missing) > 5 else ""))
+        print(line)
+        return 1 if missing else 0
     if args.action == "import-wandb":
         print(f"{import_wandb(args.directories)} runs imported")
         return 0
