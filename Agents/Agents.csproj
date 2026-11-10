@@ -11,8 +11,8 @@
          The file lives in Artifacts/, which is not tracked in git. When it is missing, the build downloads it from
          Hugging Face and checks its SHA-256 (disable with -p:DownloadStateValueNet=false). It is copied next to every
          program referencing Agents. -->
-    <StateValueNetModel>state_value_net-n0e4owde.onnx</StateValueNetModel>
-    <StateValueNetModelSha256>0c965b757c623b450d3e419e7e79f6218c8935a2650e77fdb3af921c3911802d</StateValueNetModelSha256>
+    <StateValueNetModel>state_value_net-htvpfhxw.onnx</StateValueNetModel>
+    <StateValueNetModelSha256>12756846ec18fa4701e1fdfc3ff8c47ad19284cafce24c31eda4c73ead9c0bd9</StateValueNetModelSha256>
     <StateValueNetModelUrl>https://huggingface.co/Lahusa/lanzenbrecher-state-value-net/resolve/main/$(StateValueNetModel)</StateValueNetModelUrl>
     <StateValueNetModelPath>$(MSBuildThisFileDirectory)Artifacts\$(StateValueNetModel)</StateValueNetModelPath>
     <DownloadStateValueNet Condition="'$(DownloadStateValueNet)' == ''">true</DownloadStateValueNet>
