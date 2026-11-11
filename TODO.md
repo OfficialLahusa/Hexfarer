@@ -3,7 +3,6 @@
 	- Offen: Cloudflare einrichten (bis dahin antwortet keine der Domains per HTTPS): Zone lanzenbrecher.de, Nameserver und DNSSEC (DS-Eintrag) bei INWX, 2FA; hexfarer.dev und hexfarer.com per Redirect Rule (301, Pfad und Query bleiben) auf lanzenbrecher.de; lanzenbrecher.de bis zur Website auf das GitHub-Repo (Link im README erst mit Website); Email Routing (contact@lanzenbrecher.de)
 	- Später: Cloudflare Tunnel vom Server für Web-Client und Match-Server (wss mit Cloudflare-Zertifikat, kein Fingerprint, keine offenen Ports)
 - README deutlich kürzen, Zusatzinfos ggf. anderswohin auslagern
-	- Alle Semikolons aus dem README entfernen (nicht mein Stil)
 - Save Files auch mit Handel vollständig, alte Dateien laden richtig => keine neue Version nötig
 	- Offen: Edits und Sitze im Save für Share Links
 - Freier Handel umgesetzt (Regelbuch: nur mit dem Spieler am Zug, nach dem Wurf, keine Geschenke/gleichen Rohstoffe; Angebot, Annehmen/Ablehnen/Gegenangebot, Partnerwahl; Regel FreeTrade aus für Self-Play/Datasets, an im Client; Bots antworten per Value Net bzw. Handheuristik, max. 10 Angebote pro Zug)
