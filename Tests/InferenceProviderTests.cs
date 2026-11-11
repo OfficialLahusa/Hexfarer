@@ -90,8 +90,8 @@ namespace Tests
         [SkippableFact]
         public void CUDARunsTheSessionOnAFixedSetOfThreadsWithTheCPUsValues()
         {
-            // CUDA keeps state for every thread that ever ran the session and never frees it, so the net runs its session on a
-            // fixed set of threads however many threads call it (here 64 fresh ones, 8 at a time, as a thread pool's come and go)
+            // CUDA keeps state for every thread that ever ran the session and never frees it, so only a bounded set of threads
+            // runs the session however many threads call it (here 64 fresh ones, 8 at a time, as a thread pool's come and go)
             TestUtil.SkipWithoutModel();
             Skip.IfNot(OperatingSystem.IsLinux(), "CUDA runs on Linux here.");
             StateValueNet gpu = new(TestUtil.ModelPath, provider: InferenceProvider.CUDA);
@@ -118,7 +118,8 @@ namespace Tests
             }
 
             Assert.Empty(failures);
-            Assert.InRange(gpu.SessionThreads, 1, StateValueNet.CUDAThreads);
+            // The first threads ran their own calls, the later ones handed them over: at most twice CUDAThreads in all
+            Assert.InRange(gpu.SessionThreads, StateValueNet.CUDAThreads + 1, 2 * StateValueNet.CUDAThreads);
         }
     }
 }

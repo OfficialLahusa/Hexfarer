@@ -36,9 +36,9 @@ namespace Agents.Inference
         // shape about 4x faster than a dynamic one (measured on an RTX 5080: 566k vs 136k states/s at 256, the CPU 89k).
         public const int DefaultFixedBatchSize = 256;
 
-        // Threads that run the CUDA session's calls at most (see FixedThreads). Measured on an RTX 5060 Ti with random
-        // batches of 1-256 rows: 4 callers at once ran ~122k rows/s at 1.2 GB, 8 ~130-148k at 2.3 GB (both flat), 16 no more
-        // rows but memory still growing (4.5 => 6.4 GB in 100 s), 32 nearly stalled
+        // CUDA session calls at once at most (see FixedThreads; at most twice as many threads ever run the session). Measured
+        // on an RTX 5060 Ti with random batches of 1-256 rows: 4 callers at once ran ~122k rows/s at 1.2 GB, 8 ~130-148k at
+        // 2.3 GB (both flat), 16 no more rows but memory still growing (4.5 => 6.4 GB in 100 s), 32 nearly stalled
         public const int CUDAThreads = 8;
 
         private readonly InferenceSession _session;
@@ -46,8 +46,9 @@ namespace Agents.Inference
         // DirectML doesn't allow parallel Run calls on one session
         private readonly object? _runLock;
 
-        // CUDA's runs go through these threads only: its provider keeps state for every thread that ever ran the session
-        // (~15 MB each, measured) and never frees it, so calls straight from the thread pool made it grow without end
+        // CUDA's runs go through this: its provider keeps state for every thread that ever ran the session (~15 MB each,
+        // measured) and never frees it, so calls straight from the thread pool made it grow without end. The first callers
+        // run their own calls (long-lived workers pay no handover), later ones hand them to fixed threads
         private readonly FixedThreads? _cudaThreads;
 
         public const int PlayerCount = 4;
@@ -64,10 +65,10 @@ namespace Agents.Inference
         public int? FixedBatchSize { get; }
 
         /// <summary>
-        /// Threads that have run the session so far on CUDA (at most CUDAThreads), 0 on the other providers, whose runs stay
-        /// on the calling thread
+        /// Threads that have run the session so far on CUDA (at most twice CUDAThreads: the first callers and the fixed
+        /// threads), 0 on the other providers, whose runs stay on the calling thread
         /// </summary>
-        public int SessionThreads => _cudaThreads?.ThreadsStarted ?? 0;
+        public int SessionThreads => _cudaThreads is FixedThreads threads ? threads.DirectThreads + threads.ThreadsStarted : 0;
 
         /// <summary>
         /// Whether the model also predicts each player's placement distribution (output "placements", models trained with
@@ -232,8 +233,8 @@ namespace Agents.Inference
         }
 
         /// <summary>
-        /// The one place the session runs: on CUDA on its fixed threads (see _cudaThreads), on DirectML one call at a time,
-        /// on the CPU on the calling thread
+        /// The one place the session runs: on CUDA on a bounded set of threads (see _cudaThreads), on DirectML one call at a
+        /// time, on the CPU on the calling thread
         /// </summary>
         private IDisposableReadOnlyCollection<DisposableNamedOnnxValue> SessionRun(List<NamedOnnxValue> inputs, IReadOnlyCollection<string> outputNames)
         {
