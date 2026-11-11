@@ -5,7 +5,8 @@ Every generation:
 1. collect: SelfPlayCollector plays games with the newest net (policy target pruning and root noise as configured there)
 2. convert: DatasetProcessing/selfplay_to_dataset.py turns the run into training arrays
 3. train: train.py continues from the previous checkpoint for a fixed number of samples at a constant learning rate, on a
-   window of the newest generations (equal shares) plus extra data (e.g. the v2 data, against the value drift)
+   window of the newest generations (equal shares; --prefill starts the window with data from elsewhere, e.g. an earlier
+   loop's newest generations, which leave it as the loop's own come in) plus extra data (e.g. the v2 data)
 4. export: export_onnx.py writes the net the next generation collects with (with --fp16 the collection uses a float16
    export of it, the evaluations keep the float32 net)
 
@@ -87,6 +88,16 @@ def command_arguments(template, **values):
     return [part.format(**values) for part in parts]
 
 
+def training_data(prepared, prefill, window, extra_data):
+    """The --data specs of a generation's training: a window of the newest --window prepared directories, in which data
+    from elsewhere (prefill, oldest first) comes before the loop's own generations and leaves first, with equal shares of
+    what the extra data leave, the newest first (the validation runs on the first source), then the extra data as given"""
+    extra_shares = sum(float(spec.rsplit("@", 1)[1]) for spec in extra_data)
+    newest = (list(prefill) + list(prepared))[-window:]
+    share = (1 - extra_shares) / len(newest)
+    return [f"{path}@{share}" for path in reversed(newest)] + list(extra_data)
+
+
 def clearly_worse(line):
     """Whether an evaluation line ("... +12 Elo [-30, +55] ...") puts the upper end of the interval below 0"""
     match = re.search(r"([+-]?\d+) Elo \[([+-]?\d+), ([+-]?\d+)\]", line)
@@ -105,6 +116,8 @@ def main(argv=None):
                         help="collect with float16 exports of the nets (faster where the GPU limits, e.g. CUDA on the server)")
     parser.add_argument("--seed", type=int, default=20261100, help="generation g collects with seed + g")
     parser.add_argument("--window", type=int, default=4, help="newest generations in the training data")
+    parser.add_argument("--prefill", action="append", default=[],
+                        help="prepared data that fills the window before the loop's own generations (repeat, oldest first), e.g. an earlier loop's newest generations")
     parser.add_argument("--extra-data", action="append", default=[], help="further prepared data DIR@SHARE, e.g. the v2 data")
     parser.add_argument("--samples", type=int, default=2_000_000, help="training samples per generation")
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -198,10 +211,9 @@ def run_loop(args, generation_runs):
             save_state(args.loop_dir, state)
 
         if "checkpoint" not in gen:
-            window = [x["prepared"] for x in state["generations"] if "prepared" in x][-args.window:]
-            share = (1 - extra_shares) / len(window)
             # The newest generation first: the validation runs on its held-out games
-            data = [f"{path}@{share}" for path in reversed(window)] + args.extra_data
+            data = training_data([x["prepared"] for x in state["generations"] if "prepared" in x], args.prefill, args.window, args.extra_data)
+            window = len(data) - len(args.extra_data)
             checkpoint_dir = os.path.join(gen_dir, "checkpoints")
             command = [python, os.path.join(HERE, "train.py"), "--init-from", checkpoint, "--target-lambda", str(args.target_lambda),
                        "--policy-temperature", str(args.policy_temperature), "--lr", str(args.lr), "--constant-lr",
@@ -214,7 +226,7 @@ def run_loop(args, generation_runs):
             if not checkpoints:
                 raise RuntimeError(f"train.py wrote no checkpoint into {checkpoint_dir}")
             gen["checkpoint"] = checkpoints[-1]
-            gen["train"] = {"minutes": round((time.time() - started) / 60, 1), "window": len(window),
+            gen["train"] = {"minutes": round((time.time() - started) / 60, 1), "window": window,
                             "val_loss": re.search(r"val_loss=([0-9]+\.[0-9]+)", os.path.basename(checkpoints[-1])).group(1)}
             save_state(args.loop_dir, state)
 
