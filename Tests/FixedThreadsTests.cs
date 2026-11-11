@@ -22,7 +22,7 @@ namespace Tests
         }
 
         [Fact]
-        public void A_caller_that_keeps_calling_runs_its_work_itself()
+        public void ACallerThatKeepsCallingRunsItsWorkItself()
         {
             // A long-lived worker (a BatchingEvaluator's, a self-play net's) pays no handover
             using var threads = new FixedThreads(4, "test");
@@ -34,7 +34,7 @@ namespace Tests
         }
 
         [Fact]
-        public void However_many_threads_call_at_most_twice_its_count_ever_run_work()
+        public void HoweverManyThreadsCallAtMostTwiceItsCountEverRunWork()
         {
             using var threads = new FixedThreads(4, "test");
             var ran = new System.Collections.Concurrent.ConcurrentBag<(int caller, int runner)>();
@@ -49,7 +49,7 @@ namespace Tests
         }
 
         [Fact]
-        public void Later_callers_one_at_a_time_share_one_fixed_thread()
+        public void LaterCallersOneAtATimeShareOneFixedThread()
         {
             using var threads = new FixedThreads(8, "test");
             var handedOver = new List<int>();
@@ -66,7 +66,7 @@ namespace Tests
         }
 
         [Fact]
-        public void No_more_than_its_count_run_at_once_inline_or_handed_over()
+        public void NoMoreThanItsCountRunAtOnceInlineOrHandedOver()
         {
             using var threads = new FixedThreads(3, "test");
             int running = 0, most = 0;
@@ -84,7 +84,7 @@ namespace Tests
         }
 
         [Fact]
-        public void Results_and_exceptions_reach_the_caller_inline_and_handed_over()
+        public void ResultsAndExceptionsReachTheCallerInlineAndHandedOver()
         {
             using var threads = new FixedThreads(1, "test");
             // This thread is the one that runs its own calls
@@ -105,14 +105,14 @@ namespace Tests
 
             Assert.IsType<InvalidOperationException>(handedOver);
             Assert.Equal("handed over", handedOver!.Message);
-            Assert.Contains(nameof(Results_and_exceptions_reach_the_caller_inline_and_handed_over), handedOver.StackTrace);
+            Assert.Contains(nameof(ResultsAndExceptionsReachTheCallerInlineAndHandedOver), handedOver.StackTrace);
             // The fixed thread that ran the failing work goes on with the next
             Assert.Equal("next", next);
             Assert.Equal(1, threads.ThreadsStarted);
         }
 
         [Fact]
-        public void Dispose_ends_its_threads()
+        public void DisposeEndsItsThreads()
         {
             var threads = new FixedThreads(2, "test");
             var ran = new System.Collections.Concurrent.ConcurrentBag<Thread>();
