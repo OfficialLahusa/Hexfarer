@@ -48,6 +48,7 @@ namespace Tests
             Assert.Equal(InferenceProvider.CPU, net.Provider);
             Assert.Null(net.FixedBatchSize);
             Assert.Equal(3 * 4, net.Run(RandomGameBatch(3, 180)).Length);
+            Assert.Equal(3, net.RunRows);
         }
 
         [SkippableFact]
@@ -58,7 +59,8 @@ namespace Tests
             Assert.Equal(StateValueNet.DefaultFixedBatchSize, gpu.FixedBatchSize);
 
             // Exactly the fixed size, padded (1 and 37) and split (300 = 256 + 44)
-            foreach (int size in new[] { 256, 1, 37, 300 })
+            int[] sizes = [256, 1, 37, 300];
+            foreach (int size in sizes)
             {
                 DenseTensor<float> batch = RandomGameBatch(size, 181 + size);
                 float[] expected = cpu.Run(batch), actual = gpu.Run(batch);
@@ -72,6 +74,11 @@ namespace Tests
                 for (int i = 0; i < cpuPlacements.Length; i++)
                     Assert.True(Math.Abs(cpuPlacements[i] - gpuPlacements[i]) < 1e-3, $"batch {size}, placement {i}");
             }
+
+            // Every run had the fixed size (two calls per batch: values, then with placements); the CPU ran the rows as they came
+            int fixedSize = StateValueNet.DefaultFixedBatchSize;
+            Assert.Equal(2 * sizes.Sum(size => (size + fixedSize - 1) / fixedSize) * fixedSize, gpu.RunRows);
+            Assert.Equal(2 * sizes.Sum(), cpu.RunRows);
         }
 
         [SkippableFact]

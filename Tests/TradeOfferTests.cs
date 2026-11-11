@@ -360,6 +360,22 @@ namespace Tests
         }
 
         [Fact]
+        public void TheValueNetRunsOnlyThePositionsItJudges()
+        {
+            // No empty rows to fill a run: the net runs as many rows as there are positions, also when they need several runs
+            (GameState a, sbyte active) = MainPhase();
+            StateValueNet net = Net("sensitive_tiny.onnx");
+            MCTSAgent agent = new MCTSAgent(active, a, valueNet: net, iterationLimit: 16, leavesPerBatch: 8);
+
+            foreach (int count in new[] { 3, 1, MCTSAgent.UtilityBatch, MCTSAgent.UtilityBatch + 44 })
+            {
+                long before = net.RunRows;
+                agent.Utilities(Enumerable.Repeat(a, count).ToList());
+                Assert.Equal(count, net.RunRows - before);
+            }
+        }
+
+        [Fact]
         public void ValueNetAgentsOfferOnlyLegalTermsToTheOthers()
         {
             int offers = 0;

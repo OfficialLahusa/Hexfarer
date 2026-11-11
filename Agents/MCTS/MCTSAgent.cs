@@ -579,31 +579,29 @@ namespace Agents.MCTS
         private float[] _offerFeatures = [];
 
         /// <summary>
-        /// Positions per run of the net when judging trades: every run has this shape (the last one padded with empty rows),
-        /// since CUDA's memory pool grows with every new batch shape until the GPU runs out of memory
+        /// Positions per run of the net when judging trades at most (more run in several), which bounds the feature buffer kept
+        /// between decisions
         /// </summary>
         public const int UtilityBatch = 256;
 
         /// <summary>
-        /// Every player's utility of each position by the value net, as the search scores its leaves, in batches of
-        /// UtilityBatch: PlayerCount values per position
+        /// Every player's utility of each position by the value net, as the search scores its leaves, in runs of at most
+        /// UtilityBatch positions: PlayerCount values per position
         /// </summary>
         public double[] Utilities(IReadOnlyList<GameState> states)
         {
             int dim = _stateVectorizer.FeatureDim, players = MCTSNode.PlayerCount;
-            // One feature buffer for a full batch, reused across decisions (no per-call allocation on the large object heap)
+            // One feature buffer for a full run, reused across decisions (no per-call allocation on the large object heap)
             if (_offerFeatures.Length < UtilityBatch * dim) _offerFeatures = new float[UtilityBatch * dim];
             double[] utilities = new double[states.Count * players];
             for (int start = 0; start < states.Count; start += UtilityBatch)
             {
-                // Positions in this chunk; the rest of the batch stays zero and its outputs are ignored
+                // Positions in this run, and only these go to the net (the vectorizer clears each row it writes)
                 int rows = Math.Min(UtilityBatch, states.Count - start);
-                Span<float> features = _offerFeatures.AsSpan(0, UtilityBatch * dim);
-                features.Clear();
+                Span<float> features = _offerFeatures.AsSpan(0, rows * dim);
                 for (int i = 0; i < rows; i++)
                     _stateVectorizer.VectorizeInto(states[start + i], features.Slice(i * dim, dim));
-                // Always the full shape [UtilityBatch, dim], whatever the number of positions
-                var input = new DenseTensor<float>(_offerFeatures.AsMemory(0, UtilityBatch * dim), [UtilityBatch, dim]);
+                var input = new DenseTensor<float>(_offerFeatures.AsMemory(0, rows * dim), [rows, dim]);
 
                 // Utilities as at the search's leaves: win probabilities alone, or mixed with the placements
                 if (_placementWeight == 0)

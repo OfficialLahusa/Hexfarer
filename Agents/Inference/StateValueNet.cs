@@ -51,6 +51,9 @@ namespace Agents.Inference
         // run their own calls (long-lived workers pay no handover), later ones hand them to fixed threads
         private readonly FixedThreads? _cudaThreads;
 
+        // Rows the session has run (see RunRows)
+        private long _runRows;
+
         public const int PlayerCount = 4;
 
         /// <summary>
@@ -69,6 +72,11 @@ namespace Agents.Inference
         /// threads), 0 on the other providers, whose runs stay on the calling thread
         /// </summary>
         public int SessionThreads => _cudaThreads is FixedThreads threads ? threads.DirectThreads + threads.ThreadsStarted : 0;
+
+        /// <summary>
+        /// Rows the session has run so far, the padding to a fixed batch size included
+        /// </summary>
+        public long RunRows => Interlocked.Read(ref _runRows);
 
         /// <summary>
         /// Whether the model also predicts each player's placement distribution (output "placements", models trained with
@@ -233,11 +241,13 @@ namespace Agents.Inference
         }
 
         /// <summary>
-        /// The one place the session runs: on CUDA on a bounded set of threads (see _cudaThreads), on DirectML one call at a
-        /// time, on the CPU on the calling thread
+        /// The one place the session runs, on the batch as given (counted in RunRows): on CUDA on a bounded set of threads (see
+        /// _cudaThreads), on DirectML one call at a time, on the CPU on the calling thread
         /// </summary>
-        private IDisposableReadOnlyCollection<DisposableNamedOnnxValue> SessionRun(List<NamedOnnxValue> inputs, IReadOnlyCollection<string> outputNames)
+        private IDisposableReadOnlyCollection<DisposableNamedOnnxValue> SessionRun(DenseTensor<float> inputTensor, IReadOnlyCollection<string> outputNames)
         {
+            Interlocked.Add(ref _runRows, inputTensor.Dimensions[0]);
+            var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("state", inputTensor) };
             if (_cudaThreads != null) return _cudaThreads.Run(() => _session.Run(inputs, outputNames));
             if (_runLock == null) return _session.Run(inputs, outputNames);
             lock (_runLock) return _session.Run(inputs, outputNames);
@@ -245,12 +255,7 @@ namespace Agents.Inference
 
         private float[][] RunSession(DenseTensor<float> inputTensor, string[] outputNames)
         {
-            var inputs = new List<NamedOnnxValue>
-            {
-                NamedOnnxValue.CreateFromTensor("state", inputTensor)
-            };
-
-            using var results = SessionRun(inputs, outputNames);
+            using var results = SessionRun(inputTensor, outputNames);
             return outputNames.Select(name => ToFloats(results.First(result => result.Name == name))).ToArray();
 
             // The policy queries come as float16 (half the copy from the GPU), the other outputs as float
@@ -339,9 +344,7 @@ namespace Agents.Inference
             List<string> names = ["logits"];
             if (withPlacements) names.Add("placements");
             if (withPolicy) names.Add("policy_query");
-            var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("state", inputTensor) };
-
-            return new BatchOutputs(SessionRun(inputs, names), Policy?.QueryLength ?? 0);
+            return new BatchOutputs(SessionRun(inputTensor, names), Policy?.QueryLength ?? 0);
         }
 
         /// <summary>
