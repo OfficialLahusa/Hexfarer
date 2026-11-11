@@ -92,6 +92,23 @@ namespace Agents.MCTS
         // Priors from the policy head
         private bool UsesPolicy => _evaluator.Policy != null && !UniformPriors;
 
+        private double _priorTemperature = 1;
+
+        /// <summary>
+        /// Temperature of the policy's priors at every node: softmax(logits / T), so below 1 sharpens and above 1 flattens
+        /// them (1, the default, takes them as trained). LastRootPolicy, which self-play's target pruning reads, holds the
+        /// tempered priors
+        /// </summary>
+        public double PriorTemperature
+        {
+            get => _priorTemperature;
+            set
+            {
+                if (!(value > 0)) throw new ArgumentOutOfRangeException(nameof(value), "The prior temperature must be above 0.");
+                _priorTemperature = value;
+            }
+        }
+
         /// <summary>
         /// The policy's priors of the root's moves from the last search that evaluated the root, before the root noise; null
         /// if the last search reused the root's priors from an earlier search (then they carry no noise)
@@ -213,6 +230,12 @@ namespace Agents.MCTS
             PolicyHead policy = _evaluator.Policy!;
             float[] priors = new float[moves.Count];
             ActionEncoding.Logits(queries.AsSpan(row * policy.QueryLength, policy.QueryLength), policy.Embeddings, policy.Dim, moves, priors);
+            // The temperature divides the logits before the softmax
+            if (_priorTemperature != 1)
+            {
+                float scale = (float)(1 / _priorTemperature);
+                for (int i = 0; i < priors.Length; i++) priors[i] *= scale;
+            }
             ActionEncoding.Softmax(priors);
             return priors;
         }

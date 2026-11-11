@@ -52,6 +52,24 @@ namespace Tests
             Assert.Equal("c1 a.onnx Paranoid c1 b64 f0.25 p0.5 u", spec.ToString());
         }
 
+        [Fact]
+        public void AnAgentSpecReadsAPriorTemperatureBesideAPlacementWeight()
+        {
+            // pt is read before the one-letter p (placement weight); 1 is the default and not shown
+            AgentSpec spec = AgentSpec.Parse("T=a.onnx=pt0.7=p0.5");
+            Assert.Equal(0.7, spec.PriorTemperature);
+            Assert.Equal(0.5, spec.PlacementWeight);
+            Assert.Equal("T a.onnx MaxN p0.5 pt0.7", spec.ToString());
+            Assert.Equal(1, AgentSpec.Parse("T=a.onnx").PriorTemperature);
+            Assert.Throws<ArgumentException>(() => AgentSpec.Parse("T=a.onnx=pt0"));
+
+            // The agent it creates searches with it
+            StateValueNet net = new(PolicyModelPath, provider: InferenceProvider.CPU);
+            GameState state = TestUtil.NewGame();
+            var agent = (MCTSAgent)AgentSpec.Parse($"T={PolicyModelPath}=pt1.4").Create(0, state, net, 16, 0);
+            Assert.Equal(1.4, agent.PriorTemperature);
+        }
+
         [Theory]
         [InlineData("A=x.onnx", 40, 0, 48)]
         [InlineData("A=x.onnx=b32", 40, 0, 64)]

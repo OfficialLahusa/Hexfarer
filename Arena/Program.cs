@@ -62,7 +62,7 @@ namespace Arena
             An AGENT is NAME=command:COMMAND LINE (an Open Seat Agent process per game and seat, see Bridges/PROTOCOL.md)
             or NAME=MODEL.onnx[=OPTION...] with the options MaxN, Paranoid or Random (opponent model, default MaxN),
             cX (exploration constant, default 1.414), bN (leaves per batch; default with --iterations the largest power of
-            two that leaves 100 tree updates per decision, 16 to 256, e.g. 16 at 800 and 32 at 5000; 256 with --seconds), fX (first play reduction, default 0.1), pX (placement weight, default 0), u (uniform priors instead of the policy head's), dN (hidden information:
+            two that leaves 100 tree updates per decision, 16 to 256, e.g. 16 at 800 and 32 at 5000; 256 with --seconds), fX (first play reduction, default 0.1), pX (placement weight, default 0), u (uniform priors instead of the policy head's), ptX (the priors at temperature X, softmax of the logits / X, default 1),dN (hidden information:
             only its seat's view, searched as N determinizations), is (hidden information searched as one tree over the seat's
             information sets) and isfull (that search on the true position, an ablation); without dN or is the agent sees
             every hand. Ablations of the search: norm/nonorm (values scaled to the range seen in the tree or not; MCTS

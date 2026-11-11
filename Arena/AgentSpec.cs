@@ -12,7 +12,8 @@ namespace Arena
     /// An MCTS agent of a duel, given as "NAME=MODEL.onnx[=OPTION...]". Options: an opponent model (MaxN, Paranoid, Random;
     /// MaxN if none), cX exploration constant, bN leaves per batch (default from the iteration budget, 16 to 256, or 256
     /// with a time budget, see BatchFor), fX first play reduction, pX placement weight, u PUCT
-    /// with uniform priors instead of the policy head's, dN hidden information: only its seat's view, searched as N
+    /// with uniform priors instead of the policy head's, ptX the priors at temperature X (softmax of the logits / X, above 0;
+    /// default 1, see MCTSSearch.PriorTemperature), dN hidden information: only its seat's view, searched as N
     /// determinizations (PIMC, see DeterminizedMCTSAgent), is hidden information searched as one tree over the seat's
     /// information sets (see InformationSetMCTSAgent), isfull the same search on the true position (an ablation); without
     /// these the agent sees every hand. Ablations of the search: norm or nonorm selects with or without values scaled to
@@ -37,7 +38,7 @@ namespace Arena
         bool EvaluateNewLeaves = true, bool PlayForcedMovesAtOnce = true, double ReuseDecay = 1, bool MakeOffers = true,
         double OfferMargin = 0.005, int MaxOffers = 3, int OfferWorlds = 8, bool TwoForTwo = false, double AnswerMargin = 0.002, bool Counters = true,
         bool ThreeForOne = false, double AnswerFairness = 1, bool LearnsFromTrades = true, int MaxCards = 3, int Prune = 16, double PartnerFairness = 0,
-        double SetupBudget = 1, string? Command = null)
+        double SetupBudget = 1, string? Command = null, double PriorTemperature = 1)
     {
         /// <summary>
         /// Whether an Open Seat Agent plays the side: a process started from Command (see OpenSeatAgentProxy), given as
@@ -197,6 +198,8 @@ namespace Arena
                         : throw new ArgumentException($"Option \"{option}\" in agent \"{spec}\" needs at least one world."),
                     ['s', 'u', ..] => double.Parse(option[2..], CultureInfo.InvariantCulture) is double factor and > 0 ? result with { SetupBudget = factor }
                         : throw new ArgumentException($"The setup budget factor \"{option}\" in agent \"{spec}\" is not above 0."),
+                    ['p', 't', ..] => double.Parse(option[2..], CultureInfo.InvariantCulture) is double temperature and > 0 ? result with { PriorTemperature = temperature }
+                        : throw new ArgumentException($"The prior temperature \"{option}\" in agent \"{spec}\" is not above 0."),
                     _ when Enum.TryParse(option, out OpponentModel model) => result with { OpponentModel = model },
                     ['c', ..] => result with { Exploration = Number() },
                     ['b', ..] => result with { LeavesPerBatch = int.Parse(option[1..], CultureInfo.InvariantCulture) },
@@ -222,6 +225,7 @@ namespace Arena
             if (FirstPlayReduction != 0.1) options.Add($"f{FirstPlayReduction.ToString(CultureInfo.InvariantCulture)}");
             if (PlacementWeight != 0) options.Add($"p{PlacementWeight.ToString(CultureInfo.InvariantCulture)}");
             if (UniformPriors) options.Add("u");
+            if (PriorTemperature != 1) options.Add($"pt{PriorTemperature.ToString(CultureInfo.InvariantCulture)}");
             if (Determinizations > 0) options.Add($"d{Determinizations}");
             if (InformationSets) options.Add(FullKnowledge ? "isfull" : "is");
             if (NormalizeValues is bool normalize) options.Add(normalize ? "norm" : "nonorm");
@@ -267,7 +271,8 @@ namespace Arena
                 iterationLimit: iterations, leavesPerBatch: BatchFor(iterations), evaluator: leaves)
             {
                 UniformPriors = UniformPriors, FirstPlayReduction = FirstPlayReduction, NormalizeValues = NormalizeValues ?? true, ReuseTree = ReuseTree,
-                EvaluateNewLeaves = EvaluateNewLeaves, PlayForcedMovesAtOnce = PlayForcedMovesAtOnce, SetupBudgetFactor = SetupBudget
+                EvaluateNewLeaves = EvaluateNewLeaves, PlayForcedMovesAtOnce = PlayForcedMovesAtOnce, SetupBudgetFactor = SetupBudget,
+                PriorTemperature = PriorTemperature
             };
             // Offers and counteroffers (TradeOffers), then the answers (MCTSAgent)
             search.Offers.Enabled = MakeOffers;

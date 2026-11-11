@@ -227,6 +227,56 @@ namespace Tests
         }
 
         [Fact]
+        public void APriorTemperatureSharpensOrFlattensThePriorsOfEveryNode()
+        {
+            // softmax(logits / T): at T 0.5 each prior goes with the square of its prior at T 1, at T 2 with the square root,
+            // at the root and at the nodes below it
+            StateValueNet net = new(PolicyModelPath, provider: InferenceProvider.CPU);
+            TestUtil.Seed(413);
+            GameState state = TestUtil.NewGame();
+            TestUtil.PlayUntil(state, TestUtil.IsFreeTurn);
+            MCTSTree Search(double temperature)
+            {
+                var search = new MCTSSearch(new DirectEvaluator(net), new StateVectorizer(), 16, parallelSelection: false) { PriorTemperature = temperature };
+                MCTSTree tree = new(new GameState(state), (sbyte)state.Turn.PlayerIndex, 1.414, model: OpponentModel.MaxN);
+                search.Run(tree, 0, 400);
+                return tree;
+            }
+            static double[] Priors(MCTSNode node) => node.Children.Select(child => (double)child.Prior).ToArray();
+            static double[] Powered(double[] priors, double power)
+            {
+                double[] powered = priors.Select(p => Math.Pow(p, power)).ToArray();
+                return powered.Select(p => p / powered.Sum()).ToArray();
+            }
+            static void AssertClose(double[] expected, double[] actual)
+            {
+                Assert.Equal(expected.Length, actual.Length);
+                for (int i = 0; i < expected.Length; i++) Assert.Equal(expected[i], actual[i], 4);
+            }
+
+            MCTSTree plain = Search(1), sharp = Search(0.5), flat = Search(2);
+            Assert.True(Priors(plain.RootNode).Distinct().Count() > 1);
+            AssertClose(Powered(Priors(plain.RootNode), 2), Priors(sharp.RootNode));
+            AssertClose(Powered(Priors(plain.RootNode), 0.5), Priors(flat.RootNode));
+
+            // A node below the root with its own priors over several moves in both searches (walked in step, breadth first):
+            // the same relation there
+            var queue = new Queue<(MCTSNode Plain, MCTSNode Sharp)>(plain.RootNode.Children.Zip(sharp.RootNode.Children));
+            (MCTSNode Plain, MCTSNode Sharp)? shared = null;
+            while (shared == null && queue.Count > 0)
+            {
+                var (a, b) = queue.Dequeue();
+                if (a.HasPolicyPriors && b.HasPolicyPriors && a.Children.Count > 1 && a.Children.Count == b.Children.Count) shared = (a, b);
+                else foreach (var pair in a.Children.Zip(b.Children)) queue.Enqueue(pair);
+            }
+            Assert.NotNull(shared);
+            AssertClose(Powered(Priors(shared.Value.Plain), 2), Priors(shared.Value.Sharp));
+
+            var invalid = new MCTSSearch(new DirectEvaluator(net), new StateVectorizer(), 16, parallelSelection: false);
+            Assert.Throws<ArgumentOutOfRangeException>(() => invalid.PriorTemperature = 0);
+        }
+
+        [Fact]
         public void DirichletSamplesSumToOneWithTheExpectedSpread()
         {
             Random random = new(9);

@@ -202,6 +202,15 @@ namespace Agents.MCTS
             set => _search.UniformPriors = value;
         }
 
+        /// <summary>
+        /// Temperature of the policy's priors in the search (see MCTSSearch.PriorTemperature), 1 by default
+        /// </summary>
+        public double PriorTemperature
+        {
+            get => _search.PriorTemperature;
+            set => _search.PriorTemperature = value;
+        }
+
         /// <param name="valueNet">Value net for the leaves, the default model if null</param>
         /// <param name="vectorizer">Encoding the value net was trained on, the StateVectorizer for the net's input size if null</param>
         /// <summary>
