@@ -103,7 +103,7 @@
 		- Gates und Anker aller Schleifen liefen mit 256er-Batches (bei 5k ~20 Baum-Updates statt ~156 mit der Budgetregel) => Urteile ggf. verzerrt, die Daten nicht (16er); Schleife 4 g6 mit Budgetregel nachgeprüft (s. o., −27, H0)
 		- Server-GPU RTX 5060 Ti 16 GB läuft (CUDA 13, VRAM-Test und gpu-burn ohne Fehler): Server für SPRT-Duelle, Desktop trainiert, Self-Play auf beiden etwa gleich schnell
 			- Offen: cuDNN; ob die Arena auf CUDA CPU- oder GPU-begrenzt ist
-			- CUDA-Sitzung ohne feste Batch-Form: der Speicherpool wächst mit jeder neuen Form (OpenSeat-Agent ~5,5 GB nach 2 h, mehrere zusammen CUBLAS-Allokationsfehler); Handel und gebündelte Arena laufen in festen Formen, offen für ungebündelte Suchen (OpenSeat, Zeitbudget, Arena auf CUDA ab 256er-Batches: bei 50k It. 7 => 16 GB in 100 min, dann Abbruch) => FixedBatchSize auch für CUDA oder arena_extend_strategy kSameAsRequested, Tempo vorher und nachher messen
+			- CUDA-Speicher wuchs nicht mit den Batch-Formen (ein Thread, 30k zufällige Formen 1-256: 278 MiB flach), sondern mit jedem neuen Thread, der die Session aufruft (~15 MB je Thread, nie freigegeben; Task.Run aus dem Thread-Pool => ohne Ende, 640 Threads 9,4 GB); behoben: Session-Aufrufe nur auf festen Threads (FixedThreads, max. 8: ~130-148k Zeilen/s bei 2,3 GB flach, 16 wächst, 32 stockt), Padding auf 256 entfernt; Arena ungebündelt (30k It.) 30 min: vorher 1,1 => 2,7 GB, nachher 532 MiB flach, gleich viele Spiele
 			- Im Self-Play regelmäßig Stichproben GPU gegen CPU vergleichen (stille Speicherfehler verfälschen sonst die Daten)
 		- Risiken: Bootstrapping (q vom eigenen Net), Kollaps in einen ausnutzbaren Stil
 	- 7. Netzarchitektur v2: erledigt als v2.1 (siehe StateValueNetv2), Graph Transformer zurückgestellt
