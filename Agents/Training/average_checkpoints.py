@@ -55,8 +55,8 @@ def main():
     parser.add_argument("--out", required=True, help="the averaged checkpoint")
     parser.add_argument("checkpoints", nargs="+")
     args = parser.parse_args()
-    # Entry in the run registry: the inputs, the output and how many were averaged
-    with runlog.begin("average", name=os.path.splitext(os.path.basename(args.out))[0],
+    # Entry in the run registry (the registry has no kind of its own for this): the inputs, the output and how many were averaged
+    with runlog.begin("other", name=os.path.splitext(os.path.basename(args.out))[0],
                       inputs={"checkpoints": args.checkpoints}, outputs={"checkpoint": args.out}) as run:
         average_checkpoints(args.checkpoints, args.out)
         run.result(checkpoints=len(args.checkpoints))
