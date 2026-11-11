@@ -6,8 +6,9 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 namespace Tests
 {
     /// <summary>
-    /// The value net on the CPU and with DirectML (GPU, Windows only; skipped where it isn't available): the same outputs,
-    /// also for batches the fixed DirectML batch size has to pad or split
+    /// The value net on the CPU, with DirectML (GPU, Windows only) and with CUDA (GPU, Linux only; both skipped where they
+    /// aren't available): the same outputs, also for batches the fixed DirectML batch size has to pad or split, and on CUDA
+    /// the session run on a fixed set of threads
     /// </summary>
     public class InferenceProviderTests
     {
@@ -84,6 +85,40 @@ namespace Tests
             float[] expected = cpu.Run(batch), actual = gpu.Run(batch);
             for (int i = 0; i < expected.Length; i++)
                 Assert.True(Math.Abs(expected[i] - actual[i]) < 1e-3, $"value {i}: CPU {expected[i]}, DirectML {actual[i]}");
+        }
+
+        [SkippableFact]
+        public void CUDARunsTheSessionOnAFixedSetOfThreadsWithTheCPUsValues()
+        {
+            // CUDA keeps state for every thread that ever ran the session and never frees it, so the net runs its session on a
+            // fixed set of threads however many threads call it (here 64 fresh ones, 8 at a time, as a thread pool's come and go)
+            TestUtil.SkipWithoutModel();
+            Skip.IfNot(OperatingSystem.IsLinux(), "CUDA runs on Linux here.");
+            StateValueNet gpu = new(TestUtil.ModelPath, provider: InferenceProvider.CUDA);
+            Skip.If(gpu.Provider != InferenceProvider.CUDA, "No CUDA device available.");
+            StateValueNet cpu = new(TestUtil.ModelPath, provider: InferenceProvider.CPU);
+            Assert.Equal(0, cpu.SessionThreads);
+
+            StateVectorizer vectorizer = StateVectorizer.For(cpu);
+            DenseTensor<float>[] batches = Enumerable.Range(0, 8).Select(i => RandomGameBatch(1 + 37 * i, 200 + i, vectorizer)).ToArray();
+            LeafValues[] expected = batches.Select(batch => cpu.Evaluate(batch, withPlacements: false, withPolicy: cpu.Policy != null)).ToArray();
+            var failures = new System.Collections.Concurrent.ConcurrentBag<string>();
+            for (int wave = 0; wave < 8; wave++)
+            {
+                var threads = Enumerable.Range(0, 8).Select(i => new Thread(() =>
+                {
+                    LeafValues actual = gpu.Evaluate(batches[i], withPlacements: false, withPolicy: gpu.Policy != null);
+                    for (int j = 0; j < actual.WinProbabilities.Length; j++)
+                        if (Math.Abs(actual.WinProbabilities[j] - expected[i].WinProbabilities[j]) >= 1e-3) { failures.Add($"batch {i}, value {j}"); break; }
+                    for (int j = 0; j < (actual.PolicyQueries?.Length ?? 0); j++)
+                        if (Math.Abs(actual.PolicyQueries![j] - expected[i].PolicyQueries![j]) >= 2e-2) { failures.Add($"batch {i}, query {j}"); break; }
+                })).ToList();
+                threads.ForEach(thread => thread.Start());
+                threads.ForEach(thread => thread.Join());
+            }
+
+            Assert.Empty(failures);
+            Assert.InRange(gpu.SessionThreads, 1, StateValueNet.CUDAThreads);
         }
     }
 }

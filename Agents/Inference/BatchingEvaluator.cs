@@ -17,14 +17,11 @@ namespace Agents.Inference
         private readonly Thread[] _workers;
         private readonly int _maxRows;
         private readonly int _featureDim;
-        private readonly bool _padToMaxRows;
         private long _batches, _rows, _runRows;
 
         /// <param name="nets">One net per worker, all of the same model</param>
         /// <param name="maxRows">Rows per net batch at most; nets with a fixed batch size (DirectML) need it at least this large</param>
-        /// <param name="padToMaxRows">Nets without a fixed batch size run every batch with maxRows rows too (unused rows are
-        /// ignored): one shape instead of one per batch size, since CUDA's memory pool grows with every new shape</param>
-        public BatchingEvaluator(IReadOnlyList<StateValueNet> nets, int maxRows, bool padToMaxRows = false)
+        public BatchingEvaluator(IReadOnlyList<StateValueNet> nets, int maxRows)
         {
             if (nets.Count == 0) throw new ArgumentException("At least one net is needed.", nameof(nets));
             if (nets.Any(net => net.FixedBatchSize < maxRows))
@@ -33,7 +30,6 @@ namespace Agents.Inference
                 throw new ArgumentException("The nets must be of the same model.", nameof(nets));
 
             _maxRows = maxRows;
-            _padToMaxRows = padToMaxRows;
             _featureDim = nets[0].InputDim;
             HasPlacements = nets[0].HasPlacements;
             Policy = nets[0].Policy;
@@ -118,7 +114,7 @@ namespace Agents.Inference
 
                 try
                 {
-                    int runRows = net.FixedBatchSize ?? (_padToMaxRows ? _maxRows : rows);
+                    int runRows = net.FixedBatchSize ?? rows;
                     var input = new DenseTensor<float>(buffer.AsMemory(0, runRows * _featureDim), [runRows, _featureDim]);
                     // The outputs stay in the runtime's memory, and each request gets its rows in its own arrays (those it brought,
                     // which a search reuses): no batch allocates large arrays, which would force full collections

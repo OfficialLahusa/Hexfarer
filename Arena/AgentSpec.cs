@@ -134,8 +134,7 @@ namespace Arena
                     if (!Merges(first.Provider, iterations, sides))
                         return new SideNets(first, null);
                     StateValueNet[] nets = [first, .. Enumerable.Range(1, MergingNets - 1).Select(_ => new StateValueNet(sides[0].ModelPath, provider: provider, fixedBatchSize: rows))];
-                    // CUDA runs each call in the shape it gets, and its memory pool grows with every new shape: all calls get the full one
-                    BatchingEvaluator leaves = new(nets, rows, padToMaxRows: nets[0].Provider == InferenceProvider.CUDA);
+                    BatchingEvaluator leaves = new(nets, rows);
                     // The agents' own runs (encoding, trade judgments, single positions) go to the first worker's net
                     return new SideNets(nets[0], leaves);
                 }

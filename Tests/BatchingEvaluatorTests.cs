@@ -57,34 +57,6 @@ namespace Tests
         }
 
         [Fact]
-        public async Task PaddedBatchesRunTheFullShapeAndKeepEachRequestsRows()
-        {
-            StateValueNet reference = CPUNet();
-            const int MaxRows = 48;
-            using BatchingEvaluator evaluator = new([CPUNet(), CPUNet()], maxRows: MaxRows, padToMaxRows: true);
-            Random random = new(11);
-
-            // Requests of different sizes at once: every net run has all 48 rows, the unused ones left over from earlier runs
-            var requests = Enumerable.Range(0, 120).Select(_ =>
-            {
-                var features = new DenseTensor<float>([1 + random.Next(20), reference.InputDim]);
-                for (int j = 0; j < features.Buffer.Length; j++) features.Buffer.Span[j] = (float)random.NextDouble();
-                return features;
-            }).ToArray();
-
-            LeafValues[] results = await Task.WhenAll(requests.Select(features => Task.Run(() => evaluator.EvaluateAsync(features, false))));
-
-            for (int i = 0; i < requests.Length; i++)
-            {
-                float[] wins = reference.Run(requests[i]);
-                Assert.Equal(wins.Length, results[i].WinProbabilities.Length);
-                for (int j = 0; j < wins.Length; j++) Assert.Equal(wins[j], results[i].WinProbabilities[j], 1e-5);
-            }
-            Assert.Equal(requests.Sum(features => features.Dimensions[0]), evaluator.Rows);
-            Assert.Equal(evaluator.Batches * MaxRows, evaluator.RunRows);
-        }
-
-        [Fact]
         public void AnAgentSearchesThroughTheEvaluatorItIsGiven()
         {
             // Its leaf batches go to the shared evaluator instead of its own net: each of the 48 iterations is a row there, in

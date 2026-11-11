@@ -36,10 +36,19 @@ namespace Agents.Inference
         // shape about 4x faster than a dynamic one (measured on an RTX 5080: 566k vs 136k states/s at 256, the CPU 89k).
         public const int DefaultFixedBatchSize = 256;
 
+        // Threads that run the CUDA session's calls at most (see FixedThreads). Measured on an RTX 5060 Ti with random
+        // batches of 1-256 rows: 4 callers at once ran ~122k rows/s at 1.2 GB, 8 ~130-148k at 2.3 GB (both flat), 16 no more
+        // rows but memory still growing (4.5 => 6.4 GB in 100 s), 32 nearly stalled
+        public const int CUDAThreads = 8;
+
         private readonly InferenceSession _session;
 
         // DirectML doesn't allow parallel Run calls on one session
         private readonly object? _runLock;
+
+        // CUDA's runs go through these threads only: its provider keeps state for every thread that ever ran the session
+        // (~15 MB each, measured) and never frees it, so calls straight from the thread pool made it grow without end
+        private readonly FixedThreads? _cudaThreads;
 
         public const int PlayerCount = 4;
 
@@ -53,6 +62,12 @@ namespace Agents.Inference
         /// work: smaller batches are padded, larger ones split.
         /// </summary>
         public int? FixedBatchSize { get; }
+
+        /// <summary>
+        /// Threads that have run the session so far on CUDA (at most CUDAThreads), 0 on the other providers, whose runs stay
+        /// on the calling thread
+        /// </summary>
+        public int SessionThreads => _cudaThreads?.ThreadsStarted ?? 0;
 
         /// <summary>
         /// Whether the model also predicts each player's placement distribution (output "placements", models trained with
@@ -98,6 +113,7 @@ namespace Agents.Inference
                 try
                 {
                     _session = CreateCUDASession(resolvedPath);
+                    _cudaThreads = new FixedThreads(CUDAThreads, "CUDA session");
                 }
                 catch (Exception e) when (e is OnnxRuntimeException or EntryPointNotFoundException or DllNotFoundException)
                 {
@@ -215,6 +231,17 @@ namespace Agents.Inference
             return pieces.Select(piece => piece.ToArray()).ToArray();
         }
 
+        /// <summary>
+        /// The one place the session runs: on CUDA on its fixed threads (see _cudaThreads), on DirectML one call at a time,
+        /// on the CPU on the calling thread
+        /// </summary>
+        private IDisposableReadOnlyCollection<DisposableNamedOnnxValue> SessionRun(List<NamedOnnxValue> inputs, IReadOnlyCollection<string> outputNames)
+        {
+            if (_cudaThreads != null) return _cudaThreads.Run(() => _session.Run(inputs, outputNames));
+            if (_runLock == null) return _session.Run(inputs, outputNames);
+            lock (_runLock) return _session.Run(inputs, outputNames);
+        }
+
         private float[][] RunSession(DenseTensor<float> inputTensor, string[] outputNames)
         {
             var inputs = new List<NamedOnnxValue>
@@ -222,14 +249,8 @@ namespace Agents.Inference
                 NamedOnnxValue.CreateFromTensor("state", inputTensor)
             };
 
-            if (_runLock == null) return Run(inputs, outputNames);
-            lock (_runLock) return Run(inputs, outputNames);
-
-            float[][] Run(List<NamedOnnxValue> inputs, string[] outputNames)
-            {
-                using var results = _session.Run(inputs, outputNames);
-                return outputNames.Select(name => ToFloats(results.First(result => result.Name == name))).ToArray();
-            }
+            using var results = SessionRun(inputs, outputNames);
+            return outputNames.Select(name => ToFloats(results.First(result => result.Name == name))).ToArray();
 
             // The policy queries come as float16 (half the copy from the GPU), the other outputs as float
             static float[] ToFloats(DisposableNamedOnnxValue result)
@@ -319,12 +340,7 @@ namespace Agents.Inference
             if (withPolicy) names.Add("policy_query");
             var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("state", inputTensor) };
 
-            IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results;
-            if (_runLock == null)
-                results = _session.Run(inputs, names);
-            else
-                lock (_runLock) results = _session.Run(inputs, names);
-            return new BatchOutputs(results, Policy?.QueryLength ?? 0);
+            return new BatchOutputs(SessionRun(inputs, names), Policy?.QueryLength ?? 0);
         }
 
         /// <summary>
