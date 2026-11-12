@@ -197,13 +197,45 @@ namespace Agents.MCTS
             if (childVisits.Length != children.Length)
                 throw new ArgumentException($"{childVisits.Length} visit counts for {children.Length} children.", nameof(childVisits));
 
-            Action[] legal = [.. GetValidActions(RootState)];
+            (Action[] legal, int[] slots) = LegalMoveSlots(children);
             uint[] visits = new uint[legal.Length];
+            for (int c = 0; c < children.Length; c++)
+                visits[slots[c]] = childVisits[c];
+            return (legal, visits);
+        }
+
+        /// <summary>
+        /// A player's mean result over each root move's resolved visits, over all legal moves of the root state (in
+        /// GetValidActions order, like LegalMoveVisits): the search's value of every move, for policy targets from values
+        /// (completed Q). NaN for a move without results, unvisited or not searched at all beside a winning move.
+        /// </summary>
+        public (Action[] moves, double[] values) LegalMoveValues(int player)
+        {
+            MCTSNode[] children = RootNode.ChildArray;
+            (Action[] legal, int[] slots) = LegalMoveSlots(children);
+            double[] values = new double[legal.Length];
+            Array.Fill(values, double.NaN);
+            for (int c = 0; c < children.Length; c++)
+            {
+                // Resolved visits only, like RootValues: a pending visit has no result in the score yet
+                uint resolved = children[c].ResolvedVisitCount;
+                if (resolved > 0) values[slots[c]] = children[c].PlayerScore(player) / resolved;
+            }
+            return (legal, values);
+        }
+
+        /// <summary>
+        /// The root state's legal moves and the index among them of every root child
+        /// </summary>
+        private (Action[] legal, int[] slots) LegalMoveSlots(MCTSNode[] children)
+        {
+            Action[] legal = [.. GetValidActions(RootState)];
+            int[] slots = new int[children.Length];
             // Checked rather than assumed: children in another order would give every target to the wrong move
             if (children.Length == legal.Length && children.Select((child, c) => child.LastAction!.IsSameDecision(legal[c])).All(same => same))
             {
-                childVisits.CopyTo(visits, 0);
-                return (legal, visits);
+                for (int c = 0; c < slots.Length; c++) slots[c] = c;
+                return (legal, slots);
             }
             bool[] matched = new bool[legal.Length];
             for (int c = 0; c < children.Length; c++)
@@ -212,9 +244,9 @@ namespace Agents.MCTS
                 if (m < 0) throw new InvalidOperationException($"The root move {children[c].LastAction} is not among the root state's legal moves.");
                 if (matched[m]) throw new InvalidOperationException($"Two root moves are the legal move {legal[m]}.");
                 matched[m] = true;
-                visits[m] = childVisits[c];
+                slots[c] = m;
             }
-            return (legal, visits);
+            return (legal, slots);
         }
 
         /// <summary>

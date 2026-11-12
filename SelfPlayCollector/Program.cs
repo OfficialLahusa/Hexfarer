@@ -39,6 +39,34 @@ namespace SelfPlayCollector
                 }
             }
 
+            // Policy targets of recorded positions against a deep search: SelfPlayCollector target-check RUN_DIRECTORY OUTPUT [options]
+            if (args.Length >= 1 && args[0] == "target-check")
+            {
+                TargetCheckSettings check;
+                try
+                {
+                    check = TargetCheckSettings.Parse(args[1..]);
+                }
+                catch (Exception e) when (e is ArgumentException or FormatException or OverflowException)
+                {
+                    Console.Error.WriteLine(e.Message);
+                    Console.Error.WriteLine();
+                    Console.Error.WriteLine(TargetCheckSettings.Usage);
+                    return 1;
+                }
+                try
+                {
+                    TargetCheck.Run(check, Console.Out);
+                    return 0;
+                }
+                catch (Exception e) when (e is InvalidOperationException or IOException)
+                {
+                    Console.Error.WriteLine(e.Message);
+                    if (e.InnerException != null) Console.Error.WriteLine(e.InnerException);
+                    return 1;
+                }
+            }
+
             CommandLine commandLine;
             try
             {

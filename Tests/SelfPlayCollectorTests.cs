@@ -5,6 +5,7 @@ using Common;
 using SelfPlayCollector;
 using System.Buffers.Binary;
 using System.Globalization;
+using System.Text.Json;
 using Action = Common.Actions.Action;
 
 namespace Tests
@@ -230,6 +231,99 @@ namespace Tests
                 }
 
                 Assert.Throws<InvalidOperationException>(() => ViewFeatureWriter.ConvertRun(directory, TextWriter.Null));
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            }
+        }
+
+        [Fact]
+        public void TargetCheckSearchesRecordedPositionsShallowWithNoiseCleanAndDeep()
+        {
+            string modelPath = TestUtil.FixturePath("ValueNet", "policy_tiny.onnx");
+            string root = Path.Combine(Path.GetTempPath(), "lanzenbrecher-targetcheck-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                SelfPlaySettings settings = new()
+                {
+                    Games = 4, ConcurrentGames = 4, LeavesPerBatch = 8, FullIterations = 32, FastIterations = 16, FullSearchProbability = 1,
+                    TemperatureMoves = 10, MaxActions = 500, ModelPath = modelPath, Nets = 1, BatchRows = 64, Provider = InferenceProvider.CPU,
+                    Seed = 12, OutputDirectory = root, Name = "run",
+                };
+                SelfPlayCollector.SelfPlayCollector collector = new(settings, TextWriter.Null);
+                Assert.Equal(0, collector.Collect().Errors);
+                string directory = collector.RunDirectory;
+                var samples = ReadCSV(Path.Combine(directory, "samples.csv"));
+                var games = ReadCSV(Path.Combine(directory, "games.csv")).ToDictionary(game => game["game"]);
+
+                // Every recorded position, so some are decided out of turn (discards, answers to trades)
+                string output = Path.Combine(root, "check.jsonl");
+                TargetCheckSettings check = TargetCheckSettings.Parse([directory, output, "--positions", "100000", "--shallow", "32", "--deep", "96", "--leaves", "8",
+                    "--model", modelPath, "--provider", "cpu", "--nets", "1", "--batch", "64", "--concurrent", "8", "--seed", "5"]);
+                Assert.Equal(100000, check.Positions);
+                Assert.Equal(96, check.DeepIterations);
+                Assert.Equal(samples.Count, TargetCheck.Run(check, TextWriter.Null));
+
+                string[] lines = File.ReadAllLines(output);
+                Assert.Equal(samples.Count, lines.Length);
+                int outOfTurn = 0;
+                var seen = new HashSet<(long, int)>();
+                foreach (string line in lines)
+                {
+                    using JsonDocument document = JsonDocument.Parse(line);
+                    JsonElement record = document.RootElement;
+                    long game = record.GetProperty("game").GetInt64();
+                    int action = record.GetProperty("action").GetInt32();
+                    Assert.True(seen.Add((game, action)), "a position was checked twice");
+                    var sample = samples.Single(s => long.Parse(s["game"]) == game && int.Parse(s["action"]) == action);
+                    Assert.Equal(int.Parse(sample["actor"]), record.GetProperty("decider").GetInt32());
+                    Assert.Equal(int.Parse(sample["round"]), record.GetProperty("round").GetInt32());
+
+                    // The position replays from the saved game: its legal moves are the record's moves
+                    var saved = games[sample["game"]];
+                    SaveFile save = SelfPlayWriter.ReadRecord(directory, int.Parse(saved["record_chunk"]), long.Parse(saved["record_offset"]), int.Parse(saved["record_length"]));
+                    GameState state = SelfPlayGame.InitialState(ulong.Parse(saved["seed"]), settings.CenterDesert);
+                    for (int i = 0; i < action; i++) save.PlayedActions[i].Apply(state);
+                    int moves = MCTSTree.GetValidActions(state).Count;
+                    Assert.Equal(moves, record.GetProperty("moves").GetInt32());
+                    if (record.GetProperty("decider").GetInt32() != state.Turn.PlayerIndex) outOfTurn++;
+
+                    double[] prior = record.GetProperty("prior").EnumerateArray().Select(p => p.GetDouble()).ToArray();
+                    Assert.Equal(moves, prior.Length);
+                    Assert.Equal(1.0, prior.Sum(), 4);
+
+                    JsonElement searches = record.GetProperty("searches");
+                    long Total(string name) => searches.GetProperty(name).GetProperty("visits").EnumerateArray().Sum(v => v.GetInt64());
+                    foreach (string name in new[] { "shallow", "clean", "deep" })
+                    {
+                        JsonElement search = searches.GetProperty(name);
+                        long[] visits = search.GetProperty("visits").EnumerateArray().Select(v => v.GetInt64()).ToArray();
+                        long[] pruned = search.GetProperty("pruned").EnumerateArray().Select(v => v.GetInt64()).ToArray();
+                        JsonElement[] q = search.GetProperty("q").EnumerateArray().ToArray();
+                        Assert.Equal(moves, visits.Length);
+                        Assert.Equal(moves, pruned.Length);
+                        Assert.Equal(moves, q.Length);
+                        Assert.Equal(4, search.GetProperty("root").GetArrayLength());
+                        for (int m = 0; m < moves; m++)
+                        {
+                            // A value exactly where the move has visits, a win probability
+                            Assert.Equal(visits[m] == 0, q[m].ValueKind == JsonValueKind.Null);
+                            if (visits[m] > 0) Assert.InRange(q[m].GetDouble(), 0.0, 1.0);
+                            Assert.InRange(pruned[m], 0, visits[m]);
+                        }
+                        // Only the noisy search prunes
+                        if (name != "shallow") Assert.Equal(visits, pruned);
+                    }
+                    Assert.True(Total("deep") > Total("clean"), "the deep search has more visits");
+                    Assert.InRange(Total("clean"), 32 - 8, 32 + 8 * MCTSSearch.MaxBatchesForRoot);
+                }
+                Assert.True(outOfTurn > 0, "no position decided out of turn, so the deciding seat goes untested");
+
+                // An existing output is never overwritten
+                Assert.Throws<IOException>(() => TargetCheck.Run(check, TextWriter.Null));
+                Assert.Throws<ArgumentException>(() => TargetCheckSettings.Parse([directory]));
+                Assert.Throws<ArgumentException>(() => TargetCheckSettings.Parse([directory, output, "--deep", "0"]));
             }
             finally
             {

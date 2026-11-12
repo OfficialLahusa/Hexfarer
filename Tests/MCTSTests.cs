@@ -325,6 +325,61 @@ namespace Tests
             Assert.Equal([(winningIdx, 7u)], SelfPlayCollector.SelfPlayGame.Record(state, 0, tree, 7, vectorizer, features, [1f]).Visits);
         }
 
+        [Fact]
+        public void RootValuesPerLegalMoveFollowTheirMovesAndAreMissingWithoutVisits()
+        {
+            TestUtil.Seed(147);
+            GameState state = TestUtil.NewGame();
+            Assert.True(TestUtil.PlayUntil(state, s => TestUtil.IsFreeTurn(s) && TestUtil.CountBuildings(s, s.Turn.PlayerIndex, Intersection.BuildingType.Settlement) > 0));
+            int playerIdx = state.Turn.PlayerIndex, other = (playerIdx + 1) % 4;
+            PlayerState player = state.Players[playerIdx];
+            foreach ((ResourceCardType type, uint amount) in new[] { (ResourceCardType.Ore, 3u), (ResourceCardType.Grain, 2u) })
+                if (player.ResourceCards.Get(type) < amount)
+                    TestUtil.GiveCards(state, playerIdx, type, amount - player.ResourceCards.Get(type));
+            player.VictoryPoints.SettlementPoints += (byte)(8 - player.VictoryPoints.Total);
+            List<Action> legal = MCTSTree.GetValidActions(state);
+            Assert.True(legal.Count >= 3);
+
+            // Three wins and a loss on the first move, one win on the third, nothing on the second
+            double[] win = new double[4], loss = new double[4];
+            win[playerIdx] = 1;
+            loss[other] = 1;
+            MCTSTree tree = new(new GameState(state), (sbyte)playerIdx, 1.414, model: OpponentModel.MaxN);
+            tree.ExpandNode(tree.RootNode, new GameState(state));
+            MCTSNode[] children = tree.RootNode.ChildArray;
+            for (int i = 0; i < 3; i++) tree.Backpropagate(children[0], win);
+            tree.Backpropagate(children[0], loss);
+            tree.Backpropagate(children[2], win);
+
+            (Action[] moves, double[] values) = tree.LegalMoveValues(playerIdx);
+            Assert.Equal(legal.Count, moves.Length);
+            Assert.All(Enumerable.Range(0, legal.Count), m => Assert.True(moves[m].IsSameDecision(legal[m])));
+            Assert.Equal(0.75, values[0], 12);
+            Assert.True(double.IsNaN(values[1]));
+            Assert.Equal(1.0, values[2], 12);
+            Assert.All(values.Skip(3), value => Assert.True(double.IsNaN(value)));
+            // Another player's results: the loss went to them
+            Assert.Equal(0.25, tree.LegalMoveValues(other).values[0], 12);
+            Assert.Equal(0.0, tree.LegalMoveValues(other).values[2], 12);
+
+            // Children in another order: the values stay with their moves
+            Array.Reverse(tree.RootNode.ChildArray);
+            (moves, double[] reordered) = tree.LegalMoveValues(playerIdx);
+            Assert.All(Enumerable.Range(0, legal.Count), m => Assert.True(moves[m].IsSameDecision(legal[m])));
+            Assert.Equal(values, reordered);
+
+            // One city away from ten points: only the winning move is a child, the other legal moves have no value
+            player.VictoryPoints.SettlementPoints += 1;
+            legal = MCTSTree.GetValidActions(state);
+            int winningIdx = legal.FindIndex(move => move.IsSameDecision(MCTSTree.WinningMove(state, legal)!));
+            MCTSTree winning = new(new GameState(state), (sbyte)playerIdx, 1.414, model: OpponentModel.MaxN);
+            winning.ExpandNode(winning.RootNode, new GameState(state));
+            for (int i = 0; i < 4; i++) winning.Backpropagate(winning.RootNode.Children[0], win);
+            (moves, values) = winning.LegalMoveValues(playerIdx);
+            Assert.Equal(legal.Count, moves.Length);
+            Assert.All(Enumerable.Range(0, legal.Count), m => Assert.True(m == winningIdx ? values[m] == 1.0 : double.IsNaN(values[m])));
+        }
+
         // ================================================================ MCTSAgent with the value net
 
         [SkippableFact]

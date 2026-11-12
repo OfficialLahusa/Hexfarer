@@ -129,6 +129,7 @@ namespace SelfPlayCollector
             Usage: SelfPlayCollector [options]
                    SelfPlayCollector policy-targets RUN_DIRECTORY
                    SelfPlayCollector view-features RUN_DIRECTORY
+                   SelfPlayCollector target-check RUN_DIRECTORY OUTPUT [options]   (see target-check --help)
 
             Plays games with all four seats searching with MCTS (max^n) on one value net and records the positions of
             full searches with the search's values and visits, plus every game's result and save file.
