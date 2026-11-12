@@ -302,8 +302,19 @@ namespace Tests
             Assert.InRange(pruned[1], 0u, 2u);
             (int, uint)[] expected = Enumerable.Range(0, legal.Count).Where(m => pruned[m] > 0).Select(m => (m, pruned[m])).ToArray();
             Assert.Equal(expected, SelfPlayCollector.SelfPlayGame.Record(state, 0, puct, 70, vectorizer, features, clean).Visits);
+            // Beside them the raw visits, the decider's values and the root's priors per legal move, the inputs of Gumbel targets
+            float[] rootPolicy = Enumerable.Range(1, legal.Count).Select(i => (float)i / (legal.Count * (legal.Count + 1) / 2)).ToArray();
+            SelfPlayCollector.RecordedPosition recorded = SelfPlayCollector.SelfPlayGame.Record(state, 0, puct, 70, vectorizer, features, clean, rootPolicy: rootPolicy);
+            Assert.Equal(puct.LegalMoveVisits().visits, recorded.RawVisits);
+            Assert.Equal(puct.LegalMoveValues(playerIdx).values, recorded.Values);
+            Assert.Equal(1.0, recorded.Values[0], 12);
+            Assert.Equal(0.0, recorded.Values[1], 12);
+            Assert.Equal(rootPolicy, recorded.Priors);
+            Assert.Null(SelfPlayCollector.SelfPlayGame.Record(state, 0, puct, 70, vectorizer, features, clean).Priors);
             Array.Reverse(puct.RootNode.ChildArray);
             Assert.Equal(expected, SelfPlayCollector.SelfPlayGame.Record(state, 0, puct, 70, vectorizer, features, clean).Visits);
+            // With the children reversed the values still follow their moves
+            Assert.Equal(recorded.Values, SelfPlayCollector.SelfPlayGame.Record(state, 0, puct, 70, vectorizer, features, clean, rootPolicy: rootPolicy).Values);
 
             // One city away from ten points: the tree searches only the city, the targets still list every legal move
             player.VictoryPoints.SettlementPoints += 1;

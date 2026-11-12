@@ -10,10 +10,14 @@ namespace SelfPlayCollector
     /// <summary>
     /// A position recorded after a full search: the state vector, the player deciding there, the search's mean result of
     /// every player at the root, and the visits of the root moves by their index in MCTSTree.GetValidActions (the order of
-    /// the root's children), only those with visits; Moves are all legal moves in that order (MCTSTree.LegalMoveVisits)
+    /// the root's children), only those with visits; Moves are all legal moves in that order (MCTSTree.LegalMoveVisits).
+    /// Per legal move in the same order, the inputs of Gumbel targets: RawVisits (without target pruning), Values (the
+    /// decider's mean result, NaN without visits) and Priors (the root's priors before the noise, null if the search had
+    /// none); Range is the decider's value range in the tree (null before two distinct values).
     /// </summary>
     internal sealed record RecordedPosition(int ActionIndex, int Round, int Actor, Half[] Features, double[] RootValues, uint RootVisits,
-        long Iterations, (int move, uint visits)[] Visits, Action[] Moves);
+        long Iterations, (int move, uint visits)[] Visits, Action[] Moves, uint[] RawVisits, double[] Values, float[]? Priors,
+        (double Min, double Max)? Range);
 
     /// <summary>
     /// A played game: its ID and seed, the final state with all actions (a save file replays them from the seed's initial
@@ -98,7 +102,7 @@ namespace SelfPlayCollector
 
                     if (full)
                         positions.Add(Record(state, actions.Count, tree, search.LastSearch.Iterations, vectorizer, features,
-                            settings.PruneTargets ? search.LastRootPolicy : null, trackers?[actor]));
+                            settings.PruneTargets ? search.LastRootPolicy : null, trackers?[actor], search.LastRootPolicy));
 
                     action = searchedMoves < settings.TemperatureMoves ? tree.SampleMove(settings.Temperature, random) : tree.GetMostPromisingMove();
                     searchedMoves++;
@@ -128,8 +132,10 @@ namespace SelfPlayCollector
         /// <param name="cleanPriors">The root's priors before the root noise, to record the visits without those the noise
         /// caused (MCTSTree.PrunedRootVisits); null records the visits as they are</param>
         /// <param name="tracker">Under hidden information the actor's tracker: the position is recorded as its view</param>
+        /// <param name="rootPolicy">The root's priors before the noise over the legal moves (MCTSSearch.LastRootPolicy), recorded
+        /// for Gumbel targets; null, or of another length, records none</param>
         internal static RecordedPosition Record(GameState state, int actionIndex, MCTSTree tree, long iterations, IStateVectorizer vectorizer, float[] features,
-            float[]? cleanPriors, BeliefTracker? tracker = null)
+            float[]? cleanPriors, BeliefTracker? tracker = null, float[]? rootPolicy = null)
         {
             if (tracker != null) ViewVectorizer.VectorizeView(state, tracker, features);
             else vectorizer.VectorizeInto(state, features);
@@ -143,8 +149,16 @@ namespace SelfPlayCollector
             for (int i = 0; i < moves.Length; i++)
                 if (counts[i] > 0) visits.Add((i, counts[i]));
 
-            return new RecordedPosition(actionIndex, state.Turn.RoundCounter, tree.RootNode.DeciderIndex, row, tree.RootValues(), tree.RootNode.VisitCount,
-                iterations, visits.ToArray(), moves);
+            // The inputs of Gumbel targets over the same legal moves: raw visits, the decider's values, the priors, its value range
+            int decider = tree.RootNode.DeciderIndex;
+            uint[] raw = tree.LegalMoveVisits().visits;
+            double[] values = tree.LegalMoveValues(decider).values;
+            float[]? priors = rootPolicy != null && rootPolicy.Length == moves.Length ? (float[])rootPolicy.Clone() : null;
+            MinMaxStats.Range? bounds = tree.PlayerBounds?[decider].GetRange();
+            (double, double)? range = bounds is MinMaxStats.Range seen && seen.Max > seen.Min ? (seen.Min, seen.Max) : null;
+
+            return new RecordedPosition(actionIndex, state.Turn.RoundCounter, decider, row, tree.RootValues(), tree.RootNode.VisitCount,
+                iterations, visits.ToArray(), moves, raw, values, priors, range);
         }
 
         /// <summary>

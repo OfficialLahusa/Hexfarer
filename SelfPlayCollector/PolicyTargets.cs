@@ -125,6 +125,9 @@ namespace SelfPlayCollector
             return positions;
         }
 
+        /// <summary>
+        /// The legal moves at the given action indices of a saved game
+        /// </summary>
         private static List<Action>[] LegalMovesAt(string directory, (ulong seed, int chunk, long offset, int length) record, bool centerDesert, List<int> actionIndices)
         {
             SaveFile saved = SelfPlayWriter.ReadRecord(directory, record.chunk, record.offset, record.length);
@@ -139,6 +142,62 @@ namespace SelfPlayCollector
             }
             if (next < actionIndices.Count) throw new InvalidOperationException($"A position's action index lies beyond the game's {saved.PlayedActions.Count} actions.");
             return result;
+        }
+    }
+
+    /// <summary>
+    /// The search's values behind every recorded position, for Gumbel targets (DatasetProcessing/policy_targets.py), in the
+    /// order of the policy files: policy_values.f32 holds per legal move three little-endian float32, the raw visits (without
+    /// target pruning), the deciding player's mean result (NaN without visits) and the root's prior before the noise (NaN if
+    /// the search had none); policy_ranges.f32 per position the decider's value range in the tree (min, max; NaN before two
+    /// distinct values). A run collected before has neither file.
+    /// </summary>
+    internal sealed class PolicyValueWriter : IDisposable
+    {
+        public const string ValuesFile = "policy_values.f32", RangesFile = "policy_ranges.f32";
+        public const int FloatsPerMove = 3;
+
+        private readonly FileStream _values, _ranges;
+        private byte[] _buffer = new byte[64 * FloatsPerMove * sizeof(float)];
+
+        public PolicyValueWriter(string directory)
+        {
+            _values = new FileStream(Path.Combine(directory, ValuesFile), FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+            _ranges = new FileStream(Path.Combine(directory, RangesFile), FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+        }
+
+        public void Write(RecordedPosition position)
+        {
+            int moves = position.Moves.Length;
+            if (position.RawVisits.Length != moves || position.Values.Length != moves || position.Priors is float[] given && given.Length != moves)
+                throw new ArgumentException($"A position's values don't cover its {moves} legal moves.");
+            int bytes = moves * FloatsPerMove * sizeof(float);
+            if (_buffer.Length < bytes) _buffer = new byte[bytes];
+            for (int m = 0; m < moves; m++)
+            {
+                Span<byte> move = _buffer.AsSpan(m * FloatsPerMove * sizeof(float), FloatsPerMove * sizeof(float));
+                BinaryPrimitives.WriteSingleLittleEndian(move, position.RawVisits[m]);
+                BinaryPrimitives.WriteSingleLittleEndian(move[sizeof(float)..], (float)position.Values[m]);
+                BinaryPrimitives.WriteSingleLittleEndian(move[(2 * sizeof(float))..], position.Priors?[m] ?? float.NaN);
+            }
+            _values.Write(_buffer, 0, bytes);
+
+            Span<byte> range = stackalloc byte[2 * sizeof(float)];
+            BinaryPrimitives.WriteSingleLittleEndian(range, position.Range is (double low, _) ? (float)low : float.NaN);
+            BinaryPrimitives.WriteSingleLittleEndian(range[sizeof(float)..], position.Range is (_, double high) ? (float)high : float.NaN);
+            _ranges.Write(range);
+        }
+
+        public void Flush()
+        {
+            _values.Flush();
+            _ranges.Flush();
+        }
+
+        public void Dispose()
+        {
+            _values.Dispose();
+            _ranges.Dispose();
         }
     }
 }

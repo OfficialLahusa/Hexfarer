@@ -101,6 +101,49 @@ namespace Tests
                 int[] counts = ReadInts(Path.Combine(directory, PolicyTargetWriter.CountsFile));
                 Assert.Equal(samples.Count, counts.Length);
                 Assert.Equal(counts.Sum() * ActionEncoding.MaxTokens * sizeof(short), new FileInfo(Path.Combine(directory, PolicyTargetWriter.TokensFile)).Length);
+
+                // Per legal move the raw visits, the deciding player's value (NaN without visits) and the clean prior (NaN
+                // without a policy head), per position the decider's value range: the inputs of Gumbel targets
+                bool policy = model == "policy_tiny.onnx";
+                float[] values = ReadFloats(Path.Combine(directory, PolicyValueWriter.ValuesFile));
+                float[] ranges = ReadFloats(Path.Combine(directory, PolicyValueWriter.RangesFile));
+                Assert.Equal(counts.Sum() * PolicyValueWriter.FloatsPerMove, values.Length);
+                Assert.Equal(samples.Count * 2, ranges.Length);
+                int offset = 0;
+                for (int s = 0; s < samples.Count; s++)
+                {
+                    var pruned = samples[s]["visits"].Split(' ').Select(pair => pair.Split(':')).ToDictionary(pair => int.Parse(pair[0]), pair => uint.Parse(pair[1]));
+                    double priorSum = 0;
+                    long rawSum = 0;
+                    for (int m = 0; m < counts[s]; m++)
+                    {
+                        float raw = values[(offset + m) * 3], value = values[(offset + m) * 3 + 1], prior = values[(offset + m) * 3 + 2];
+                        Assert.Equal(raw == 0, float.IsNaN(value));
+                        if (raw > 0) Assert.InRange(value, 0f, 1f);
+                        // The recorded (pruned) visits never exceed the raw ones
+                        uint recorded = pruned.TryGetValue(m, out uint kept) ? kept : 0;
+                        Assert.True(raw >= recorded, $"position {s}, move {m}: fewer raw visits than recorded");
+                        // Without a policy head nothing is pruned: the recorded visits are the raw ones
+                        if (!policy) Assert.Equal(recorded, raw);
+                        Assert.Equal(!policy, float.IsNaN(prior));
+                        if (policy) priorSum += prior;
+                        rawSum += (long)raw;
+                    }
+                    if (policy) Assert.Equal(1.0, priorSum, 3);
+                    long rootVisits = long.Parse(samples[s]["root_visits"]);
+                    Assert.InRange(rawSum, rootVisits - 1, rootVisits);
+                    // The moves' values are the decider's: weighted by their visits they give the root's value of the decider
+                    // (up to the root's own first visit)
+                    double weighted = Enumerable.Range(0, counts[s]).Where(m => values[(offset + m) * 3] > 0)
+                        .Sum(m => (double)values[(offset + m) * 3] * values[(offset + m) * 3 + 1]) / rawSum;
+                    double rootValue = double.Parse(samples[s][$"q{samples[s]["actor"]}"], CultureInfo.InvariantCulture);
+                    Assert.True(Math.Abs(weighted - rootValue) <= 1.5 / rootVisits + 1e-5, $"position {s}: the moves' values give {weighted}, the root {rootValue}");
+                    (float low, float high) = (ranges[2 * s], ranges[2 * s + 1]);
+                    Assert.Equal(float.IsNaN(low), float.IsNaN(high));
+                    if (!float.IsNaN(low)) Assert.True(low < high);
+                    offset += counts[s];
+                }
+
                 string[] policyFiles = [PolicyTargetWriter.CountsFile, PolicyTargetWriter.TokensFile, PolicyTargetWriter.WeightsFile, PolicyTargetWriter.LayoutFile];
                 var written = policyFiles.ToDictionary(name => name, name => File.ReadAllBytes(Path.Combine(directory, name)));
                 foreach (string name in policyFiles) File.Delete(Path.Combine(directory, name));
@@ -361,6 +404,12 @@ namespace Tests
         {
             byte[] bytes = File.ReadAllBytes(path);
             return Enumerable.Range(0, bytes.Length / sizeof(int)).Select(i => BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(i * sizeof(int)))).ToArray();
+        }
+
+        private static float[] ReadFloats(string path)
+        {
+            byte[] bytes = File.ReadAllBytes(path);
+            return Enumerable.Range(0, bytes.Length / sizeof(float)).Select(i => BinaryPrimitives.ReadSingleLittleEndian(bytes.AsSpan(i * sizeof(float)))).ToArray();
         }
 
         private static List<Dictionary<string, string>> ReadCSV(string path)
