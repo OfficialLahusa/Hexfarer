@@ -22,7 +22,8 @@ namespace Arena
     /// moves instead of the leaf itself (the old search; leaf is the default), searchforced lets MCTS and PIMC search a
     /// decision with a single legal move instead of playing it at once (the old search), gX scales the statistics of the
     /// subtree ISMCTS goes on with by X (above 0, at most 1; 1, full weight, if not given), suX gives the initial placements
-    /// X times the search budget of the other decisions (default 1, see MCTSAgent.SetupBudgetFactor). Trade offers (with free trade, see
+    /// X times the search budget of the other decisions (default 1, see MCTSAgent.SetupBudgetFactor), itX searches X times the duel's
+    /// budget per decision (iterations or seconds, above 0; default 1), e.g. to measure what more search is worth. Trade offers (with free trade, see
     /// TradeOffers): nooffers makes neither offers nor counteroffers, omX needs a mean gain above X (default 0.005), onN makes
     /// at most N per turn (default 3), owN judges them over N worlds (default 8), oc2 keeps to one or two cards a side (oc3,
     /// any trade up to three for three, is the default), with oc2 o22 looks at two cards for two too and o31 at three for
@@ -38,7 +39,7 @@ namespace Arena
         bool EvaluateNewLeaves = true, bool PlayForcedMovesAtOnce = true, double ReuseDecay = 1, bool MakeOffers = true,
         double OfferMargin = 0.005, int MaxOffers = 3, int OfferWorlds = 8, bool TwoForTwo = false, double AnswerMargin = 0.002, bool Counters = true,
         bool ThreeForOne = false, double AnswerFairness = 1, bool LearnsFromTrades = true, int MaxCards = 3, int Prune = 16, double PartnerFairness = 0,
-        double SetupBudget = 1, string? Command = null, double PriorTemperature = 1)
+        double SetupBudget = 1, string? Command = null, double PriorTemperature = 1, double BudgetFactor = 1)
     {
         /// <summary>
         /// Whether an Open Seat Agent plays the side: a process started from Command (see OpenSeatAgentProxy), given as
@@ -58,7 +59,13 @@ namespace Arena
         /// DirectML and on the CPU), the same on every machine
         /// </summary>
         public int BatchFor(long iterations) => LeavesPerBatch
-            ?? (iterations > 0 ? MCTSAgent.LeavesFor(iterations / Math.Max(1, Determinizations)) : MCTSAgent.DefaultLeavesPerBatch);
+            ?? (iterations > 0 ? MCTSAgent.LeavesFor(Budget(iterations) / Math.Max(1, Determinizations)) : MCTSAgent.DefaultLeavesPerBatch);
+
+        /// <summary>
+        /// The iterations per decision this side searches in a duel of the given iterations: BudgetFactor times them,
+        /// rounded (0, a time budget, stays 0)
+        /// </summary>
+        public long Budget(long iterations) => (long)Math.Round(iterations * BudgetFactor);
 
         /// <summary>
         /// Leaf rows per net file that the games played at once keep in flight by default: throughput follows games times
@@ -200,6 +207,8 @@ namespace Arena
                         : throw new ArgumentException($"The setup budget factor \"{option}\" in agent \"{spec}\" is not above 0."),
                     ['p', 't', ..] => double.Parse(option[2..], CultureInfo.InvariantCulture) is double temperature and > 0 ? result with { PriorTemperature = temperature }
                         : throw new ArgumentException($"The prior temperature \"{option}\" in agent \"{spec}\" is not above 0."),
+                    ['i', 't', ..] => double.Parse(option[2..], CultureInfo.InvariantCulture) is double budget and > 0 ? result with { BudgetFactor = budget }
+                        : throw new ArgumentException($"The budget factor \"{option}\" in agent \"{spec}\" is not above 0."),
                     _ when Enum.TryParse(option, out OpponentModel model) => result with { OpponentModel = model },
                     ['c', ..] => result with { Exploration = Number() },
                     ['b', ..] => result with { LeavesPerBatch = int.Parse(option[1..], CultureInfo.InvariantCulture) },
@@ -235,6 +244,7 @@ namespace Arena
             if (!PlayForcedMovesAtOnce) options.Add("searchforced");
             if (ReuseDecay != 1) options.Add($"g{ReuseDecay.ToString(CultureInfo.InvariantCulture)}");
             if (SetupBudget != 1) options.Add($"su{SetupBudget.ToString(CultureInfo.InvariantCulture)}");
+            if (BudgetFactor != 1) options.Add($"it{BudgetFactor.ToString(CultureInfo.InvariantCulture)}");
             // Trade options only where they differ from the defaults
             if (!MakeOffers) options.Add("nooffers");
             if (OfferMargin != 0.005) options.Add($"om{OfferMargin.ToString(CultureInfo.InvariantCulture)}");
@@ -266,9 +276,10 @@ namespace Arena
 
             // The agent picks the encoding of its net (see Vectorizers): a belief-aware net sees its seat's view; its search's
             // leaf batches go to leaves if given (shared with the other games), else to the net
-            MCTSAgent search = new MCTSAgent(seat, start, explorationParameter: Exploration, timeLimitSeconds: seconds,
+            // It searches its multiple of the duel's budget (BudgetFactor), in the batches of that budget
+            MCTSAgent search = new MCTSAgent(seat, start, explorationParameter: Exploration, timeLimitSeconds: seconds * BudgetFactor,
                 valueNet: net, placementWeight: PlacementWeight, opponentModel: OpponentModel,
-                iterationLimit: iterations, leavesPerBatch: BatchFor(iterations), evaluator: leaves)
+                iterationLimit: Budget(iterations), leavesPerBatch: BatchFor(iterations), evaluator: leaves)
             {
                 UniformPriors = UniformPriors, FirstPlayReduction = FirstPlayReduction, NormalizeValues = NormalizeValues ?? true, ReuseTree = ReuseTree,
                 EvaluateNewLeaves = EvaluateNewLeaves, PlayForcedMovesAtOnce = PlayForcedMovesAtOnce, SetupBudgetFactor = SetupBudget,

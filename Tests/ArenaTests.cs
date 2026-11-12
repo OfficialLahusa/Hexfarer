@@ -70,14 +70,49 @@ namespace Tests
             Assert.Equal(1.4, agent.PriorTemperature);
         }
 
+        [Fact]
+        public void AnAgentSpecReadsABudgetFactorBesideInformationSets()
+        {
+            // it is read as a prefix with a number, is stays the information-set search; 1 is the default and not shown
+            AgentSpec spec = AgentSpec.Parse("T=a.onnx=it2=is");
+            Assert.Equal(2, spec.BudgetFactor);
+            Assert.True(spec.InformationSets);
+            Assert.Equal("T a.onnx MaxN is it2", spec.ToString());
+            Assert.Equal(1, AgentSpec.Parse("T=a.onnx").BudgetFactor);
+            Assert.Throws<ArgumentException>(() => AgentSpec.Parse("T=a.onnx=it0"));
+            Assert.Throws<ArgumentException>(() => AgentSpec.Parse("T=a.onnx=it-1"));
+
+            // The budget it searches: X times the duel's iterations, rounded, and no iterations with a time budget
+            Assert.Equal((1600L, 1200L, 0L), (spec.Budget(800), AgentSpec.Parse("T=a.onnx=it1.5").Budget(800), spec.Budget(0)));
+            // Its batches follow its own budget: 5000 iterations search in batches of 32, 10000 in batches of 64
+            Assert.Equal((64, 32), (spec.BatchFor(5000), AgentSpec.Parse("T=a.onnx").BatchFor(5000)));
+        }
+
+        [Fact]
+        public void AnAgentWithABudgetFactorSearchesItsMultipleOfTheBudget()
+        {
+            StateValueNet net = new(PolicyModelPath, provider: InferenceProvider.CPU);
+            GameState state = TestUtil.NewGame();
+            // Iterations: twice the duel's 800 (the batches: TheAgentSearchesInTheBatchesOfItsBudget)
+            var agent = (MCTSAgent)AgentSpec.Parse($"T={PolicyModelPath}=it2").Create(0, state, net, 800, 0);
+            Assert.Equal(1600L, agent.IterationLimit);
+            // Time: twice the seconds per decision
+            var timed = (MCTSAgent)AgentSpec.Parse($"T={PolicyModelPath}=it2").Create(0, state, net, 0, 0.05);
+            Assert.Equal((0L, 0.1), (timed.IterationLimit, timed.TimeLimitSeconds));
+            // The other side keeps the duel's budget
+            var plain = (MCTSAgent)AgentSpec.Parse($"T={PolicyModelPath}").Create(1, state, net, 800, 0);
+            Assert.Equal(800L, plain.IterationLimit);
+        }
+
         [Theory]
         [InlineData("A=x.onnx", 40, 0, 48)]
         [InlineData("A=x.onnx=b32", 40, 0, 64)]
         [InlineData("A=x.onnx", 0, 0.02, 256)]
+        [InlineData("A=x.onnx=it2", 1700, 0, 3424)]
         public void TheAgentSearchesInTheBatchesOfItsBudget(string spec, long iterations, double seconds, int multiple)
         {
             // The search runs whole batches: 40 iterations are three batches of 16 by default and two of 32 with b32; a time
-            // budget searches in batches of 256
+            // budget searches in batches of 256; it2 doubles 1700 to 3400, searched in the batches of 3400 (32): 107 of them
             AgentSpec agent = AgentSpec.Parse(spec.Replace("x.onnx", PlainModelPath));
             StateValueNet net = new(PlainModelPath, provider: InferenceProvider.CPU);
             GameState state = new GameState(MapGenerator.GenerateRandomClassic(), 4);
