@@ -21,7 +21,7 @@ try:
     import torch
     from export_onnx import export_model, output_difference
     from state_value_net import StateValueModule, masked_kl, policy_cross_entropy, sibling_ranking
-    from train import GroupBatchSampler, MixedDataset, MixSampler, StateDataset, policy_dirs, widen_state_dict
+    from train import GroupBatchSampler, MixedDataset, MixSampler, StateDataset, policy_dirs, td_targets, widen_state_dict
 except ImportError as error:  # pragma: no cover - depends on the environment
     IMPORT_ERROR = error
 else:
@@ -285,6 +285,56 @@ class TrainingTest(unittest.TestCase):
 
             # Without λ, or without the self-play arrays, the stored labels stay
             stored = StateDataset(os.path.join(directory, "states.npy"), os.path.join(directory, "win_rates.npy"), directory)
+            np.testing.assert_array_equal(stored.__getitems__([2])["y"].numpy(), np.load(os.path.join(directory, "win_rates.npy"))[[2]])
+
+    def test_td_targets_blend_the_following_root_values_toward_the_result(self):
+        # Two games in their recorded order: game 7 with three positions won by seat 1, game 9 with two won by seat 2
+        root_q = np.array([[.1, .2, .3, .4], [.2, .5, .1, .2], [.1, .7, .1, .1], [.3, .3, .2, .2], [.2, .2, .5, .1]], dtype=np.float32)
+        winners = np.array([1, 1, 1, 2, 2], dtype=np.int8)
+        groups = np.array([7, 7, 7, 9, 9], dtype=np.int64)
+        rounds_left = np.array([12, 9, 3, 5, 0], dtype=np.float32)
+        z7, z9 = np.eye(4)[1], np.eye(4)[2]
+        # G for the last position of a game is its result, before it (1 - λ) * the next root q + λ * the next G
+        g2 = z7
+        g1 = 0.25 * root_q[2] + 0.75 * g2
+        g0 = 0.25 * root_q[1] + 0.75 * g1
+        h1 = z9
+        h0 = 0.25 * root_q[4] + 0.75 * h1
+        np.testing.assert_allclose(td_targets(root_q, winners, groups, rounds_left, 0.75), np.stack([g0, g1, g2, h0, h1]), rtol=1e-6)
+        # λ 1 is the result alone, λ 0 the next position's root q
+        np.testing.assert_allclose(td_targets(root_q, winners, groups, rounds_left, 1.0), np.stack([z7, z7, z7, z9, z9]))
+        np.testing.assert_allclose(td_targets(root_q, winners, groups, rounds_left, 0.0), np.stack([root_q[1], root_q[2], z7, root_q[4], z9]))
+        # A game split in two places, or positions out of order, would blend the wrong positions: that stops instead
+        with self.assertRaises(ValueError):
+            td_targets(root_q, winners, np.array([7, 7, 9, 7, 9]), rounds_left, 0.75)
+        with self.assertRaises(ValueError):
+            td_targets(root_q, winners, groups, np.array([12, 3, 9, 5, 0], dtype=np.float32), 0.75)
+        with self.assertRaises(ValueError):
+            td_targets(root_q, np.array([1, 2, 1, 2, 2], dtype=np.int8), groups, rounds_left, 0.75)
+
+    def test_a_dataset_with_a_td_lambda_trains_on_the_td_targets(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            write_source(directory, rows=6, features=8, label_dtype=np.float32, self_play=True)
+            # Two games of three positions each, in order, with one winner per game
+            np.save(os.path.join(directory, "winners.npy"), np.array([3, 3, 3, 0, 0, 0], dtype=np.int8))
+            np.save(os.path.join(directory, "groups.npy"), np.array([4, 4, 4, 8, 8, 8], dtype=np.int64))
+            np.save(os.path.join(directory, "rounds_left.npy"), np.array([9, 4, 1, 7, 6, 2], dtype=np.float32))
+            dataset = StateDataset(os.path.join(directory, "states.npy"), os.path.join(directory, "win_rates.npy"), directory,
+                                   target_lambda=0.5, td_lambda=0.8)
+            expected = td_targets(np.load(os.path.join(directory, "root_q.npy")), np.load(os.path.join(directory, "winners.npy")),
+                                  np.load(os.path.join(directory, "groups.npy")), np.load(os.path.join(directory, "rounds_left.npy")), 0.8)
+            np.testing.assert_allclose(dataset.__getitems__([4, 0, 2])["y"].numpy(), expected[[4, 0, 2]], rtol=1e-6)
+            # Without a TD λ the λ mix stays, and data without the game order can't have TD targets
+            mixed = StateDataset(os.path.join(directory, "states.npy"), os.path.join(directory, "win_rates.npy"), directory, target_lambda=0.5)
+            root_q = np.load(os.path.join(directory, "root_q.npy"))
+            np.testing.assert_allclose(mixed.__getitems__([1])["y"].numpy(), 0.5 * root_q[[1]] + 0.5 * np.eye(4)[[3]], rtol=1e-6)
+            os.remove(os.path.join(directory, "groups.npy"))
+            with self.assertRaises(ValueError):
+                StateDataset(os.path.join(directory, "states.npy"), os.path.join(directory, "win_rates.npy"), directory, target_lambda=0.5, td_lambda=0.8)
+        # Data without self-play targets keeps its stored labels whatever the TD λ
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            write_source(directory, rows=3, features=8, label_dtype=np.float32, self_play=False)
+            stored = StateDataset(os.path.join(directory, "states.npy"), os.path.join(directory, "win_rates.npy"), directory, target_lambda=0.5, td_lambda=0.8)
             np.testing.assert_array_equal(stored.__getitems__([2])["y"].numpy(), np.load(os.path.join(directory, "win_rates.npy"))[[2]])
 
     def test_mixed_sources_are_drawn_by_their_shares(self):

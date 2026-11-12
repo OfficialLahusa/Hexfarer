@@ -36,6 +36,42 @@ def read_policy_layout(directory):
         return json.load(file)
 
 
+def td_targets(root_q, winners, groups, rounds_left, td_lambda):
+    """TD(λ)-Value-Targets von Self-Play-Positionen in ihrer aufgezeichneten Reihenfolge (selfplay_to_dataset.py schreibt die
+    Positionen einer Partie hintereinander, ihre Runden aufsteigend): die letzte Position einer Partie bekommt ihr Ergebnis,
+    jede davor (1 - λ) * Root-q der nächsten Position + λ * deren Target. Anders als der λ-Mix (Ergebnis und Root-q derselben
+    Position) steckt darin, was nach der Position wirklich geschah, aber kaum das Würfelglück des ganzen Rests der Partie.
+    λ 1 ist das Ergebnis allein, λ 0 die Root-q der nächsten Position. Bricht ab, wenn eine Partie nicht am Stück oder nicht
+    in Reihenfolge liegt oder zwei Sieger hat."""
+    root_q = np.asarray(root_q, dtype=np.float64)
+    winners = np.asarray(winners, dtype=np.int64)
+    groups = np.asarray(groups)
+    rounds_left = np.asarray(rounds_left, dtype=np.float64)
+    n = len(groups)
+    targets = np.empty((n, PLAYER_COUNT), dtype=np.float32)
+    if n == 0:
+        return targets
+    # Die Partien als zusammenhängende Abschnitte; eine Partie in zwei Abschnitten mischte fremde Positionen
+    starts = np.flatnonzero(np.r_[True, groups[1:] != groups[:-1]])
+    ends = np.r_[starts[1:], n]
+    if len(np.unique(groups[starts])) != len(starts):
+        raise ValueError("The positions of a game are not consecutive, so TD targets would blend other games' positions")
+    one_hot = np.eye(PLAYER_COUNT)
+    for start, end in zip(starts, ends):
+        # Die verbleibenden Runden fallen in Spielreihenfolge nie, sonst sind die Positionen umsortiert
+        if np.any(np.diff(rounds_left[start:end]) > 0):
+            raise ValueError(f"The positions of game {groups[start]} are not in the order they were played")
+        if np.any(winners[start:end] != winners[start]):
+            raise ValueError(f"Game {groups[start]} has more than one winner")
+        target = one_hot[winners[start]]
+        targets[end - 1] = target
+        # Rückwärts: das Target jeder Position aus der Root-q und dem Target der nächsten
+        for i in range(end - 2, start - 1, -1):
+            target = (1 - td_lambda) * root_q[i + 1] + td_lambda * target
+            targets[i] = target
+    return targets
+
+
 def read_policy_target(directory):
     """Art der Policy-Targets laut policy_target.json: "visits" (Visit-Anteile, auch ohne die Datei) oder "gumbel" """
     path = os.path.join(directory, "policy_target.json")
@@ -50,7 +86,7 @@ def read_policy_target(directory):
 
 class StateDataset(Dataset):
     def __init__(self, states_path, labels_path, aux_dir=None, augment_rotation=False, augment_numbers=False, augment_board=False,
-                 target_lambda=None, policy_temperature=1.0, policy_dir=None, policy_max_moves=None):
+                 target_lambda=None, policy_temperature=1.0, policy_dir=None, policy_max_moves=None, td_lambda=None):
         self.states_path = states_path
         self.labels_path = labels_path
         # Self-Play-Daten (selfplay_to_dataset.py): Target λ·onehot(Sieger) + (1-λ)·Root-q statt der gespeicherten Labels,
@@ -67,6 +103,14 @@ class StateDataset(Dataset):
             if all(os.path.exists(path) for path in paths.values()):
                 self.target_lambda = target_lambda
                 self.target_paths = paths
+        # TD(λ)-Targets statt des λ-Mix (siehe td_targets), aus der Reihenfolge der Partien (groups.npy, rounds_left.npy)
+        self.td = None
+        if td_lambda is not None and self.target_lambda is not None:
+            order = {name: os.path.join(aux_dir, f"{name}.npy") for name in ("groups", "rounds_left")}
+            if not all(os.path.exists(path) for path in order.values()):
+                raise ValueError(f"{aux_dir} has no groups.npy and rounds_left.npy, so no TD targets")
+            self.td = td_targets(np.load(self.target_paths["root_q"]), np.load(self.target_paths["winners"]),
+                                 np.load(order["groups"]), np.load(order["rounds_left"]), td_lambda)
         # Spieler zufällig zyklisch umbenennen (nur nach der Setup-Phase, siehe augmentation.py), für die Trainingsdaten
         self.augment_rotation = augment_rotation
         # Zahlenchip-Paare (2/12 bis 6/8) zufällig tauschen, in jeder Phase (siehe augmentation.py)
@@ -157,6 +201,8 @@ class StateDataset(Dataset):
         x = take(self.states, self.states.dtype)
         if self.target_lambda is None:
             y = take(self.labels, self.labels.dtype)
+        elif self.td is not None:
+            y = take(self.td, np.float32)
         else:
             one_hot = np.eye(PLAYER_COUNT, dtype=np.float32)[take(self.targets["winners"], np.int64)]
             y = (self.target_lambda * one_hot + (1 - self.target_lambda) * take(self.targets["root_q"], np.float32)).astype(np.float32)
@@ -489,6 +535,8 @@ def main():
     parser.add_argument("--epoch-samples", type=int, default=None)
     # Target der Self-Play-Daten: λ·onehot(Sieger) + (1-λ)·Root-q (aus root_q.npy und winners.npy), Default: win_rates.npy
     parser.add_argument("--target-lambda", type=float, default=None)
+    # TD(λ)-Value-Targets der Self-Play-Daten über die Root-q der folgenden Positionen statt des λ-Mix (braucht --target-lambda)
+    parser.add_argument("--td-lambda", type=float, default=None)
     # Gewichte (und Input-Normalisierung) aus einem Checkpoint übernehmen und weitertrainieren, z.B. von E2 aus
     parser.add_argument("--init-from", default=None)
     # Policy Head auf die Visit-Verteilung der Self-Play-Daten (policy_*.npy aus selfplay_to_dataset.py); Daten ohne zählen nicht
@@ -524,7 +572,7 @@ def run_training(args):
             raise SystemExit("--ranking-weight works with a single data source only")
     policy_dir_for = policy_dirs(args.policy_dir, [args.aux_dir] + [directory for directory, _ in sources])
 
-    full_ds = StateDataset(args.states, args.labels, args.aux_dir, target_lambda=args.target_lambda, policy_temperature=args.policy_temperature,
+    full_ds = StateDataset(args.states, args.labels, args.aux_dir, target_lambda=args.target_lambda, td_lambda=args.td_lambda, policy_temperature=args.policy_temperature,
                            policy_dir=policy_dir_for(args.aux_dir), policy_max_moves=args.policy_max_moves)
     for name, weight in [("placements", args.placement_weight), ("vp_shares", args.vp_share_weight),
                          ("rounds_left", args.rounds_weight), ("sibling_groups", args.ranking_weight),
@@ -542,13 +590,13 @@ def run_training(args):
     augment = args.augment_rotation or args.augment_numbers or args.augment_board
     train_ds = StateDataset(args.states, args.labels, args.aux_dir, augment_rotation=args.augment_rotation,
                             augment_numbers=args.augment_numbers, augment_board=args.augment_board,
-                            target_lambda=args.target_lambda, policy_temperature=args.policy_temperature,
+                            target_lambda=args.target_lambda, td_lambda=args.td_lambda, policy_temperature=args.policy_temperature,
                             policy_dir=policy_dir_for(args.aux_dir), policy_max_moves=args.policy_max_moves) if augment else full_ds
     loader_args = dict(num_workers=args.num_workers, pin_memory=True, persistent_workers=True, collate_fn=keep_batch)
     if len(sources) > 1:
         datasets = [train_ds] + [StateDataset(os.path.join(directory, args.features), os.path.join(directory, "win_rates.npy"), directory,
                                               augment_rotation=args.augment_rotation, augment_numbers=args.augment_numbers,
-                                              augment_board=args.augment_board, target_lambda=args.target_lambda,
+                                              augment_board=args.augment_board, target_lambda=args.target_lambda, td_lambda=args.td_lambda,
                                               policy_temperature=args.policy_temperature, policy_dir=policy_dir_for(directory),
                                               policy_max_moves=args.policy_max_moves)
                                  for directory, _ in sources[1:]]
