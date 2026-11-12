@@ -19,10 +19,17 @@ If every run has the policy files of SelfPlayCollector (policy_counts.i32 and th
 - policy_offsets.npy (n + 1,) int64: the moves of position i are rows offsets[i]:offsets[i + 1] of the arrays below
 - policy_tokens.npy (moves, max_tokens) int16 and policy_weights.npy (moves, max_tokens) uint8: the encoded legal moves
   (token -1 unused), in the order of the root's children
-- policy_targets.npy (moves,) float32: the share of the root visits per move
+- policy_targets.npy (moves,) float32: the share of the root visits per move, or with --policy-target gumbel the Gumbel
+  target from the search's values (policy_targets.gumbel_targets, from the run's policy_values.f32 and policy_ranges.f32:
+  raw visits, the decider's value and the prior per move, the value range per position; positions without priors keep
+  their visit shares)
 - policy_layout.json: the token ranges
+- policy_target.json: which target it is ({"kind": "visits"} or {"kind": "gumbel", ...} with its settings), so train.py
+  applies its temperature only to visit shares, and where the runs recorded the priors the targets' mean KL from them (the
+  distillation margin, for visit shares before the temperature) and their mean entropy
 
 Usage: python selfplay_to_dataset.py RUN [RUN ...] --output DIR [--target-lambda 0.5] [--val 0.1] [--test 0.0] [--seed 42]
+       [--policy-target visits|gumbel] [--c-scale 0.05] [--c-visit 50]
 """
 
 import argparse
@@ -35,7 +42,13 @@ import sys
 import numpy as np
 
 from playout_results import PLAYER_COUNT, placements
+from policy_targets import gumbel_targets
 from split_dataset import split_indices
+
+POLICY_TARGETS = ("visits", "gumbel")
+VALUES_FILE, RANGES_FILE = "policy_values.f32", "policy_ranges.f32"
+# Raw visits, the decider's value and the prior per move in VALUES_FILE
+FLOATS_PER_MOVE = 3
 
 
 def read_run(run_dir: str):
@@ -89,8 +102,10 @@ VIEWS_FILE = "views.f16"
 
 
 
-def read_policy(run_dir: str, arrays: dict, max_tokens: int):
-    """The encoded legal moves and visit shares of the run's kept positions (see the module docstring)"""
+def read_policy(run_dir: str, arrays: dict, max_tokens: int, policy_target: str = "visits", c_scale: float = 0.05, c_visit: float = 50.0):
+    """The encoded legal moves and targets of the run's kept positions (see the module docstring), how many of them fell
+    back to their visit shares for lack of priors, and where the run recorded the priors the sums over those positions of
+    the targets' KL from the priors (the distillation margin) and of their entropies, with the number of such positions"""
     counts = np.fromfile(os.path.join(run_dir, "policy_counts.i32"), dtype="<i4").astype(np.int64)
     starts = np.concatenate([[0], np.cumsum(counts)])
     tokens = np.fromfile(os.path.join(run_dir, "policy_tokens.i16"), dtype="<i2").reshape(-1, max_tokens)
@@ -103,20 +118,56 @@ def read_policy(run_dir: str, arrays: dict, max_tokens: int):
         raise ValueError(f"{run_dir}: samples.csv has more lines than policy_counts.i32 entries")
     kept_counts = counts[lines]
     rows = np.concatenate([np.arange(starts[line], starts[line + 1]) for line in lines]) if len(lines) else np.array([], dtype=np.int64)
+    paths = [os.path.join(run_dir, name) for name in (VALUES_FILE, RANGES_FILE)]
+    recorded_values = all(os.path.exists(path) for path in paths)
+    if policy_target == "gumbel" and not recorded_values:
+        raise ValueError(f"{run_dir} has no {VALUES_FILE} and {RANGES_FILE} (collected before they were recorded), so no Gumbel targets")
+    if recorded_values:
+        move_values = np.fromfile(paths[0], dtype="<f4").reshape(-1, FLOATS_PER_MOVE)
+        ranges = np.fromfile(paths[1], dtype="<f4").reshape(-1, 2)
+        if len(move_values) != starts[-1] or len(ranges) != len(counts):
+            raise ValueError(f"{run_dir}: {VALUES_FILE} or {RANGES_FILE} don't match the policy files")
     targets = np.zeros(len(rows), dtype=np.float32)
+    fallbacks = 0
+    kl_sum, entropy_sum, with_priors = 0.0, 0.0, 0
     offset = 0
-    for count, visits in zip(kept_counts, arrays["visits"]):
+    for i, (count, visits) in enumerate(zip(kept_counts, arrays["visits"])):
         pairs = [pair.split(":") for pair in visits.split()]
         moves = np.array([int(move) for move, _ in pairs], dtype=np.int64)
         if moves.size and moves.max() >= count:
             raise ValueError(f"{run_dir}: a visited move index lies beyond the position's {count} moves")
         values = np.array([float(v) for _, v in pairs], dtype=np.float64)
-        targets[offset + moves] = values / values.sum()
+        shares = np.zeros(count)
+        shares[moves] = values / values.sum()
+        prior = None
+        if recorded_values:
+            line = lines[i]
+            recorded = move_values[starts[line]:starts[line + 1]].astype(np.float64)
+            raw, q, prior = recorded[:, 0], recorded[:, 1], recorded[:, 2]
+            if np.isnan(prior).any() or raw.sum() <= 0:
+                # No priors (a search that reused its root's): the visits stay the target
+                prior = None
+                fallbacks += policy_target == "gumbel"
+            elif policy_target == "gumbel":
+                low, high = ranges[line]
+                value_range = None if np.isnan(low) or np.isnan(high) else (float(low), float(high))
+                root_value = float(arrays["q"][i][arrays["actor"][i]])
+                shares = gumbel_targets(prior, raw, q, c_visit=c_visit, c_scale=c_scale, value_range=value_range, root_value=root_value)
+        if prior is not None:
+            # How far the target moves from the net's priors, and how sharp it is
+            kept = shares > 0
+            kl_sum += float(np.sum(shares[kept] * np.log(shares[kept] / np.maximum(prior[kept], 1e-30))))
+            entropy_sum += float(-np.sum(shares[kept] * np.log(shares[kept])))
+            with_priors += 1
+        targets[offset:offset + count] = shares
         offset += count
-    return kept_counts, tokens[rows], weights[rows], targets
+    return kept_counts, tokens[rows], weights[rows], targets, fallbacks, (kl_sum, entropy_sum, with_priors)
 
 
-def convert(runs, output_dir: str, target_lambda: float = 0.5, val: float = 0.1, test: float = 0.0, seed: int = 42):
+def convert(runs, output_dir: str, target_lambda: float = 0.5, val: float = 0.1, test: float = 0.0, seed: int = 42,
+            policy_target: str = "visits", c_scale: float = 0.05, c_visit: float = 50.0):
+    if policy_target not in POLICY_TARGETS:
+        raise ValueError(f"Unknown policy target \"{policy_target}\" ({', '.join(POLICY_TARGETS)})")
     os.makedirs(output_dir, exist_ok=True)
     parts = [(run, *read_run(run)) for run in runs]
     feature_dims = {dim for _, dim, _, _ in parts}
@@ -189,13 +240,29 @@ def convert(runs, output_dir: str, target_lambda: float = 0.5, val: float = 0.1,
         if any(layout != layouts[0] for layout in layouts):
             raise ValueError("The runs encode the moves differently (policy_layout.json)")
         max_tokens = layouts[0]["max_tokens"][0]
-        policy = [read_policy(run, arrays, max_tokens) for run, _, arrays, _ in parts]
+        policy = [read_policy(run, arrays, max_tokens, policy_target, c_scale, c_visit) for run, _, arrays, _ in parts]
         counts = np.concatenate([part[0] for part in policy])
         np.save(os.path.join(output_dir, "policy_offsets.npy"), np.concatenate([[0], np.cumsum(counts)]).astype(np.int64))
         for i, name in enumerate(("policy_tokens", "policy_weights", "policy_targets"), start=1):
             np.save(os.path.join(output_dir, f"{name}.npy"), np.concatenate([part[i] for part in policy]))
         with open(os.path.join(output_dir, "policy_layout.json"), "w", encoding="utf-8") as file:
             json.dump(layouts[0], file, indent=2)
+        # Which target this is: train.py flattens visit shares with its temperature, a Gumbel target is trained as it is
+        kind = {"kind": policy_target}
+        if policy_target == "gumbel":
+            kind.update(c_scale=c_scale, c_visit=c_visit, visit_fallbacks=int(sum(part[4] for part in policy)))
+        # The distillation margin where the runs recorded the priors: the targets' mean KL from them (visit shares before
+        # train.py's temperature) and their mean entropy
+        with_priors = sum(part[5][2] for part in policy)
+        if with_priors:
+            kind.update(positions_with_priors=with_priors, mean_kl_prior=sum(part[5][0] for part in policy) / with_priors,
+                        mean_entropy=sum(part[5][1] for part in policy) / with_priors)
+            print(f"policy targets ({policy_target}): KL from the priors {kind['mean_kl_prior']:.4f}, entropy {kind['mean_entropy']:.4f} "
+                  f"on average over {with_priors} positions")
+        with open(os.path.join(output_dir, "policy_target.json"), "w", encoding="utf-8") as file:
+            json.dump(kind, file, indent=2)
+    elif policy_target == "gumbel":
+        raise ValueError("Gumbel targets need the runs' policy files")
 
     # Split by game; without a test share everything that isn't validation is training
     groups = labels["groups"]
@@ -224,10 +291,14 @@ def main(argv=None) -> int:
     parser.add_argument("--val", type=float, default=0.1)
     parser.add_argument("--test", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=42)
+    # The policy target: the visit shares, or Gumbel targets from the recorded values (see the module docstring)
+    parser.add_argument("--policy-target", choices=POLICY_TARGETS, default="visits")
+    parser.add_argument("--c-scale", type=float, default=0.05, help="Gumbel targets: scale of the values (normalized to the tree's range)")
+    parser.add_argument("--c-visit", type=float, default=50.0, help="Gumbel targets: visits added to the most visited move's in the scale")
     args = parser.parse_args(argv)
 
     runs = sorted({path for pattern in args.runs for path in (glob.glob(pattern) or [pattern])})
-    convert(runs, args.output, args.target_lambda, args.val, args.test, args.seed)
+    convert(runs, args.output, args.target_lambda, args.val, args.test, args.seed, args.policy_target, args.c_scale, args.c_visit)
     return 0
 
 

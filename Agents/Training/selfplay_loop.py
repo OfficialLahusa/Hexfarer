@@ -88,6 +88,13 @@ def command_arguments(template, **values):
     return [part.format(**values) for part in parts]
 
 
+def convert_command(python, run_dir, prepared, target_lambda, convert_args):
+    """The command turning a generation's run into training arrays, with the loop's further converter options (e.g. the
+    policy target: --policy-target gumbel --c-scale 0.05)"""
+    return ([python, os.path.join(REPO, "DatasetProcessing", "selfplay_to_dataset.py"), run_dir, "--output", prepared,
+             "--target-lambda", str(target_lambda)] + convert_args.split())
+
+
 def training_data(prepared, prefill, window, extra_data):
     """The --data specs of a generation's training: a window of the newest --window prepared directories, in which data
     from elsewhere (prefill, oldest first) comes before the loop's own generations and leaves first, with equal shares of
@@ -122,7 +129,8 @@ def main(argv=None):
     parser.add_argument("--samples", type=int, default=2_000_000, help="training samples per generation")
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--target-lambda", type=float, default=0.5)
-    parser.add_argument("--policy-temperature", type=float, default=2.0)
+    parser.add_argument("--policy-temperature", type=float, default=2.0, help="flattens the visit shares in training (not Gumbel targets)")
+    parser.add_argument("--convert-args", default="", help="further selfplay_to_dataset.py options, e.g. \"--policy-target gumbel --c-scale 0.05\"")
     parser.add_argument("--train-args", default="--normalize-inputs --placement-weight 0.5 --vp-share-weight 0.5 --rounds-weight 0.2 "
                                                   "--augment-rotation --augment-board --policy-weight 1.0")
     parser.add_argument("--eval-every", type=int, default=3)
@@ -205,8 +213,7 @@ def run_loop(args, generation_runs):
 
         if "prepared" not in gen:
             prepared = os.path.join(gen_dir, "prepared")
-            run([python, os.path.join(REPO, "DatasetProcessing", "selfplay_to_dataset.py"), gen["run"], "--output", prepared,
-                 "--target-lambda", str(args.target_lambda)], os.path.join(gen_dir, "convert.log"), kind="convert")
+            run(convert_command(python, gen["run"], prepared, args.target_lambda, args.convert_args), os.path.join(gen_dir, "convert.log"), kind="convert")
             gen["prepared"] = prepared
             save_state(args.loop_dir, state)
 

@@ -394,6 +394,31 @@ class TrainingTest(unittest.TestCase):
             expected, _ = reference_policy_loss(module.model.policy_embeddings.weight, query, [stored[i] for i in indices], temperature=2.0)
             self.assertAlmostEqual(expected.item(), loss.item(), places=5)
 
+    def test_gumbel_targets_are_trained_as_they_are_whatever_the_temperature(self):
+        # Prepared data whose policy_target.json says gumbel holds the improved policy itself, a temperature would flatten it
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            source = os.path.join(directory, "gen")
+            write_source(source, rows=4, features=8, label_dtype=np.float16, self_play=False)
+            stored = random_moves(np.random.default_rng(4), [3, 2, 0, 4])
+            write_policy(source, stored, 3)
+            with open(os.path.join(source, "policy_target.json"), "w") as file:
+                json.dump({"kind": "gumbel", "c_scale": 0.05}, file)
+            gumbel = StateDataset(os.path.join(source, "states.npy"), os.path.join(source, "win_rates.npy"), source, policy_temperature=2.0)
+            batch = gumbel.__getitems__([0, 1, 3])
+            for row, index in enumerate([0, 1, 3]):
+                shares = np.array([m[2] for m in stored[index]])
+                np.testing.assert_allclose(moves_of(batch, row)[2].numpy(), shares / shares.sum(), rtol=1e-5, err_msg=f"row {row}")
+            # Visit targets (and data without the file) keep the temperature
+            with open(os.path.join(source, "policy_target.json"), "w") as file:
+                json.dump({"kind": "visits"}, file)
+            visits = StateDataset(os.path.join(source, "states.npy"), os.path.join(source, "win_rates.npy"), source, policy_temperature=2.0)
+            shares = np.array([m[2] for m in stored[0]]) ** 0.5
+            np.testing.assert_allclose(moves_of(visits.__getitems__([0]), 0)[2].numpy(), shares / shares.sum(), rtol=1e-5)
+            with open(os.path.join(source, "policy_target.json"), "w") as file:
+                json.dump({"kind": "something"}, file)
+            with self.assertRaises(ValueError):
+                StateDataset(os.path.join(source, "states.npy"), os.path.join(source, "win_rates.npy"), source, policy_temperature=2.0)
+
     def test_each_row_turns_its_moves_with_its_own_board_symmetry(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             source = os.path.join(directory, "v2")

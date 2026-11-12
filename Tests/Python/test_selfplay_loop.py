@@ -11,7 +11,7 @@ import unittest
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(REPO, "Agents", "Training"))
 
-from selfplay_loop import clearly_worse, command_arguments, training_data  # noqa: E402
+from selfplay_loop import clearly_worse, command_arguments, convert_command, training_data  # noqa: E402
 
 TEMPLATE = ('"D:/Some Dir/Arena.exe" mirror --challenger "NEW={new}" --baseline "OLD={old}" --name {name} '
             '--iterations 5000 --sprt 0 40')
@@ -30,6 +30,17 @@ class CommandArgumentsTest(unittest.TestCase):
         self.assertEqual(args[3], "NEW=C:/a b/x;calc & y.onnx")
         self.assertEqual(args[5], "OLD=C:/o\" --evil.onnx")
         self.assertEqual(len(args), len(command_arguments(TEMPLATE, new="a", old="b", name="n")))
+
+
+class ConvertCommandTest(unittest.TestCase):
+    def test_the_convert_options_follow_the_run_and_its_target_lambda(self):
+        command = convert_command("python", "loop/gen001/run", "loop/gen001/prepared", 0.5, "--policy-target gumbel --c-scale 0.05")
+        self.assertEqual(command[0], "python")
+        self.assertTrue(command[1].endswith(os.path.join("DatasetProcessing", "selfplay_to_dataset.py")))
+        self.assertEqual(command[2:], ["loop/gen001/run", "--output", "loop/gen001/prepared", "--target-lambda", "0.5",
+                                       "--policy-target", "gumbel", "--c-scale", "0.05"])
+        # Without options the loop converts as before: visit targets
+        self.assertEqual(convert_command("python", "r", "p", 0.8, "")[2:], ["r", "--output", "p", "--target-lambda", "0.8"])
 
 
 def split(specs):

@@ -36,6 +36,18 @@ def read_policy_layout(directory):
         return json.load(file)
 
 
+def read_policy_target(directory):
+    """Art der Policy-Targets laut policy_target.json: "visits" (Visit-Anteile, auch ohne die Datei) oder "gumbel" """
+    path = os.path.join(directory, "policy_target.json")
+    if not os.path.exists(path):
+        return "visits"
+    with open(path, encoding="utf-8") as file:
+        kind = json.load(file).get("kind")
+    if kind not in ("visits", "gumbel"):
+        raise ValueError(f"{path}: unknown policy target kind {kind!r}")
+    return kind
+
+
 class StateDataset(Dataset):
     def __init__(self, states_path, labels_path, aux_dir=None, augment_rotation=False, augment_numbers=False, augment_board=False,
                  target_lambda=None, policy_temperature=1.0, policy_dir=None, policy_max_moves=None):
@@ -78,6 +90,10 @@ class StateDataset(Dataset):
             self.token_symmetries = move_token_symmetries(self.policy_layout)
         elif policy_dir is not None:
             raise ValueError(f"{policy_dir} has no complete policy targets (policy_layout.json and {', '.join(POLICY_ARRAYS)})")
+        # Gumbel-Targets (selfplay_to_dataset.py --policy-target gumbel, siehe policy_target.json) sind schon die verbesserte
+        # Policy: die Temperatur glättet nur Visit-Anteile
+        if self.policy_paths and read_policy_target(policy_source) == "gumbel":
+            self.policy_temperature = 1.0
         self.max_tokens = self.policy_layout["max_tokens"][0] if self.policy_layout else 1
         self._open()
         if self.policy:
