@@ -232,6 +232,61 @@
 - PPO RL Agent
 - PlayerAgent
 
+## Review (Stand 2155ae1, 2026-11-13)
+- Keine Fehler in Regeln, Backup, Features, TD- und Gumbel-Targets oder Duell-Statistik, die Ergebnisse breit verfälschen: Feature-Parität C#/Python Index für Index, die 12 Symmetrien gültig, kein Leak im fairen Standard-Agent
+- Bugs (Schwere in Klammern)
+	- (kritisch) Netzwerkspiel: jedes Sitz-Token öffnet auch eine Zuschauer-Verbindung, die alle Hände sieht (SimulationServer.cs:273) => Token nur für die eigene Rolle oder Zuschauer mit der Sicht des Sitzes
+	- (hoch) Server nimmt `Unknown` als Rohstoff in Zügen an (CardSet wertet es als Joker): 4:1 mit beliebigen Karten, Year of Plenty mit Jokern, Siedlung halb angewendet => nur Züge annehmen, die einem gelisteten legalen Zug entsprechen
+	- (hoch) EndTurnAction trägt die im Zug gekauften Entwicklungskarten unredigiert in der History an alle Sitze (z. B. die Siegpunktkarte) => auf die Anzahl redigieren, Test mit zwei Partien, die sich nur im verdeckten Ausgang unterscheiden
+	- (hoch) Andere Siegpunkte oder Abwurfgrenze (OSP `victory_points: 12`) geben dem Net einen Input ×1000, weil Features 0 und 1 in allen Trainingsdaten konstant sind (Skala 1/0,001) => konstante Features mit Skala 1, für bestehende Nets ablehnen oder 7 und 10 einspeisen
+	- (mittel) Root-Noise geht auf Roots ohne Visits verloren (ApplyPriors überschreibt ihn nach dem ersten Batch mit den sauberen Priors): erste Entscheidung jeder Partie, 4,7 % der Positionen, alles `--hidden`-Self-Play und der Target-Check, dessen Offline-Zahlen also ohne Noise auf frischen Bäumen gelten => Noise beim Eintreffen der Root-Bewertung anwenden, Test auf neuem Baum
+	- (mittel) Fehlgeschlagene Evaluation zählt als bestandenes Gate: die Schleife ignoriert den Exit-Code, die Arena endet bei Fehlern in jedem Spiel mit 0 Spielen und Exit 0 => Exit-Code ≠ 0 oder Zeile ohne Intervall als Fehlschlag, Arena-Exit ≠ 0 ohne fertiges Paar, Agents vor den Threads erzeugen
+	- (mittel) SelfPlayCollector hängt bei einem Fehler des Writers (z. B. volle Platte) statt zu enden, die Schleife wartet ohne Limit => Spieler abbrechen, mit Fehler enden
+	- (mittel) Faire Suche: der Weltsampler verwirft jede Verteilung, solange ein Sitz außerhalb seines Zugs auf den Siegpunkten steht (Längste Straße durch Abschneiden), 200 Neuversuche je Iteration => nur für den Spieler am Zug verwerfen
+	- (mittel) Cross-Engine-Tallies verlieren Partien still: JSettlers-Partien ohne Handshake zählen als reine Robot-Partien, Partien ohne Sieger stehen in keinem Nenner (Catanatron zählt sie als Niederlagen), die Arena verwirft fehlgeschlagene Paare ohne Zählung => Ergebniszeile pro Partie, ein Tally-Modul, Fehlerzahl in der Duell-Zusammenfassung
+	- (mittel) Würfel und Kartenziehungen des Servers kommen aus seeded System.Random hinter einem 32-Bit-Seed, aus beobachteten Würfen in Minuten zu berechnen => Match zieht aus einem kryptographischen Generator, Suche und Self-Play behalten die Seeds
+	- (mittel) Server durch schlechten Input blockier- oder halb änderbar: 8 MB YAML vor der Rollenprüfung, Schließen ohne Timeout (64 stumme Sockets füllen ihn), LoadGame setzt den Record vor dem Replay zurück, das werfen kann => Nachrichtentyp zuerst lesen, Timeout, Laden auf einer Kopie prüfen
+	- (mittel) Client: gehaltene Tasten wiederholen Züge (Leertaste würfelt und beendet dann den Zug, 4 kauft je Wiederholung eine Karte) => Key Repeat aus
+	- (mittel) Client Hot Seat: während ein Bot zieht, sieht der nächste Mensch die Hand des vorigen => bei mehreren lokalen Menschen dann keine Hand zeigen
+	- (mittel) Client: wer einen Server als Spieler verlässt, spielt lokal auf der Sicht seines Sitzes weiter (Bots mit `Unknown`-Jokern) und kann sie als vollen Spielstand speichern => neues lokales Spiel, Speichern sperren
+	- (mittel) Nets mit View-Layout: der Beobachter wird nur im `--hidden`-Zweig gesetzt (ohne `--hidden` 3/4 der Positionen vom falschen Sitz, kein Fehler), auf Views ist die Kaufbarkeit von Entwicklungskarten immer 0 und die Handgröße zählt nur bekannte Karten => Beobachter pro Aufruf, Kombination ablehnen, abgeleitete Features aus öffentlichen Zahlen, vor ISMCTS-Self-Play mit Views
+	- (niedrig) Ein fehlgeschlagenes Spiel stoppt die Schleife (Collector Exit 2, 24 min Sammlung verworfen), ein Stopp während der Evaluation überspringt sie dauerhaft => fertige Runs mit wenigen Fehlern annehmen, offene Evaluationen im Loop-State
+	- (niedrig) Die FP16-Exportprüfung lässt fast alles durch (relative Abweichung bis 5 bei den Policy Queries) => FP16 gegen FP32 auf einigen hundert echten Zeilen vergleichen
+	- (niedrig) Ein ausdrücklich verlangter Provider (`--provider cuda`) fällt still auf die CPU zurück => dann werfen, Datei, Hash, Provider und Batch-Form in jedem Programm ausgeben
+	- (niedrig) Ein Dezimalkomma in Arena-Optionen wird als Tausendertrenner gelesen (`pt0,7` => 7) => NumberStyles.Float
+	- (niedrig) Server endet, wenn stdin endet (nohup, systemd, Docker ohne -i) => auf das Cancel-Signal warten, SIGTERM behandeln
+	- (niedrig) Client: kaputte settings.json lädt Defaults und überschreibt die Datei beim nächsten Besuch der Einstellungen, `--selftest` prüft die Undos nicht, Räuber-Opferdialog ohne Zurück, HUD-Skala fest, Schließen ohne Dispose der Agent-Prozesse
+	- (niedrig) Faire Suche: Diebstähle proportional zum Rest statt nach Wahrscheinlichkeit verteilt, `ob` mit Tree Reuse folgt dem wahren Ausgang, ohne Priors Züge in Listenreihenfolge, PIMC wirft bei Abbruch vor der ersten Welt, kein Resync nach verpasstem Zug
+	- (niedrig) Options-Fallen: `--td-lambda` ohne `--target-lambda` still ignoriert, `--epoch-samples` bei einer Quelle ignoriert, `--monitor val_total_loss` bricht die Schleife, eine per Ctrl+C abgebrochene Sammlung endet mit 0 und wird trainiert, das Fenster mischt Visit- und Gumbel-Targets ohne Hinweis => Manifest pro prepared-Verzeichnis
+	- (niedrig) Seeds: die Karten eines Duells liegen auf einem Gitter (SeedBase + n in den affinen Legacy-Generator), Collector-Seeds auf 31 Bit gefaltet (117 doppelte v2-Partien) => alle Seeds über Seeds.Derive (ändert die Karten je Seed-Basis)
+	- (niedrig) Target Pruning ohne KataGos Deckel entfernt auch ohne Noise 13,6 % der Visits => deckeln oder Doku korrigieren (nur Visit-Targets betroffen)
+	- (niedrig) Handel und Heuristik-Agents: Open-Hand-Agent lehnt nach Gesamtpunkten ab und kontert nach öffentlichen, Angebote vor dem Sofortsieg-Check, BuilderAgent wählt Monopoly nach den wahren Händen (vor dem Einsatz als Rating-Anker einfrieren), die Arena nimmt wirkungslose Optionen an (`Paranoid` mit `is`)
+	- (niedrig) Kleinkram: Sofortsieg-Abkürzung übersieht +3 durch Längste Straße, nach Undo bekommt ein externer Agent alle Siegpunkte, Replica ignoriert das offene Angebot, `OpenSeat relay` stürzt bei `legal: null`, eine zerrissene Zeile macht runs.jsonl unlesbar, nicht-endliche Net-Ausgaben ungeprüft im Baum, zwei Migrationsskripte laufen nicht mehr
+	- Design-Risiken: TD 0,75 gibt dem Ergebnis 12 Positionen vor dem Ende nur noch 3 %, die Gumbel-Skala zählt wiederverwendete Visits mit (im Mittel 919 statt 800) und wird dadurch schärfer, val_loss von Schleife 9 und 9b nicht vergleichbar
+- Optimierung (nach Nutzen pro Aufwand)
+	- Laufende Visits nicht als Ergebnis 0 in den Mittelwert der Open-Hand-Suche (nach der Normierung bis ~8× im Setup, ISMCTS nimmt nur aufgelöste) => Hypothese für die 58 Elo der fairen Suche auf dem wahren Zustand und den Vorteil kleiner Batches, wenige Zeilen, Duelle bei 800 und 5k mit 16er- und 64er-Batches
+	- Roll-Vorschau aus den Outcome-Varianten streichen (liest niemand, 3 % der Open-Hand- und 12 % der fairen Suche)
+	- Validierungsanteil pro Generation von 10 % auf ~2 % (val_loss wählt bei einer Epoche nichts) => ~8 % mehr Trainingspositionen
+	- Framerate des Clients begrenzen (zeichnet ungebremst mit 8x MSAA, auch unfokussiert)
+	- Einzelpositionen nicht als gepolsterte 256er-Batches rechnen (2 MB Kopie je Aufruf, Analyse 2× pro Position, Handelsantwort 6×)
+	- Root-Priors aus der Root-Bewertung selbst (spart eine Anfrage pro Suche, ~2 %, behebt den Root-Noise-Bug gleich mit)
+	- Faire Suche: Kind-Array pro Hand cachen (pro Visit ein Array und ~1500 Vergleiche im Setup)
+	- Such-Apply ohne Validierung und History, State-Kopie in place (größter verbliebener CPU-Posten, braucht die Aufteilung der Actions)
+	- Optimizer-State über Generationen mitnehmen (AdamW startet jede Generation neu), A/B gegen eine Kontrollschleife
+	- GarbageCollectionAdaptationMode 0 auch in Client und Server
+	- Kleinkram: Reanalyse baut je Replay-Batch 1024 Suchen neu (~260 MB), Client baut die Geometrie pro Eintrag neu, eine Closure pro Blatt in EncodePorts, Adjazenz in jedem YAML-State (1056 von 1980 Zeilen)
+- Refactoring
+	- Ein Tor für Züge von außen (nur gelistete Züge) und ein Redaktionsvertrag mit Test über alle History-Felder => Voraussetzung für einen Server mit Fremden und den Web-Client
+	- Schleifenschritte als Daten: Training schreibt eine Ergebnisdatei, Gate mit bestanden, schlechter und fehlgeschlagen, offene Evaluationen im State, Manifest pro prepared-Verzeichnis, Collector bricht bei Writer-Fehlern ab und schreibt `.partial`
+	- Eine Funktion für volle Suche und Aufzeichnung (SelfPlayGame.Record und TargetCheck rechnen getrennt), Target-Check optional auf dem mitgeführten Baum, ein Reader für Self-Play-Runs
+	- Actions in Mutation und validierenden, aufzeichnenden Wrapper teilen (24 Klassen, mechanisch) => Such-Apply ohne Checks und gepoolte Blatt-States
+	- Spec-Validierung an einer Stelle, ein Duell-Runner statt der Kopien MirrorDuel und TableDuel, BuilderAgent mit Golden Record als Anker
+	- Eine Layout-Beschreibung für C# und Python (Offsets in vier Python-Dateien hart kodiert), Layout und Trainingseinstellungen in den ONNX-Metadaten, beim Laden geprüft
+	- Präsentationsschicht ohne SFML und ImGui (Sichtregeln, Input-State-Machine und Logsätze testbar)
+	- Ein Tally für alle drei Engines, gemeinsame Java-Quellen der Bridges
+	- Informationsmengen nach Beobachtung, Siegregel an einer Stelle, gemeinsame Basis der fairen Agents
+	- Ein Seeding-Helfer, später eine Zufallsquelle pro Partie (Self-Play-Partien aus ihrem Seed wiederholbar)
+
 ## Future Enhancements
 - Simulation Server: gesamte Spiel- und Simulationslogik im Server, Client nur Darstellung und Eingabe, auch headless (Duelle, Benchmarks, Datensammlung, Self-Play)
 	- Umgesetzt: Bibliothek Simulation (Match mit History/Undo/Edits, AgentRunner, Event-Stream, LocalSimulation/RemoteSimulation), Protokoll JSON über WebSocket (States/Actions als Save-File-YAML), Server-Exe mit Admin-Konsole, Rollen Admin/Player/Agent/Spectator mit gehashten Tokens und Reconnect; Client spielt immer über ISimulation, hostet oder tritt bei; Admin-Panel im Client (Sitze, Playback, Verbindungen, Tokens anlegen/widerrufen, Optionen), TLS mit gepinntem Fingerprint, Login-Sperre nach Fehlversuchen, Admins nur lokal (AllowRemoteAdmins), Origin-Check, Größen- und Verbindungslimits; Server würfelt selbst (Client-History wird verworfen); Analyse des Matches (Win Chances und Priors der Agent-Nets, Live-Suche) nur an Zuschauer und Admins; Protokollversion in Hello und Welcome, andere Versionen werden mit Hinweis abgelehnt
