@@ -1,4 +1,3 @@
-using Client.Logging;
 using Client.UI;
 using Common;
 using Common.Actions;
@@ -138,9 +137,11 @@ namespace Client
             string title = answering ? $"{Theme.PlayerName(offerer)} offers you a trade" : $"{Theme.PlayerName(offerer)} offers a trade";
             ImDrawListPtr dl = BeginDialog("##pendingtrade", size, title, null, offerer, out Vector2 min);
 
-            // The terms, from the side of whoever looks: the one answering gets what the offerer gives
-            DrawTerms(dl, min + new Vector2(24, 60), answering ? "You get" : $"{Theme.PlayerName(offerer)} gives", offer.Give);
-            DrawTerms(dl, min + new Vector2(310, 60), answering ? "You give" : $"{Theme.PlayerName(offerer)} wants", offer.Get);
+            // The terms, from the side of whoever looks: the one answering gets what the offerer gives, the offerer sees its own
+            // side. The label's color says whether its party gives or gets the cards
+            bool own = Viewer == offerer;
+            DrawTerms(dl, min + new Vector2(24, 60), answering ? "You get" : own ? "You give" : $"{Theme.PlayerName(offerer)} gives", answering ? GetColor : GiveColor, offer.Give);
+            DrawTerms(dl, min + new Vector2(310, 60), answering ? "You give" : own ? "You get" : $"{Theme.PlayerName(offerer)} wants", answering ? GiveColor : GetColor, offer.Get);
 
             // The answers so far
             float y = 160;
@@ -148,16 +149,23 @@ namespace Client
             {
                 Vector2 row = min + new Vector2(24, y);
                 Theme.DrawText(dl, Theme.Bold15, row, Theme.PlayerTextColor(seat), Theme.PlayerName(seat));
-                (string text, Color color) = offer.Responses[seat] switch
+                if (offer.Responses[seat] == TradeResponse.Countered && offer.Counters.FirstOrDefault(c => c.Player == seat) is TradeCounter counter)
                 {
-                    TradeResponse.Accepted => ("accepted", new Color(120, 220, 140)),
-                    TradeResponse.Rejected => ("rejected", Theme.TextFaint),
-                    TradeResponse.Countered when offer.Counters.FirstOrDefault(c => c.Player == seat) is TradeCounter counter =>
-                        ($"wants {ActionLogger.CardList(counter.Give)}, gives {ActionLogger.CardList(counter.Get)}", Theme.Highlight),
-                    _ when seat == next => (IsHuman(seat) ? "deciding..." : "thinking...", Theme.TextSoft),
-                    _ => ("waiting", Theme.TextFaint),
-                };
-                Theme.DrawText(dl, Theme.Regular15, row + new Vector2(110, 0), color, text);
+                    // A counteroffer as cards, up to the Trade button when there is one
+                    float right = picking ? size.X - 48 - 120 - 12 : size.X - 48;
+                    DrawCounterTerms(dl, row + new Vector2(110, 0), right - 110, offerer, counter);
+                }
+                else
+                {
+                    (string text, Color color) = offer.Responses[seat] switch
+                    {
+                        TradeResponse.Accepted => ("accepted", GetColor),
+                        TradeResponse.Rejected => ("rejected", Theme.TextFaint),
+                        _ when seat == next => (IsHuman(seat) ? "deciding..." : "thinking...", Theme.TextSoft),
+                        _ => ("waiting", Theme.TextFaint),
+                    };
+                    Theme.DrawText(dl, Theme.Regular15, row + new Vector2(110, 0), color, text);
+                }
 
                 if (picking && offer.TermsWith(seat) != null)
                 {
@@ -214,9 +222,50 @@ namespace Client
             ImGui.End();
         }
 
-        private static void DrawTerms(ImDrawListPtr dl, Vector2 pos, string label, CardSet<ResourceCardType> cards)
+        // Label colors for the cards a party gives and the cards it gets
+        private static readonly Color GiveColor = new Color(255, 150, 140);
+        private static readonly Color GetColor = new Color(120, 220, 140);
+
+        /// <summary>
+        /// A counteroffer in one row: the cards that change hands in each direction, each side behind a colored label. From the
+        /// offerer's side ("You give", "You get") when the viewer made the offer, otherwise from the countering seat's side,
+        /// whose name starts the row
+        /// </summary>
+        private void DrawCounterTerms(ImDrawListPtr dl, Vector2 pos, float width, int offerer, TradeCounter counter)
         {
-            Theme.DrawText(dl, Theme.SemiBold15, pos, Theme.TextMuted, label);
+            // The counter is in the offerer's terms: Give is what the offerer would give, Get what it would get
+            (string label, CardSet<ResourceCardType> cards, Color color)[] parts = Viewer == offerer
+                ? [("You give", counter.Give, GiveColor), ("You get", counter.Get, GetColor)]
+                : [("gives", counter.Get, GiveColor), ("gets", counter.Give, GetColor)];
+            const float labelGap = 6, partGap = 20, cardGap = 2;
+
+            // Cards up to 20 wide, narrower when many have to fit before the button, centered on the text line
+            float labels = parts.Sum(p => Theme.TextSize(Theme.Bold15, p.label).X + labelGap) + partGap;
+            int cards = parts.Sum(p => (int)p.cards.Count());
+            float cardWidth = Math.Clamp((width - labels - cardGap * cards) / Math.Max(cards, 1), 12, 20);
+            Vector2 cardSize = new Vector2(cardWidth, cardWidth * 4 / 3);
+            float cardTop = pos.Y + Theme.TextSize(Theme.Bold15, parts[0].label).Y / 2 - cardSize.Y / 2;
+
+            float x = pos.X;
+            foreach ((string label, CardSet<ResourceCardType> set, Color color) in parts)
+            {
+                Theme.DrawText(dl, Theme.Bold15, new Vector2(x, pos.Y), color, label);
+                x += Theme.TextSize(Theme.Bold15, label).X + labelGap;
+                foreach (ResourceCardType type in CardTypeExtensions.ResourceTypes)
+                {
+                    for (int i = 0; i < set.Get(type); i++)
+                    {
+                        Theme.ResourceCard(dl, type, new Vector2(x, cardTop), cardSize);
+                        x += cardWidth + cardGap;
+                    }
+                }
+                x += partGap - cardGap;
+            }
+        }
+
+        private static void DrawTerms(ImDrawListPtr dl, Vector2 pos, string label, Color labelColor, CardSet<ResourceCardType> cards)
+        {
+            Theme.DrawText(dl, Theme.SemiBold15, pos, labelColor, label);
             float x = 0;
             foreach (ResourceCardType type in CardTypeExtensions.ResourceTypes)
             {

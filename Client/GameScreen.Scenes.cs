@@ -73,8 +73,10 @@ namespace Client
                 for (int i = 0; i < maxMoves && !done() && !State.HasEnded; i++)
                     Send(new PlayMove(fast[ActingPlayer].Act(State)));
             }
+            // Without an open offer, since the human also acts when answering an agent's offer in the agent's turn
             bool HumanMainPhase(int minRound) => ActingPlayer == 3 && State.Turn.RoundCounter >= minRound && !State.Turn.MustRoll
-                && !State.Turn.MustDiscard && !State.Turn.MustMoveRobber && State.Turn.TypeOfRound == TurnState.RoundType.Normal;
+                && !State.Turn.MustDiscard && !State.Turn.MustMoveRobber && State.Turn.TypeOfRound == TurnState.RoundType.Normal
+                && State.Turn.PendingTrade == null;
 
             switch (scene)
             {
@@ -195,14 +197,22 @@ namespace Client
                     }
                     else if (scene == "tradepick")
                     {
-                        // A generous offer to everyone; the agents answer once the scene hands the match back to them
+                        // A generous offer to everyone, which Blue counters (Orange gives 3 ore, gets a lumber and a brick). The
+                        // other agents answer once the scene hands the match back to them
                         GiveCards(3, ResourceCardType.Ore, 3);
                         GiveCards(3, ResourceCardType.Grain, 2);
+                        GiveCards(0, ResourceCardType.Lumber, 1);
+                        GiveCards(0, ResourceCardType.Brick, 1);
                         CardSet<ResourceCardType> give = new(), get = new();
                         give.Add(ResourceCardType.Ore, 2);
                         give.Add(ResourceCardType.Grain, 1);
                         get.Add(ResourceCardType.Lumber, 1);
                         Send(new PlayMove(new OfferTradeAction(3, give, get, OfferTradeAction.Everyone(State, 3))));
+                        CardSet<ResourceCardType> counterGive = new(), counterGet = new();
+                        counterGive.Add(ResourceCardType.Ore, 3);
+                        counterGet.Add(ResourceCardType.Lumber, 1);
+                        counterGet.Add(ResourceCardType.Brick, 1);
+                        Send(new PlayMove(new CounterTradeAction(0, counterGive, counterGet)));
                     }
                     else if (scene == "edit")
                     {
