@@ -1,5 +1,5 @@
-## Vor dem nächsten Push (höchste Priorität)
-- Neues Standardnetz aru1cjq2 (Schleife 9b g18) vor dem Push extern prüfen: 1 gegen 3, fair, 5k wie für htvpfhxw gegen 3 Stac mit Handel, Catanatron und JSettlers, dazu gegen htvpfhxw bei 5k. Erst danach Net und Model Card auf Hugging Face hochladen und pushen (ohne Upload lädt ein frischer Build das Net nicht)
+## Höchste Priorität
+- Neues Standardnetz aru1cjq2 (Schleife 9b g18) gegen die externen Baselines testen: 1 gegen 3, fair, 5k wie für htvpfhxw gegen 3 Stac mit Handel, Catanatron und JSettlers, dazu gegen htvpfhxw bei 5k. Ergebnisse in die Model Card (bisher nur die Mirror-Duelle)
 
 ## Simulator
 - Projekt in Lanzenbrecher umbenannt (2026-11-09; vorher Hexfarer, davor CatanSim; CATAN ist Marke der CATAN GmbH), überall umgestellt, alte Namen werden nicht mehr gelesen (nur Auswertungen erkennen alte Ergebnisse als Hexfarer)
