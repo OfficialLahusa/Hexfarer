@@ -172,6 +172,20 @@ namespace Agents.MCTS
         public double FirstPlayReduction { get; set; } = 0.1;
 
         /// <summary>
+        /// Above 0, the move played after a search is the top of the improved policy at this scale instead of the most
+        /// visited move (see MCTSTree.FinalMoveScale); 0 by default
+        /// </summary>
+        public double FinalMoveScale
+        {
+            get => _finalMoveScale;
+            set => _finalMoveScale = value >= 0 ? value : throw new ArgumentOutOfRangeException(nameof(value), "The final move scale must not be negative.");
+        }
+        private double _finalMoveScale;
+
+        // The tree of the last decision, for tests
+        internal MCTSTree? CurrentTree => _tree;
+
+        /// <summary>
         /// Whether selection scales each player's values to the range seen in the tree (see MCTSTree, MinMaxStats)
         /// </summary>
         public bool NormalizeValues { get; set; } = true;
@@ -336,6 +350,7 @@ namespace Agents.MCTS
             }
             _tree.FirstPlayReduction = FirstPlayReduction;
             _tree.EvaluateNewLeaves = EvaluateNewLeaves;
+            _tree.FinalMoveScale = FinalMoveScale;
 
             // The budget of this decision (more for the initial placements, see SetupBudgetFactor)
             (double seconds, long iterations) = BudgetFor(state);

@@ -13,7 +13,8 @@ namespace Arena
     /// MaxN if none), cX exploration constant, bN leaves per batch (default from the iteration budget, 16 to 256, or 256
     /// with a time budget, see BatchFor), fX first play reduction, pX placement weight, u PUCT
     /// with uniform priors instead of the policy head's, ptX the priors at temperature X (softmax of the logits / X, above 0;
-    /// default 1, see MCTSSearch.PriorTemperature), dN hidden information: only its seat's view, searched as N
+    /// default 1, see MCTSSearch.PriorTemperature), fqX plays the top of the improved policy at scale X after each search
+    /// instead of the most visited move (above 0, open-hand MCTS only, see MCTSTree.FinalMoveScale), dN hidden information: only its seat's view, searched as N
     /// determinizations (PIMC, see DeterminizedMCTSAgent), is hidden information searched as one tree over the seat's
     /// information sets (see InformationSetMCTSAgent), isfull the same search on the true position (an ablation); without
     /// these the agent sees every hand. Ablations of the search: norm or nonorm selects with or without values scaled to
@@ -39,7 +40,7 @@ namespace Arena
         bool EvaluateNewLeaves = true, bool PlayForcedMovesAtOnce = true, double ReuseDecay = 1, bool MakeOffers = true,
         double OfferMargin = 0.005, int MaxOffers = 3, int OfferWorlds = 8, bool TwoForTwo = false, double AnswerMargin = 0.002, bool Counters = true,
         bool ThreeForOne = false, double AnswerFairness = 1, bool LearnsFromTrades = true, int MaxCards = 3, int Prune = 16, double PartnerFairness = 0,
-        double SetupBudget = 1, string? Command = null, double PriorTemperature = 1, double BudgetFactor = 1)
+        double SetupBudget = 1, string? Command = null, double PriorTemperature = 1, double BudgetFactor = 1, double FinalMoveScale = 0)
     {
         /// <summary>
         /// Whether an Open Seat Agent plays the side: a process started from Command (see OpenSeatAgentProxy), given as
@@ -209,6 +210,8 @@ namespace Arena
                         : throw new ArgumentException($"The prior temperature \"{option}\" in agent \"{spec}\" is not above 0."),
                     ['i', 't', ..] => double.Parse(option[2..], CultureInfo.InvariantCulture) is double budget and > 0 ? result with { BudgetFactor = budget }
                         : throw new ArgumentException($"The budget factor \"{option}\" in agent \"{spec}\" is not above 0."),
+                    ['f', 'q', ..] => double.Parse(option[2..], CultureInfo.InvariantCulture) is double scale and > 0 ? result with { FinalMoveScale = scale }
+                        : throw new ArgumentException($"The final move scale \"{option}\" in agent \"{spec}\" is not above 0."),
                     _ when Enum.TryParse(option, out OpponentModel model) => result with { OpponentModel = model },
                     ['c', ..] => result with { Exploration = Number() },
                     ['b', ..] => result with { LeavesPerBatch = int.Parse(option[1..], CultureInfo.InvariantCulture) },
@@ -232,6 +235,7 @@ namespace Arena
             if (Exploration != 1.414) options.Add($"c{Exploration.ToString(CultureInfo.InvariantCulture)}");
             if (LeavesPerBatch is int batch) options.Add($"b{batch}");
             if (FirstPlayReduction != 0.1) options.Add($"f{FirstPlayReduction.ToString(CultureInfo.InvariantCulture)}");
+            if (FinalMoveScale != 0) options.Add($"fq{FinalMoveScale.ToString(CultureInfo.InvariantCulture)}");
             if (PlacementWeight != 0) options.Add($"p{PlacementWeight.ToString(CultureInfo.InvariantCulture)}");
             if (UniformPriors) options.Add("u");
             if (PriorTemperature != 1) options.Add($"pt{PriorTemperature.ToString(CultureInfo.InvariantCulture)}");
@@ -283,7 +287,7 @@ namespace Arena
             {
                 UniformPriors = UniformPriors, FirstPlayReduction = FirstPlayReduction, NormalizeValues = NormalizeValues ?? true, ReuseTree = ReuseTree,
                 EvaluateNewLeaves = EvaluateNewLeaves, PlayForcedMovesAtOnce = PlayForcedMovesAtOnce, SetupBudgetFactor = SetupBudget,
-                PriorTemperature = PriorTemperature
+                PriorTemperature = PriorTemperature, FinalMoveScale = FinalMoveScale
             };
             // Offers and counteroffers (TradeOffers), then the answers (MCTSAgent)
             search.Offers.Enabled = MakeOffers;
@@ -298,6 +302,10 @@ namespace Arena
             search.AnswerMargin = (float)AnswerMargin;
             search.AnswerFairness = (float)AnswerFairness;
             search.Offers.PartnerFairness = (float)PartnerFairness;
+
+            // The final move by the improved policy is the open-hand tree's; the hidden information agents pick theirs otherwise
+            if (FinalMoveScale > 0 && (InformationSets || Determinizations > 0))
+                throw new ArgumentException($"Agent {Name}: the final move scale (fq) applies to open-hand MCTS only, not under hidden information.");
 
             // Under hidden information the agent sees only its seat's view: one tree over its information sets, or the
             // iterations split between its determinizations

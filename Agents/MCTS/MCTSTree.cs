@@ -149,9 +149,109 @@ namespace Agents.MCTS
             // Without moves (a search cancelled before the root was expanded) the first legal move
             if (RootNode.Children.Count == 0) return HandOut(GetValidActions(RootState)[0]);
 
+            // With a final move scale the top of the improved policy, where the root has priors and every player's values
+            MCTSNode[] children = RootNode.ChildArray;
+            if (FinalMoveScale > 0 && children.Length > 1 && RootNode.HasPriors && Model != OpponentModel.Random && RootNode.ResolvedVisitCount > 0
+                && RootNode.DeciderIndex >= 0)
+                return HandOut(children[ImprovedPolicyMove(children)].LastAction!);
+
             // Return the child with the highest visit count
             MCTSNode bestChild = RootNode.Children.OrderByDescending(c => c.VisitCount).First();
             return HandOut(bestChild.LastAction!);
+        }
+
+        /// <summary>
+        /// Above 0, GetMostPromisingMove plays the top of the improved policy of Gumbel MuZero instead of the most visited
+        /// move: the argmax of log prior + (50 + most visits) * this * completed Q, the decider's values normalized to the
+        /// tree's range (see ImprovedPolicyChoice; the policy targets' gumbel_targets with c_scale this). 0, the default,
+        /// plays the most visited move.
+        /// </summary>
+        public double FinalMoveScale
+        {
+            get => _finalMoveScale;
+            set => _finalMoveScale = value >= 0 ? value : throw new ArgumentOutOfRangeException(nameof(value), "The final move scale must not be negative.");
+        }
+        private double _finalMoveScale;
+
+        /// <summary>
+        /// The root child ImprovedPolicyChoice ranks first, from the root decider's values (MaxN and Paranoid record every
+        /// player's; the agent's decisions are its own, so at the root the decider is the owner under either model). Visits
+        /// count with their results only (all of them after a finished search), so no visited move lacks a value.
+        /// </summary>
+        private int ImprovedPolicyMove(MCTSNode[] children)
+        {
+            int decider = RootNode.DeciderIndex;
+            MinMaxStats.Range? range = PlayerBounds?[decider].GetRange();
+            double Value(MCTSNode node)
+            {
+                // Resolved visits only, like LegalMoveValues; NaN without a result
+                uint resolved = node.ResolvedVisitCount;
+                return resolved == 0 ? double.NaN : node.PlayerScore(decider) / resolved;
+            }
+
+            float[] priors = new float[children.Length];
+            uint[] visits = new uint[children.Length];
+            double[] values = new double[children.Length];
+            for (int c = 0; c < children.Length; c++)
+            {
+                priors[c] = children[c].Prior;
+                visits[c] = children[c].ResolvedVisitCount;
+                values[c] = Value(children[c]);
+            }
+            return ImprovedPolicyChoice(priors, visits, values, Value(RootNode), FinalMoveScale, range);
+        }
+
+        /// <summary>
+        /// The index of the move the improved policy of Gumbel MuZero (Danihelka et al., 2022) ranks first, the argmax of
+        /// DatasetProcessing/policy_targets.py's gumbel_targets: log max(prior, 1e-30) + (visitOffset + most visits) * scale *
+        /// completed Q. Completed Q is a visited move's value, and for an unvisited one v_mix = (root value + N * the
+        /// prior-weighted mean of the visited values) / (1 + N), N the total visits; with a range each is then normalized to
+        /// it and clipped to [0, 1]. A single visited move (the search's shortcut for a winning move) is chosen at once.
+        /// values are per move, ignored for unvisited ones.
+        /// </summary>
+        public static int ImprovedPolicyChoice(ReadOnlySpan<float> priors, ReadOnlySpan<uint> visits, ReadOnlySpan<double> values, double rootValue,
+            double scale, MinMaxStats.Range? range = null, double visitOffset = 50)
+        {
+            if (scale < 0) throw new ArgumentOutOfRangeException(nameof(scale), "The scale must not be negative.");
+            if (visits.Length != priors.Length || values.Length != priors.Length)
+                throw new ArgumentException($"{priors.Length} priors, {visits.Length} visit counts and {values.Length} values.", nameof(values));
+
+            // The visited moves: how many, the most and total visits, and their prior-weighted and plain mean value
+            int visited = 0, single = -1;
+            uint most = 0;
+            double total = 0, weight = 0, weighted = 0, plain = 0;
+            for (int i = 0; i < priors.Length; i++)
+            {
+                if (visits[i] == 0) continue;
+                visited++;
+                single = i;
+                most = Math.Max(most, visits[i]);
+                total += visits[i];
+                weight += priors[i];
+                weighted += priors[i] * values[i];
+                plain += values[i];
+            }
+            if (visited == 0) throw new ArgumentException("The improved policy needs a visited move.", nameof(visits));
+            if (visited == 1) return single;
+
+            // Priors of the visited moves can all be 0 (moves the net rules out, searched anyway): then weigh them equally
+            double mean = weight > 0 ? weighted / weight : plain / visited;
+            double mixed = (rootValue + total * mean) / (1 + total);
+            double factor = (visitOffset + most) * scale;
+            int best = 0;
+            double bestLogit = double.NegativeInfinity;
+            for (int i = 0; i < priors.Length; i++)
+            {
+                double q = visits[i] > 0 ? values[i] : mixed;
+                if (range is MinMaxStats.Range bounds) q = Math.Clamp(bounds.Normalize(q), 0, 1);
+                double logit = Math.Log(Math.Max(priors[i], 1e-30)) + factor * q;
+                if (logit > bestLogit)
+                {
+                    best = i;
+                    bestLogit = logit;
+                }
+            }
+            return best;
         }
 
         /// <summary>
